@@ -3,28 +3,13 @@ import { AnimalCreateForm } from "@/components/app/animal-create-form";
 import { ColonyTable } from "@/components/app/colony-table";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
-import { getAnimalListItems, getCageLabel, getColonyData } from "@/lib/colony";
+import { getAnimalListView, getAnimalPageOptions } from "@/lib/animals-read";
 import { requireUser } from "@/lib/session";
 
 export default async function AnimalsPage() {
   const user = await requireUser();
-  const colonyData = await getColonyData();
-  const animals = getAnimalListItems();
+  const [animals, options] = await Promise.all([getAnimalListView(), getAnimalPageOptions()]);
   const canCreateAnimal = user.role === "admin" || user.role === "colony_manager" || user.role === "animal_staff";
-  const cageOptions = colonyData.cages
-    .filter((cage) => cage.status !== "closed" && cage.status !== "retired")
-    .map((cage) => ({
-      id: cage.id,
-      label: `${getCageLabel(cage.id)} · ${cage.barcode}`,
-    }));
-  const strainOptions = colonyData.strains.map((strain) => ({
-    id: strain.id,
-    label: strain.name,
-  }));
-  const projectOptions = colonyData.projects.map((project) => ({
-    id: project.id,
-    label: `${project.projectCode} · ${project.title}`,
-  }));
 
   return (
     <AppShell currentPath="/animals" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
@@ -47,9 +32,9 @@ export default async function AnimalsPage() {
                 </p>
               </div>
               <AnimalCreateForm
-                cageOptions={cageOptions}
-                projectOptions={projectOptions}
-                strainOptions={strainOptions}
+                cageOptions={options.cageOptions}
+                projectOptions={options.projectOptions}
+                strainOptions={options.strainOptions}
               />
             </Surface>
           ) : null}

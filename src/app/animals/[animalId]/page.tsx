@@ -5,27 +5,20 @@ import { AppShell } from "@/components/app/app-shell";
 import { ExperimentReservationForm } from "@/components/app/experiment-reservation-form";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
-import { getAnimalSnapshot, getCageLabel, getColonyData } from "@/lib/colony";
+import { getAnimalDetailView } from "@/lib/animals-read";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
 export default async function AnimalDetailPage({ params }: { params: Promise<{ animalId: string }> }) {
   const user = await requireUser();
-  const colonyData = await getColonyData();
   const { animalId } = await params;
-  const snapshot = getAnimalSnapshot(animalId);
+  const snapshot = await getAnimalDetailView(animalId);
 
   if (!snapshot) {
     notFound();
   }
 
   const canReserveAnimal = user.role === "admin" || user.role === "colony_manager" || user.role === "researcher";
-  const experimentOptions = colonyData.experiments
-    .filter((experiment) => experiment.status === "planned" || experiment.status === "active")
-    .map((experiment) => ({
-      id: experiment.id,
-      label: `${experiment.experimentCode} · ${experiment.title}`,
-    }));
 
   return (
     <AppShell currentPath="/animals" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
@@ -46,7 +39,7 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Current cage</p>
-                  <p className="mt-2 font-medium">{getCageLabel(snapshot.animal.currentCageId)}</p>
+                  <p className="mt-2 font-medium">{snapshot.cageLabel}</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">DOB</p>
@@ -54,7 +47,7 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Strain</p>
-                  <p className="mt-2">{snapshot.strain?.name}</p>
+                  <p className="mt-2">{snapshot.strainName}</p>
                 </div>
               </div>
               <div className="space-y-2 border-t border-[var(--line)] pt-4">
@@ -64,11 +57,11 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
               <div className="grid gap-4 border-t border-[var(--line)] pt-4 md:grid-cols-2">
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Sire</p>
-                  <p className="mt-2">{snapshot.sire?.animalId ?? "Not recorded"}</p>
+                  <p className="mt-2">{snapshot.sireAnimalId ?? "Not recorded"}</p>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Dam</p>
-                  <p className="mt-2">{snapshot.dam?.animalId ?? "Not recorded"}</p>
+                  <p className="mt-2">{snapshot.damAnimalId ?? "Not recorded"}</p>
                 </div>
               </div>
             </Surface>
@@ -78,7 +71,7 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                 {snapshot.assignments.length ? (
                   snapshot.assignments.map((assignment) => (
                     <article key={assignment.id} className="rounded-2xl border border-[var(--line)] p-4">
-                      <p className="font-medium">{assignment.experiment?.experimentCode}</p>
+                      <p className="font-medium">{assignment.experimentCode}</p>
                       <p className="mt-1 text-sm text-[var(--muted)]">
                         {assignment.status} · {assignment.treatmentGroup ?? "No treatment group"}
                       </p>
@@ -106,7 +99,7 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
           </div>
           <div className="space-y-6">
             <AlertFeed alerts={snapshot.alerts} title="Animal alerts" />
-            {canReserveAnimal && snapshot.animal.status === "colony_holding" ? (
+            {canReserveAnimal && snapshot.canReserve ? (
               <Surface className="space-y-4">
                 <div className="space-y-2">
                   <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Experiment reservation</p>
@@ -117,7 +110,7 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                     Reservation runs conflict checks against current status, genotype confirmation, and existing experiment assignments before saving.
                   </p>
                 </div>
-                <ExperimentReservationForm animalId={snapshot.animal.id} experimentOptions={experimentOptions} />
+                <ExperimentReservationForm animalId={snapshot.animal.id} experimentOptions={snapshot.experimentOptions} />
               </Surface>
             ) : null}
             <Surface className="space-y-4">
