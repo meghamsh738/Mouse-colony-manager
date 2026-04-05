@@ -1,0 +1,171 @@
+"use client";
+
+import Link from "next/link";
+import { useMemo, useState } from "react";
+import {
+  createColumnHelper,
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import type { AnimalListItem } from "@/lib/types";
+
+const columnHelper = createColumnHelper<AnimalListItem>();
+
+function statusVariant(status: AnimalListItem["status"]) {
+  if (status === "in_experiment" || status === "reserved") {
+    return "info";
+  }
+
+  if (status === "breeding") {
+    return "warning";
+  }
+
+  return "neutral";
+}
+
+export function ColonyTable({ data }: { data: AnimalListItem[] }) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | AnimalListItem["status"]>("all");
+  const [availabilityFilter, setAvailabilityFilter] = useState(false);
+
+  const filteredData = useMemo(
+    () =>
+      data.filter((animal) => {
+        const haystack = [animal.animalId, animal.labId, animal.strain, animal.genotypeSummary, animal.cageLabel]
+          .join(" ")
+          .toLowerCase();
+        const matchesSearch = haystack.includes(search.toLowerCase());
+        const matchesStatus = statusFilter === "all" ? true : animal.status === statusFilter;
+        const matchesAvailability = availabilityFilter ? animal.availableForExperiment : true;
+
+        return matchesSearch && matchesStatus && matchesAvailability;
+      }),
+    [availabilityFilter, data, search, statusFilter],
+  );
+
+  const columns = useMemo(
+    () => [
+      columnHelper.accessor("animalId", {
+        header: "Animal",
+        cell: (info) => (
+          <div className="space-y-1">
+            <Link href={`/animals/${info.row.original.id}`} className="font-medium hover:text-[var(--accent)]">
+              {info.getValue()}
+            </Link>
+            <p className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{info.row.original.labId}</p>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("sex", {
+        header: "Sex",
+        cell: (info) => <span className="capitalize">{info.getValue()}</span>,
+      }),
+      columnHelper.accessor("ageLabel", {
+        header: "Age",
+        cell: (info) => info.getValue(),
+      }),
+      columnHelper.accessor("strain", {
+        header: "Strain",
+        cell: (info) => <span className="text-sm text-[var(--muted)]">{info.getValue()}</span>,
+      }),
+      columnHelper.accessor("genotypeSummary", {
+        header: "Genotype",
+        cell: (info) => <span className="font-mono text-xs text-[var(--muted)]">{info.getValue()}</span>,
+      }),
+      columnHelper.accessor("cageLabel", {
+        header: "Cage",
+        cell: (info) => info.getValue(),
+      }),
+      columnHelper.accessor("status", {
+        header: "Status",
+        cell: (info) => <Badge variant={statusVariant(info.getValue())}>{info.getValue().replaceAll("_", " ")}</Badge>,
+      }),
+      columnHelper.display({
+        id: "warnings",
+        header: "Warnings",
+        cell: (info) =>
+          info.row.original.warnings.length ? (
+            <p className="max-w-[280px] text-sm text-amber-900">{info.row.original.warnings[0]}</p>
+          ) : (
+            <span className="text-sm text-[var(--muted)]">None</span>
+          ),
+      }),
+    ],
+    [],
+  );
+
+  // TanStack Table owns stateful table instance creation here; disabling the
+  // React Compiler compatibility warning is appropriate for this boundary.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const table = useReactTable({
+    data: filteredData,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
+
+  return (
+    <div className="space-y-5" data-testid="colony-table">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <Input
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search animal ID, lab ID, genotype, strain, or cage"
+          data-testid="colony-search"
+        />
+        <select
+          value={statusFilter}
+          onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+          className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
+        >
+          <option value="all">All statuses</option>
+          <option value="colony_holding">Colony holding</option>
+          <option value="breeding">Breeding</option>
+          <option value="reserved">Reserved</option>
+          <option value="in_experiment">In experiment</option>
+        </select>
+        <label className="flex items-center gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
+          <input
+            checked={availabilityFilter}
+            onChange={(event) => setAvailabilityFilter(event.target.checked)}
+            type="checkbox"
+          />
+          Available for experiment only
+        </label>
+      </div>
+      <div className="overflow-x-auto rounded-[24px] border border-[var(--line)]">
+        <table className="min-w-full border-collapse text-left">
+          <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <th key={header.id} className="px-4 py-3 font-medium">
+                    {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                  </th>
+                ))}
+              </tr>
+            ))}
+          </thead>
+          <tbody className="divide-y divide-[var(--line)] bg-white/70">
+            {table.getRowModel().rows.map((row) => (
+              <tr key={row.id} className="align-top">
+                {row.getVisibleCells().map((cell) => (
+                  <td key={cell.id} className="px-4 py-4 text-sm text-[var(--ink)]">
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,505 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  colony_manager
+  animal_staff
+  researcher
+  read_only
+}
+
+enum Sex {
+  male
+  female
+  unknown
+}
+
+enum CageStatus {
+  active
+  breeding
+  quarantine
+  experiment
+  retired
+  closed
+}
+
+enum AnimalStatus {
+  planned
+  born
+  nursing
+  weaned
+  colony_holding
+  breeding
+  reserved
+  in_experiment
+  experiment_completed
+  euthanized
+  dead
+  transferred_out
+  archived
+}
+
+enum OutcomeStatus {
+  alive
+  euthanized
+  dead
+  transferred
+  missing
+}
+
+enum ExperimentStatus {
+  planned
+  active
+  completed
+  cancelled
+}
+
+enum AssignmentStatus {
+  planned
+  reserved
+  active
+  completed
+  cancelled
+}
+
+enum HealthNoteType {
+  routine_welfare
+  adverse_effect
+  veterinary_concern
+  breeding_concern
+  underweight
+  overweight
+  grooming_issue
+  aggression
+  pregnancy_suspicion
+  delivery_observed
+  post_procedure_monitoring
+}
+
+enum AlertSeverity {
+  info
+  warning
+  critical
+}
+
+enum AlertStatus {
+  open
+  acknowledged
+  resolved
+}
+
+enum GenotypeCallStatus {
+  pending
+  provisional
+  confirmed
+  conflict
+}
+
+enum BreedingStatus {
+  planned
+  active
+  paused
+  retired
+  failed
+}
+
+enum RuleCategory {
+  breeding
+  welfare
+  compliance
+  genotype
+  experiment
+  capacity
+}
+
+enum BreedingAdultRole {
+  sire
+  dam
+  support
+}
+
+model User {
+  id                 String              @id
+  name               String
+  email              String              @unique
+  passwordHash       String
+  role               UserRole
+  active             Boolean             @default(true)
+  projectsOwned      Project[]           @relation("ProjectOwner")
+  experimentsOwned   Experiment[]        @relation("ExperimentOwner")
+  healthNotesCreated HealthNote[]        @relation("HealthNoteCreator")
+  auditLogs          AuditLog[]          @relation("AuditActor")
+  cageMoves          CageMovement[]      @relation("CageMoveActor")
+  animalMoves        AnimalMovement[]    @relation("AnimalMoveActor")
+  statusEvents       AnimalStatusEvent[] @relation("StatusEventActor")
+  genotypesPerformed GenotypingRecord[]  @relation("GenotypeOperator")
+  genotypesVerified  GenotypingRecord[]  @relation("GenotypeVerifier")
+}
+
+model Facility {
+  id        String   @id
+  name      String
+  notes     String?
+  rooms     Room[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Room {
+  id         String   @id
+  facilityId String
+  roomNumber String
+  notes      String?
+  facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+  racks      Rack[]
+  cages      Cage[]
+
+  @@unique([facilityId, roomNumber])
+}
+
+model Rack {
+  id         String @id
+  roomId     String
+  rackNumber String
+  notes      String?
+  room       Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  cages      Cage[]
+
+  @@unique([roomId, rackNumber])
+}
+
+model Cage {
+  id            String      @id
+  roomId        String
+  rackId        String
+  cageNumber    String
+  barcode       String      @unique
+  status        CageStatus
+  notes         String?
+  active        Boolean     @default(true)
+  welfareFlags  Json?
+  lastUpdatedAt DateTime    @default(now())
+  room          Room        @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  rack          Rack        @relation(fields: [rackId], references: [id], onDelete: Restrict)
+  animals       Animal[]
+  healthNotes   HealthNote[]
+  cageMovements CageMovement[]
+  attachments   Attachment[]
+
+  @@unique([rackId, cageNumber])
+}
+
+model Strain {
+  id               String   @id
+  name             String   @unique
+  background       String?
+  notes            String?
+  maintenanceRules Json?
+  animals          Animal[]
+}
+
+model Allele {
+  id                String          @id
+  name              String          @unique
+  gene              String
+  type              String
+  notes             String?
+  harmfulHomozygous Boolean         @default(false)
+  maintainAsHet     Boolean         @default(false)
+  prohibitedPairings Json?
+  animalAlleles     AnimalAllele[]
+}
+
+model Animal {
+  id                    String                  @id
+  animalId              String                  @unique
+  labId                 String                  @unique
+  sex                   Sex
+  dob                   DateTime
+  strainId              String
+  currentCageId         String?
+  status                AnimalStatus
+  originType            String
+  sireId                String?
+  damId                 String?
+  breedingGeneration    String?
+  healthStatus          String?
+  projectSummary        String?
+  experimentalStatus    String?
+  outcomeStatus         OutcomeStatus           @default(alive)
+  deathDate             DateTime?
+  deathReason           String?
+  notes                 String?
+  strain                Strain                  @relation(fields: [strainId], references: [id], onDelete: Restrict)
+  currentCage           Cage?                   @relation(fields: [currentCageId], references: [id], onDelete: SetNull)
+  sire                  Animal?                 @relation("AnimalSire", fields: [sireId], references: [id], onDelete: SetNull)
+  dam                   Animal?                 @relation("AnimalDam", fields: [damId], references: [id], onDelete: SetNull)
+  siredOffspring        Animal[]                @relation("AnimalSire")
+  dammedOffspring       Animal[]                @relation("AnimalDam")
+  alleles               AnimalAllele[]
+  genotypingRecords     GenotypingRecord[]
+  breedingAdults        BreedingAdult[]
+  litters               LitterAnimal[]
+  projectAllocations    AnimalProjectAllocation[]
+  experimentAssignments ExperimentAssignment[]
+  healthNotes           HealthNote[]
+  attachments           Attachment[]
+  statusEvents          AnimalStatusEvent[]
+  animalMovements       AnimalMovement[]
+
+  @@index([status])
+  @@index([sex])
+  @@index([currentCageId])
+}
+
+model AnimalAllele {
+  id         String             @id
+  animalId   String
+  alleleId   String
+  zygosity   String
+  callStatus GenotypeCallStatus @default(pending)
+  animal     Animal             @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  allele     Allele             @relation(fields: [alleleId], references: [id], onDelete: Cascade)
+
+  @@unique([animalId, alleleId])
+}
+
+model GenotypingRecord {
+  id             String             @id
+  animalId       String
+  sourceType     String
+  assayType      String
+  sampleId       String?
+  markerTested   String
+  resultText     String
+  attachmentUrl  String?
+  sampleDate     DateTime
+  resultDate     DateTime
+  operatorId     String?
+  provider       String?
+  verifiedById   String?
+  finalCall      String
+  status         GenotypeCallStatus @default(pending)
+  confidence     String?
+  animal         Animal              @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  operator       User?               @relation("GenotypeOperator", fields: [operatorId], references: [id], onDelete: SetNull)
+  verifiedBy     User?               @relation("GenotypeVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  attachments    Attachment[]
+
+  @@index([animalId])
+}
+
+model BreedingSetup {
+  id             String         @id
+  startDate      DateTime
+  endDate        DateTime?
+  status         BreedingStatus
+  targetGenotype String
+  targetSex      Sex?
+  notes          String?
+  adults         BreedingAdult[]
+  litters        Litter[]
+}
+
+model BreedingAdult {
+  id              String            @id
+  breedingSetupId String
+  animalId        String
+  role            BreedingAdultRole
+  breedingSetup   BreedingSetup     @relation(fields: [breedingSetupId], references: [id], onDelete: Cascade)
+  animal          Animal            @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  @@unique([breedingSetupId, animalId])
+}
+
+model Litter {
+  id              String        @id
+  breedingSetupId String
+  birthDate       DateTime
+  litterSizeBirth Int
+  litterSizeWean  Int?
+  notes           String?
+  breedingSetup   BreedingSetup @relation(fields: [breedingSetupId], references: [id], onDelete: Cascade)
+  litterAnimals   LitterAnimal[]
+}
+
+model LitterAnimal {
+  id       String @id
+  litterId String
+  animalId String
+  litter   Litter @relation(fields: [litterId], references: [id], onDelete: Cascade)
+  animal   Animal @relation(fields: [animalId], references: [id], onDelete: Cascade)
+
+  @@unique([litterId, animalId])
+}
+
+model Project {
+  id                String                   @id
+  projectCode       String                   @unique
+  title             String
+  ownerId           String
+  notes             String?
+  owner             User                     @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  animalAllocations AnimalProjectAllocation[]
+  experiments       Experiment[]
+}
+
+model AnimalProjectAllocation {
+  id         String   @id
+  animalId   String
+  projectId  String
+  startedAt  DateTime
+  endedAt    DateTime?
+  chargeable Boolean  @default(true)
+  notes      String?
+  animal     Animal   @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([animalId])
+  @@index([projectId])
+}
+
+model Experiment {
+  id             String             @id
+  experimentCode String             @unique
+  projectId      String
+  title          String
+  ownerId        String
+  status         ExperimentStatus
+  notes          String?
+  owner          User               @relation("ExperimentOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  project        Project            @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  assignments    ExperimentAssignment[]
+}
+
+model ExperimentAssignment {
+  id             String           @id
+  animalId       String
+  experimentId   String
+  status         AssignmentStatus
+  startDate      DateTime
+  endDate        DateTime?
+  treatmentGroup String?
+  notes          String?
+  isPrimary      Boolean          @default(false)
+  animal         Animal           @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  experiment     Experiment       @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+
+  @@index([animalId])
+  @@index([experimentId])
+}
+
+model HealthNote {
+  id               String         @id
+  animalId         String?
+  cageId           String?
+  noteType         HealthNoteType
+  severity         AlertSeverity
+  note             String
+  followupRequired Boolean        @default(false)
+  actionTaken      String?
+  resolved         Boolean        @default(false)
+  createdById      String
+  createdAt        DateTime       @default(now())
+  animal           Animal?        @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  cage             Cage?          @relation(fields: [cageId], references: [id], onDelete: Cascade)
+  createdBy        User           @relation("HealthNoteCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  attachments      Attachment[]
+}
+
+model Attachment {
+  id                 String            @id
+  animalId           String?
+  cageId             String?
+  healthNoteId       String?
+  genotypingRecordId String?
+  label              String
+  fileName           String
+  fileType           String
+  storageUrl         String
+  animal             Animal?           @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  cage               Cage?             @relation(fields: [cageId], references: [id], onDelete: Cascade)
+  healthNote         HealthNote?       @relation(fields: [healthNoteId], references: [id], onDelete: Cascade)
+  genotypingRecord   GenotypingRecord? @relation(fields: [genotypingRecordId], references: [id], onDelete: Cascade)
+}
+
+model AnimalStatusEvent {
+  id         String       @id
+  animalId   String
+  fromStatus AnimalStatus?
+  toStatus   AnimalStatus
+  happenedAt DateTime
+  actorId    String?
+  reason     String?
+  animal     Animal       @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  actor      User?        @relation("StatusEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+}
+
+model AnimalMovement {
+  id         String  @id
+  animalId   String
+  fromCageId String?
+  toCageId   String?
+  movedById  String?
+  movedAt    DateTime
+  reason     String?
+  animal     Animal  @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  movedBy    User?   @relation("AnimalMoveActor", fields: [movedById], references: [id], onDelete: SetNull)
+}
+
+model CageMovement {
+  id           String   @id
+  cageId       String
+  fromLocation String
+  toLocation   String
+  movedById    String?
+  movedAt      DateTime
+  reason       String?
+  cage         Cage     @relation(fields: [cageId], references: [id], onDelete: Cascade)
+  movedBy      User?    @relation("CageMoveActor", fields: [movedById], references: [id], onDelete: SetNull)
+}
+
+model RuleConfig {
+  id            String       @id
+  key           String       @unique
+  label         String
+  category      RuleCategory
+  valueType     String
+  value         Json
+  description   String?
+  criticalBlock Boolean      @default(false)
+  updatedAt     DateTime     @updatedAt
+}
+
+model Alert {
+  id          String        @id
+  entityType  String
+  entityId    String
+  alertType   String
+  severity    AlertSeverity
+  message     String
+  source      String
+  status      AlertStatus   @default(open)
+  generatedAt DateTime
+  resolvedAt  DateTime?
+}
+
+model AuditLog {
+  id           String   @id
+  actorId      String?
+  entityType   String
+  entityId     String
+  action       String
+  previousValue Json?
+  newValue     Json?
+  timestamp    DateTime
+  actor        User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+}

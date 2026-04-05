@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/test-results
+/playwright-report
+/output
 
 # next.js
 /.next/
@@ -19,6 +22,9 @@
 
 # production
 /build
+/.runtime-debs
+/.runtime-libs
+/.runtime-data
 
 # misc
 .DS_Store
