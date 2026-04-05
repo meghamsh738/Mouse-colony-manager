@@ -8,6 +8,7 @@ import {
   getBreedingSuggestions,
   getExperimentCandidates,
 } from "@/lib/colony";
+import { buildCsvExport } from "@/lib/export-csv";
 import { addCageHealthNote, createAnimalRecord, reserveAnimalForExperiment } from "@/lib/colony-write";
 import { seedDatabase } from "../../prisma/seed";
 
@@ -106,5 +107,13 @@ describe("colony logic", () => {
 
     expect(allowed.ok).toBe(true);
     await getColonyData();
+  });
+
+  it("builds animal csv exports directly from Prisma data", async () => {
+    const csv = await buildCsvExport("animals");
+
+    expect(csv).toContain("animalId,labId,sex,age,strain,genotype,cage,status,projects,warnings");
+    expect(csv).toContain("CM-26005");
+    expect(csv).toContain("MC-2026-005");
   });
 });

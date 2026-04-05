@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { auth } from "@/auth";
-import { getColonyData, toCsv } from "@/lib/colony";
+import { buildCsvExport } from "@/lib/export-csv";
 
 export async function GET(
   _request: Request,
@@ -14,10 +14,9 @@ export async function GET(
   }
 
   const { entity } = await params;
-  await getColonyData();
-  const csv = toCsv(entity);
+  const csv = await buildCsvExport(entity);
 
-  if (!csv) {
+  if (csv === null) {
     return NextResponse.json({ error: "Unknown export entity" }, { status: 404 });
   }
 

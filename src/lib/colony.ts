@@ -1,7 +1,7 @@
 import { compareDesc, differenceInDays, parseISO } from "date-fns";
 
 import { getColonyDataSnapshot } from "@/lib/colony-data";
-import { formatAgeLabel, formatPercent, formatDate, getAgeInDays, titleCase } from "@/lib/utils";
+import { formatAgeLabel, formatDate, formatPercent, getAgeInDays, titleCase } from "@/lib/utils";
 import type {
   Alert,
   Animal,
@@ -10,7 +10,6 @@ import type {
   Cage,
   CageListItem,
   DemoColonyData,
-  DemoUser,
   ExperimentCandidate,
   RuleConfig,
 } from "@/lib/types";
@@ -42,20 +41,6 @@ function getRuleBoolean(key: string) {
 
 function getActiveAnimals() {
   return colonyData.animals.filter((animal) => animal.outcomeStatus === "alive");
-}
-
-export function getUserByEmail(email: string) {
-  return colonyData.users.find((user) => user.email === email);
-}
-
-export function authenticateDemoUser(email: string, password: string) {
-  const user = getUserByEmail(email);
-
-  if (!user || user.password !== password || !user.active) {
-    return null;
-  }
-
-  return user;
 }
 
 export function getUser(userId?: string | null) {
@@ -681,76 +666,6 @@ export function getColonyComposition() {
   };
 }
 
-export function getExportRows(entity: string) {
-  switch (entity) {
-    case "animals":
-      return getAnimalListItems().map((animal) => ({
-        animalId: animal.animalId,
-        labId: animal.labId,
-        sex: animal.sex,
-        age: animal.ageLabel,
-        strain: animal.strain,
-        genotype: animal.genotypeSummary,
-        cage: animal.cageLabel,
-        status: animal.status,
-        projects: animal.projectCodes.join("; "),
-        warnings: animal.warnings.join(" | "),
-      }));
-    case "cages":
-      return getCageListItems().map((cage) => ({
-        cage: cage.cageNumber,
-        room: cage.roomNumber,
-        rack: cage.rackNumber,
-        barcode: cage.barcode,
-        status: cage.status,
-        occupants: cage.occupantCount,
-        sexComposition: cage.sexComposition,
-        strainSummary: cage.strainSummary,
-        warningCount: cage.warningCount,
-      }));
-    case "alerts":
-      return getAlerts().map((alert) => ({
-        severity: alert.severity,
-        type: alert.alertType,
-        entityType: alert.entityType,
-        entityId: alert.entityId,
-        message: alert.message,
-        generatedAt: formatDate(alert.generatedAt),
-      }));
-    case "experiments":
-      return colonyData.experimentAssignments.map((assignment) => {
-        const animal = getAnimal(assignment.animalId);
-        const experiment = getExperiment(assignment.experimentId);
-
-        return {
-          experimentCode: experiment?.experimentCode ?? "Unknown",
-          animalId: animal?.animalId ?? "Unknown",
-          status: assignment.status,
-          startDate: formatDate(assignment.startDate),
-          treatmentGroup: assignment.treatmentGroup ?? "",
-          notes: assignment.notes ?? "",
-        };
-      });
-    default:
-      return [];
-  }
-}
-
-export function toCsv(entity: string) {
-  const rows = getExportRows(entity);
-
-  if (!rows.length) {
-    return "";
-  }
-
-  const headers = Object.keys(rows[0]);
-  const escapeValue = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
-
-  return [headers.join(","), ...rows.map((row) => headers.map((header) => escapeValue(row[header as keyof typeof row])).join(","))].join(
-    "\n",
-  );
-}
-
 export function getBreedingOverview() {
   return colonyData.breedingSetups.map((setup) => {
     const adults = getBreedingAdults(setup.id);
@@ -790,15 +705,6 @@ export function getRecentAuditLogs(limit = 8) {
       ...log,
       actor: getUser(log.actorId),
     }));
-}
-
-export function getDemoAccounts() {
-  return colonyData.users.map((user: DemoUser) => ({
-    email: user.email,
-    password: user.password,
-    role: user.role,
-    name: user.name,
-  }));
 }
 
 export function getCageSnapshot(cageId: string) {

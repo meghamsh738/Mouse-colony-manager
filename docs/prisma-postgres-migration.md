@@ -32,7 +32,7 @@ This tracker covers the work required to replace the persisted demo store with r
 
 - [x] Read rule configs from Prisma and keep alert generation DB-backed.
 - [x] Seed a realistic dev dataset into Postgres.
-- [ ] Make exports read directly from Prisma query results.
+- [x] Make exports read directly from Prisma query results.
 
 ## Testing
 
