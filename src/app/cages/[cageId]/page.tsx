@@ -6,15 +6,14 @@ import { AppShell } from "@/components/app/app-shell";
 import { CageQrCard } from "@/components/app/cage-qr-card";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
-import { getCageSnapshot, getCageLabel, getAnimalGenotypeSummary, getColonyData } from "@/lib/colony";
+import { getCageDetailView } from "@/lib/cages-read";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
 export default async function CageDetailPage({ params }: { params: Promise<{ cageId: string }> }) {
   const user = await requireUser();
-  await getColonyData();
   const { cageId } = await params;
-  const snapshot = getCageSnapshot(cageId);
+  const snapshot = await getCageDetailView(cageId);
 
   if (!snapshot) {
     notFound();
@@ -25,7 +24,7 @@ export default async function CageDetailPage({ params }: { params: Promise<{ cag
       <div className="space-y-8">
         <PageHeader
           eyebrow="Cage detail"
-          title={getCageLabel(snapshot.cage.id)}
+          title={snapshot.cageLabel}
           description="Barcode-oriented cage workspace with occupancy, strain/genotype rollups, notes, and direct access to the linked animal records."
           badgeLabel={snapshot.cage.status}
         />
@@ -58,9 +57,9 @@ export default async function CageDetailPage({ params }: { params: Promise<{ cag
                     <tr key={animal.id}>
                       <td className="px-4 py-4 font-medium">{animal.animalId}</td>
                       <td className="px-4 py-4 capitalize">{animal.sex}</td>
-                      <td className="px-4 py-4">{formatDate(animal.dob)}</td>
+                      <td className="px-4 py-4">{animal.ageLabel}</td>
                       <td className="px-4 py-4 capitalize">{animal.status.replaceAll("_", " ")}</td>
-                      <td className="px-4 py-4 font-mono text-xs text-[var(--muted)]">{getAnimalGenotypeSummary(animal.id)}</td>
+                      <td className="px-4 py-4 font-mono text-xs text-[var(--muted)]">{animal.genotypeSummary}</td>
                       <td className="px-4 py-4">
                         <Link className="text-sm text-[var(--accent)]" href={`/animals/${animal.id}`}>
                           Open animal

@@ -78,6 +78,23 @@ test("animal staff can scan a cage and log a welfare note", async ({ page }, tes
   await expect(page.getByText(noteText).first()).toBeVisible();
 });
 
+test("animal staff can browse cage list and open cage detail", async ({ page }) => {
+  await signInAs(page, "staff");
+  await page.goto("/cages");
+
+  const cageLink = page.getByRole("link", { name: "A101 / R2 / 003" });
+  await expect(cageLink).toBeVisible();
+  const href = await cageLink.getAttribute("href");
+
+  expect(href).toBe("/cages/cage-a101-003");
+  await page.goto(href!);
+
+  await expect(page).toHaveURL(/\/cages\/cage-a101-003$/);
+  await expect(page.getByText("CM-A101-003").first()).toBeVisible();
+  await expect(page.getByText("CM-26003")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open mobile scan view" })).toBeVisible();
+});
+
 test("researcher sees reservation conflicts and can reserve an eligible animal", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
 

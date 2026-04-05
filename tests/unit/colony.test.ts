@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   getColonyData,
@@ -8,14 +8,19 @@ import {
   getBreedingSuggestions,
   getExperimentCandidates,
 } from "@/lib/colony";
+import { getCageDetailView, getCageListView } from "@/lib/cages-read";
 import { buildCsvExport } from "@/lib/export-csv";
 import { addCageHealthNote, createAnimalRecord, reserveAnimalForExperiment } from "@/lib/colony-write";
 import { seedDatabase } from "../../prisma/seed";
 
+async function resetColonyState() {
+  await seedDatabase();
+  await getColonyData();
+}
+
 describe("colony logic", () => {
-  beforeEach(async () => {
-    await seedDatabase();
-    await getColonyData();
+  beforeAll(async () => {
+    await resetColonyState();
   }, 60_000);
 
   it("builds genotype summaries from allele rows", () => {
@@ -115,5 +120,16 @@ describe("colony logic", () => {
     expect(csv).toContain("animalId,labId,sex,age,strain,genotype,cage,status,projects,warnings");
     expect(csv).toContain("CM-26005");
     expect(csv).toContain("MC-2026-005");
+  });
+
+  it("builds cage list and detail views directly from Prisma data", async () => {
+    const cages = await getCageListView();
+    const detail = await getCageDetailView("cage-a101-003");
+
+    expect(cages.some((cage) => cage.barcode === "CM-A101-003")).toBe(true);
+    expect(detail?.cageLabel).toBe("A101 / R2 / 003");
+    expect(detail?.occupants.some((animal) => animal.animalId === "CM-26003")).toBe(true);
+    expect(detail?.occupants.length).toBeGreaterThan(0);
+    expect(detail?.occupants[0]?.genotypeSummary.length).toBeGreaterThan(0);
   });
 });

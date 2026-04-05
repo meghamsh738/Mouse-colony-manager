@@ -3,13 +3,12 @@ import Link from "next/link";
 import { AppShell } from "@/components/app/app-shell";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
-import { getCageListItems, getColonyData } from "@/lib/colony";
+import { getCageListView } from "@/lib/cages-read";
 import { requireUser } from "@/lib/session";
 
 export default async function CagesPage() {
   const user = await requireUser();
-  await getColonyData();
-  const cages = getCageListItems();
+  const cages = await getCageListView();
 
   return (
     <AppShell currentPath="/cages" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
