@@ -95,6 +95,15 @@ test("animal staff can browse cage list and open cage detail", async ({ page }) 
   await expect(page.getByRole("link", { name: "Open mobile scan view" })).toBeVisible();
 });
 
+test("researcher can review experiment overview and candidate helper", async ({ page }) => {
+  await signInAs(page, "researcher");
+  await page.goto("/experiments");
+
+  await expect(page.getByText("EXP-LPS-005")).toBeVisible();
+  await expect(page.getByText("PRJ-NEURO-07")).toBeVisible();
+  await expect(page.getByText("Included for review despite current blocker").first()).toBeVisible();
+});
+
 test("researcher sees reservation conflicts and can reserve an eligible animal", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
 

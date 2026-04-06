@@ -1,15 +1,13 @@
 import { AppShell } from "@/components/app/app-shell";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
-import { getColonyData, getExperimentCandidates, getExperimentOverview } from "@/lib/colony";
+import { getExperimentCandidateView, getExperimentOverviewView } from "@/lib/experiments-read";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
 export default async function ExperimentsPage() {
   const user = await requireUser();
-  await getColonyData();
-  const overview = getExperimentOverview();
-  const candidates = getExperimentCandidates();
+  const [overview, candidates] = await Promise.all([getExperimentOverviewView(), getExperimentCandidateView()]);
 
   return (
     <AppShell currentPath="/experiments" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
@@ -32,7 +30,7 @@ export default async function ExperimentsPage() {
                     </div>
                     <p className="text-sm capitalize text-[var(--muted)]">{experiment.status}</p>
                   </div>
-                  <p className="mt-3 text-sm text-[var(--muted)]">{experiment.project?.projectCode}</p>
+                  <p className="mt-3 text-sm text-[var(--muted)]">{experiment.projectCode}</p>
                   <div className="mt-3 space-y-2">
                     {experiment.assignments.map((assignment) => (
                       <div key={assignment.id} className="rounded-2xl bg-[var(--surface-2)] px-4 py-3 text-sm">

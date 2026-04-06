@@ -10,6 +10,7 @@ import {
 } from "@/lib/colony";
 import { getCageDetailView, getCageListView, getScanCageViewByBarcode } from "@/lib/cages-read";
 import { buildCsvExport } from "@/lib/export-csv";
+import { getExperimentCandidateView, getExperimentOverviewView } from "@/lib/experiments-read";
 import { addCageHealthNote, createAnimalRecord, reserveAnimalForExperiment } from "@/lib/colony-write";
 import { seedDatabase } from "../../prisma/seed";
 
@@ -139,5 +140,15 @@ describe("colony logic", () => {
     expect(scanView?.cage.id).toBe("cage-a101-003");
     expect(scanView?.cage.roomNumber).toBe("A101");
     expect(scanView?.occupants.some((animal) => animal.animalId === "CM-26003")).toBe(true);
+  });
+
+  it("builds experiment overview and candidate reads directly from Prisma data", async () => {
+    const overview = await getExperimentOverviewView();
+    const candidates = await getExperimentCandidateView();
+
+    expect(overview.some((experiment) => experiment.experimentCode === "EXP-LPS-005")).toBe(true);
+    expect(overview.find((experiment) => experiment.experimentCode === "EXP-LPS-005")?.assignments.length).toBeGreaterThan(0);
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates[0]?.cageLabel.length).toBeGreaterThan(0);
   });
 });
