@@ -53,4 +53,5 @@ This tracker covers the work required to replace the persisted demo store with r
 - [x] Move dashboard metrics, highlights, and suggestion cards to Prisma-native reads.
 - [x] Move rules and recent audit views in `/settings` to Prisma-native reads.
 - [x] Remove `AppShell` dependence on compatibility-layer dashboard metrics.
-- [ ] Shrink `colony.ts` to legacy test-only helpers or replace it entirely.
+- [x] Remove `colony.ts` and the snapshot compatibility layer from the runtime path.
+- [ ] Verify the repo from a clean checkout with the Prisma-backed setup.

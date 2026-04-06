@@ -1,16 +1,14 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import {
-  getColonyData,
-  getAlerts,
-  getAnimalGenotypeSummary,
-  getAnimalListItems,
-  getBreedingSuggestions,
-  getExperimentCandidates,
-} from "@/lib/colony";
 import { getBreedingOverviewView, getBreedingSuggestionsView } from "@/lib/breeding-read";
+import { getAnimalDetailView, getAnimalListView } from "@/lib/animals-read";
 import { getCageDetailView, getCageListView, getScanCageViewByBarcode } from "@/lib/cages-read";
-import { getColonyCompositionView, getDashboardHighlightsView, getDashboardMetricsView } from "@/lib/dashboard-read";
+import {
+  getColonyCompositionView,
+  getDashboardAlertsView,
+  getDashboardHighlightsView,
+  getDashboardMetricsView,
+} from "@/lib/dashboard-read";
 import { buildCsvExport } from "@/lib/export-csv";
 import { getExperimentCandidateView, getExperimentOverviewView } from "@/lib/experiments-read";
 import { addCageHealthNote, createAnimalRecord, reserveAnimalForExperiment } from "@/lib/colony-write";
@@ -19,7 +17,6 @@ import { seedDatabase } from "../../prisma/seed";
 
 async function resetColonyState() {
   await seedDatabase();
-  await getColonyData();
 }
 
 describe("colony logic", () => {
@@ -27,13 +24,15 @@ describe("colony logic", () => {
     await resetColonyState();
   }, 60_000);
 
-  it("builds genotype summaries from allele rows", () => {
-    expect(getAnimalGenotypeSummary("animal-003")).toContain("CreER +/-");
-    expect(getAnimalGenotypeSummary("animal-003")).toContain("tdTomato +/-");
+  it("builds genotype summaries from allele rows", async () => {
+    const animal = await getAnimalDetailView("animal-003");
+
+    expect(animal?.genotypeSummary).toContain("CreER +/-");
+    expect(animal?.genotypeSummary).toContain("tdTomato +/-");
   });
 
-  it("generates rule-driven alerts for overdue and conflicting states", () => {
-    const alerts = getAlerts();
+  it("generates rule-driven alerts for overdue and conflicting states", async () => {
+    const alerts = await getDashboardAlertsView();
     const alertTypes = alerts.map((alert) => alert.alertType);
 
     expect(alertTypes).toContain("breeder_too_old");
@@ -42,15 +41,15 @@ describe("colony logic", () => {
     expect(alertTypes).toContain("weaning_due");
   });
 
-  it("ranks breeding suggestions with the best pair first", () => {
-    const suggestions = getBreedingSuggestions();
+  it("ranks breeding suggestions with the best pair first", async () => {
+    const suggestions = await getBreedingSuggestionsView();
 
     expect(suggestions[0]?.priorityScore).toBeGreaterThan(suggestions[1]?.priorityScore ?? 0);
     expect(suggestions[0]?.expectedGenotypeProbability).toBeGreaterThan(0.2);
   });
 
-  it("returns experiment candidates with eligibility scores", () => {
-    const candidates = getExperimentCandidates();
+  it("returns experiment candidates with eligibility scores", async () => {
+    const candidates = await getExperimentCandidateView();
 
     expect(candidates.length).toBeGreaterThan(0);
     expect(candidates[0]?.score).toBeGreaterThan(0);
@@ -71,8 +70,8 @@ describe("colony logic", () => {
     );
 
     expect(result.ok).toBe(true);
-    await getColonyData();
-    expect(getAnimalListItems().some((animal) => animal.animalId === "CM-TEST-101")).toBe(true);
+    const animals = await getAnimalListView();
+    expect(animals.some((animal) => animal.animalId === "CM-TEST-101")).toBe(true);
   });
 
   it("adds a cage health note that surfaces as a cage alert", async () => {
@@ -89,8 +88,8 @@ describe("colony logic", () => {
     );
 
     expect(note.ok).toBe(true);
-    await getColonyData();
-    expect(getAlerts().some((alert) => alert.message.includes("Wet bedding noted during welfare round."))).toBe(true);
+    const cage = await getCageDetailView("cage-a101-003");
+    expect(cage?.alerts.some((alert) => alert.message.includes("Wet bedding noted during welfare round."))).toBe(true);
   });
 
   it("blocks reservation for genotype-pending animals and allows eligible ones", async () => {
@@ -115,7 +114,8 @@ describe("colony logic", () => {
     );
 
     expect(allowed.ok).toBe(true);
-    await getColonyData();
+    const animal = await getAnimalDetailView("animal-004");
+    expect(animal?.assignments.some((assignment) => assignment.experimentCode === "EXP-LPS-005")).toBe(true);
   });
 
   it("builds animal csv exports directly from Prisma data", async () => {

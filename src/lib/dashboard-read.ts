@@ -425,6 +425,12 @@ export async function getDashboardHighlightsView() {
   };
 }
 
+export async function getDashboardAlertsView() {
+  const { alerts } = await getDashboardData();
+
+  return alerts;
+}
+
 export async function getDashboardOpenAlertCount() {
   const metrics = await getDashboardMetricsView();
 
