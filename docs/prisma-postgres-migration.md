@@ -44,7 +44,7 @@ This tracker covers the work required to replace the persisted demo store with r
 
 - [ ] Remove or archive demo-only data structures once Prisma is the runtime source of truth.
 - [x] Update README and environment docs for Postgres-backed setup.
-- [ ] Commit, push branch, and verify the repo from a clean checkout.
+- [x] Commit, push branch, and verify the repo from a clean checkout.
 
 ## Remaining Work
 
@@ -54,4 +54,4 @@ This tracker covers the work required to replace the persisted demo store with r
 - [x] Move rules and recent audit views in `/settings` to Prisma-native reads.
 - [x] Remove `AppShell` dependence on compatibility-layer dashboard metrics.
 - [x] Remove `colony.ts` and the snapshot compatibility layer from the runtime path.
-- [ ] Verify the repo from a clean checkout with the Prisma-backed setup.
+- [x] Verify the repo from a clean checkout with the Prisma-backed setup.

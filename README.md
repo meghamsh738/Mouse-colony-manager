@@ -63,7 +63,7 @@ npm run db:seed
 ## What Is Persisted
 
 - Auth users and roles are stored in PostgreSQL.
-- Colony reads hydrate from Prisma queries through the snapshot mapper in `src/lib/colony-data.ts`.
+- Colony reads come directly from Prisma-backed read modules for animals, cages, scan, breeding, experiments, dashboard, exports, and settings.
 - Active write flows are Prisma-backed:
   - animal creation
   - cage health notes
@@ -72,7 +72,7 @@ npm run db:seed
 
 ## Current Scope
 
-The app is Postgres-backed for the active workflows above, but some read models still pass through the compatibility snapshot layer in `src/lib/colony.ts` so the existing UI helpers can be reused. That keeps the product functional while the remaining demo-shaped read helpers are retired incrementally.
+The runtime app path is fully Postgres-backed through Prisma. The remaining demo-shaped data structures are only kept for seeding the development dataset and can be reduced further if the seed flow is later rewritten around Prisma-native fixtures.
 
 ## Verification
 
@@ -83,5 +83,17 @@ npm run typecheck
 npm run lint
 npm test
 LD_LIBRARY_PATH="$PWD/.runtime-libs/usr/lib/x86_64-linux-gnu" npm run test:e2e -- --reporter=line
+npm run build
+```
+
+Clean-checkout verification was also run from a disposable clone with:
+
+```bash
+npm ci
+npx prisma validate
+npm run db:seed
+npm run typecheck
+npm run lint
+npm test
 npm run build
 ```
