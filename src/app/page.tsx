@@ -6,22 +6,22 @@ import { PageHeader } from "@/components/app/page-header";
 import { StatStrip } from "@/components/app/stat-strip";
 import { Surface } from "@/components/app/surface";
 import {
-  getColonyData,
-  getColonyComposition,
-  getDashboardHighlights,
-  getDashboardMetrics,
-  getSuggestionSummary,
-} from "@/lib/colony";
+  getBreedingSuggestionSummaryView,
+  getColonyCompositionView,
+  getDashboardHighlightsView,
+  getDashboardMetricsView,
+} from "@/lib/dashboard-read";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  await getColonyData();
-  const metrics = getDashboardMetrics();
-  const composition = getColonyComposition();
-  const highlights = getDashboardHighlights();
-  const suggestions = getSuggestionSummary().slice(0, 3);
+  const [metrics, composition, highlights, suggestions] = await Promise.all([
+    getDashboardMetricsView(),
+    getColonyCompositionView(),
+    getDashboardHighlightsView(),
+    getBreedingSuggestionSummaryView(),
+  ]);
 
   return (
     <AppShell currentPath="/" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
@@ -30,7 +30,7 @@ export default async function DashboardPage() {
           eyebrow="Dashboard"
           title="Operational view of the live colony."
           description="Start from alerts, age-sensitive workload, and the cages or animals that need attention first. This surface is tuned for daily staff rounds and experiment planning."
-          badgeLabel="demo runtime"
+          badgeLabel="postgres runtime"
         />
         <StatStrip
           stats={[
@@ -106,7 +106,7 @@ export default async function DashboardPage() {
               </Link>
             </div>
             <div className="space-y-3">
-              {suggestions.map((suggestion) => (
+              {suggestions.slice(0, 3).map((suggestion) => (
                 <article key={suggestion.id} className="rounded-2xl border border-[var(--line)] p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>

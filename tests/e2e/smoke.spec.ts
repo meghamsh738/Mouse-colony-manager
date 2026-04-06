@@ -113,6 +113,14 @@ test("admin can review breeding overview and generator suggestions", async ({ pa
   await expect(page.getByText("Cross can yield desired dual-transgenic pups").first()).toBeVisible();
 });
 
+test("admin can review rule thresholds and recent audit history", async ({ page }) => {
+  await signInAs(page, "admin");
+  await page.goto("/settings");
+
+  await expect(page.getByText("Breeder maximum age")).toBeVisible();
+  await expect(page.getByText("activate").first()).toBeVisible();
+});
+
 test("researcher sees reservation conflicts and can reserve an eligible animal", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
 

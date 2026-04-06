@@ -4,7 +4,8 @@ import { Activity, Boxes, FlaskConical, Home, LogOut, QrCode, Settings2, Table2 
 import { signOut } from "@/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { getColonyData, getDashboardMetrics, runtimeMode } from "@/lib/colony";
+import { getDashboardMetricsView } from "@/lib/dashboard-read";
+import { runtimeMode } from "@/lib/runtime";
 import { cn } from "@/lib/utils";
 
 const navigation = [
@@ -25,8 +26,7 @@ type AppShellProps = {
 };
 
 export async function AppShell({ currentPath, userName, role, children }: AppShellProps) {
-  await getColonyData();
-  const metrics = getDashboardMetrics();
+  const metrics = await getDashboardMetricsView();
 
   return (
     <div className="min-h-screen bg-[var(--page)] text-[var(--ink)]">

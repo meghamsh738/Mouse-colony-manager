@@ -1,15 +1,13 @@
 import { AppShell } from "@/components/app/app-shell";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
-import { getColonyData, getRecentAuditLogs, getRuleSummary } from "@/lib/colony";
 import { requireUser } from "@/lib/session";
+import { getRecentAuditLogsView, getRuleSummaryView } from "@/lib/settings-read";
 import { formatDate } from "@/lib/utils";
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  await getColonyData();
-  const rules = getRuleSummary();
-  const auditLogs = getRecentAuditLogs();
+  const [rules, auditLogs] = await Promise.all([getRuleSummaryView(), getRecentAuditLogsView()]);
 
   return (
     <AppShell currentPath="/settings" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>

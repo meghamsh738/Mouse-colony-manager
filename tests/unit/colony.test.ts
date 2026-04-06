@@ -10,9 +10,11 @@ import {
 } from "@/lib/colony";
 import { getBreedingOverviewView, getBreedingSuggestionsView } from "@/lib/breeding-read";
 import { getCageDetailView, getCageListView, getScanCageViewByBarcode } from "@/lib/cages-read";
+import { getColonyCompositionView, getDashboardHighlightsView, getDashboardMetricsView } from "@/lib/dashboard-read";
 import { buildCsvExport } from "@/lib/export-csv";
 import { getExperimentCandidateView, getExperimentOverviewView } from "@/lib/experiments-read";
 import { addCageHealthNote, createAnimalRecord, reserveAnimalForExperiment } from "@/lib/colony-write";
+import { getRecentAuditLogsView, getRuleSummaryView } from "@/lib/settings-read";
 import { seedDatabase } from "../../prisma/seed";
 
 async function resetColonyState() {
@@ -162,5 +164,27 @@ describe("colony logic", () => {
     expect(overview.find((breeding) => breeding.id === "breeding-001")?.litter?.id).toBe("litter-001");
     expect(suggestions.length).toBeGreaterThan(1);
     expect(suggestions[0]?.priorityScore).toBeGreaterThan(suggestions[1]?.priorityScore ?? 0);
+  });
+
+  it("builds dashboard metrics and highlights directly from Prisma data", async () => {
+    const [metrics, composition, highlights] = await Promise.all([
+      getDashboardMetricsView(),
+      getColonyCompositionView(),
+      getDashboardHighlightsView(),
+    ]);
+
+    expect(metrics.activeAnimals).toBeGreaterThan(0);
+    expect(metrics.openAlerts).toBeGreaterThan(0);
+    expect(composition.transgenic).toBeGreaterThan(0);
+    expect(highlights.upcomingWean.some((item) => item.litterId === "litter-001")).toBe(true);
+    expect(highlights.alerts.length).toBeGreaterThan(0);
+  });
+
+  it("builds settings rules and audit reads directly from Prisma data", async () => {
+    const [rules, auditLogs] = await Promise.all([getRuleSummaryView(), getRecentAuditLogsView()]);
+
+    expect(rules.some((rule) => rule.label.includes("Breeder"))).toBe(true);
+    expect(auditLogs.length).toBeGreaterThan(0);
+    expect(auditLogs[0]?.timestamp.length).toBeGreaterThan(0);
   });
 });
