@@ -6,15 +6,13 @@ import { AppShell } from "@/components/app/app-shell";
 import { CageHealthNoteForm } from "@/components/app/cage-health-note-form";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
-import { getCageByBarcode, getCageSnapshot, getColonyData } from "@/lib/colony";
+import { getScanCageViewByBarcode } from "@/lib/cages-read";
 import { requireUser } from "@/lib/session";
 
 export default async function ScanDetailPage({ params }: { params: Promise<{ barcode: string }> }) {
   const user = await requireUser();
-  await getColonyData();
   const { barcode } = await params;
-  const cage = getCageByBarcode(barcode);
-  const snapshot = getCageSnapshot(cage?.id ?? "");
+  const snapshot = await getScanCageViewByBarcode(barcode);
 
   if (!snapshot) {
     notFound();
@@ -25,7 +23,7 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ bar
       <div className="space-y-6">
         <PageHeader
           eyebrow="Mobile cage workspace"
-          title={`${snapshot.room?.roomNumber} / ${snapshot.rack?.rackNumber} / ${snapshot.cage.cageNumber}`}
+          title={`${snapshot.cage.roomNumber} / ${snapshot.cage.rackNumber} / ${snapshot.cage.cageNumber}`}
           description="This view is tuned for quick actions after scanning: occupancy, sex mix, open alerts, recent notes, and direct access to the matching cage record."
           badgeLabel={snapshot.cage.barcode}
         />

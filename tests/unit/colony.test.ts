@@ -8,7 +8,7 @@ import {
   getBreedingSuggestions,
   getExperimentCandidates,
 } from "@/lib/colony";
-import { getCageDetailView, getCageListView } from "@/lib/cages-read";
+import { getCageDetailView, getCageListView, getScanCageViewByBarcode } from "@/lib/cages-read";
 import { buildCsvExport } from "@/lib/export-csv";
 import { addCageHealthNote, createAnimalRecord, reserveAnimalForExperiment } from "@/lib/colony-write";
 import { seedDatabase } from "../../prisma/seed";
@@ -131,5 +131,13 @@ describe("colony logic", () => {
     expect(detail?.occupants.some((animal) => animal.animalId === "CM-26003")).toBe(true);
     expect(detail?.occupants.length).toBeGreaterThan(0);
     expect(detail?.occupants[0]?.genotypeSummary.length).toBeGreaterThan(0);
+  });
+
+  it("resolves the mobile scan cage view directly from barcode", async () => {
+    const scanView = await getScanCageViewByBarcode("CM-A101-003");
+
+    expect(scanView?.cage.id).toBe("cage-a101-003");
+    expect(scanView?.cage.roomNumber).toBe("A101");
+    expect(scanView?.occupants.some((animal) => animal.animalId === "CM-26003")).toBe(true);
   });
 });

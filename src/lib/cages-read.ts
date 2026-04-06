@@ -130,6 +130,33 @@ function buildCageRuleAlerts(
   return alerts;
 }
 
+function normalizeManualAlerts(
+  alerts: Array<{
+    id: string;
+    entityId: string;
+    alertType: string;
+    severity: Alert["severity"];
+    message: string;
+    status: Alert["status"];
+    generatedAt: Date;
+    resolvedAt: Date | null;
+    source: string;
+  }>,
+) {
+  return alerts.map<Alert>((alert) => ({
+    id: alert.id,
+    entityType: "cage",
+    entityId: alert.entityId,
+    alertType: alert.alertType,
+    severity: alert.severity,
+    message: alert.message,
+    status: alert.status,
+    generatedAt: alert.generatedAt.toISOString(),
+    resolvedAt: alert.resolvedAt?.toISOString(),
+    source: (alert.source as "rule" | "manual") ?? "manual",
+  }));
+}
+
 export async function getCageListView(): Promise<CageListItem[]> {
   const rules = await getCageRuleContext();
   const cages = await prisma.cage.findMany({
@@ -169,18 +196,7 @@ export async function getCageListView(): Promise<CageListItem[]> {
 
   manualAlerts.forEach((alert) => {
     const existing = manualAlertsByCageId.get(alert.entityId) ?? [];
-    existing.push({
-      id: alert.id,
-      entityType: "cage",
-      entityId: alert.entityId,
-      alertType: alert.alertType,
-      severity: alert.severity,
-      message: alert.message,
-      status: alert.status,
-      generatedAt: alert.generatedAt.toISOString(),
-      resolvedAt: alert.resolvedAt?.toISOString(),
-      source: (alert.source as "rule" | "manual") ?? "manual",
-    });
+    existing.push(...normalizeManualAlerts([alert]));
     manualAlertsByCageId.set(alert.entityId, existing);
   });
 
@@ -278,6 +294,7 @@ export async function getCageDetailView(cageId: string) {
       id: cage.id,
       barcode: cage.barcode,
       status: cage.status,
+      welfareFlags: Array.isArray(cage.welfareFlags) ? cage.welfareFlags.map((flag) => String(flag)) : [],
       lastUpdatedAt: cage.lastUpdatedAt.toISOString(),
       notes: cage.notes ?? "",
     },
@@ -289,7 +306,83 @@ export async function getCageDetailView(cageId: string) {
       dob: animal.dob.toISOString(),
       ageLabel: getAgeLabel(animal.dob, rules.today),
       status: animal.status,
+      healthStatus: animal.healthStatus ?? "Not recorded",
       genotypeSummary: buildGenotypeSummary(animal.alleles),
+    })),
+    notes: cage.healthNotes.map((note) => ({
+      id: note.id,
+      note: note.note,
+      createdAt: note.createdAt.toISOString(),
+    })),
+    alerts,
+  };
+}
+
+export async function getScanCageViewByBarcode(barcode: string) {
+  const rules = await getCageRuleContext();
+  const cage = await prisma.cage.findUnique({
+    where: { barcode },
+    include: {
+      room: { select: { roomNumber: true } },
+      rack: { select: { rackNumber: true } },
+      animals: {
+        where: { outcomeStatus: "alive" },
+        orderBy: { animalId: "asc" },
+        select: {
+          id: true,
+          animalId: true,
+          sex: true,
+          status: true,
+          healthStatus: true,
+        },
+      },
+      healthNotes: {
+        where: { cageId: { not: null } },
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          note: true,
+          severity: true,
+          resolved: true,
+          createdAt: true,
+        },
+      },
+    },
+  });
+
+  if (!cage) {
+    return null;
+  }
+
+  const manualAlerts = await prisma.alert.findMany({
+    where: {
+      entityType: "cage",
+      entityId: cage.id,
+      status: "open",
+    },
+    orderBy: { generatedAt: "desc" },
+  });
+
+  const alerts = [...normalizeManualAlerts(manualAlerts), ...buildCageRuleAlerts(cage, rules)].sort((left, right) =>
+    compareDesc(new Date(left.generatedAt), new Date(right.generatedAt)),
+  );
+
+  return {
+    cage: {
+      id: cage.id,
+      barcode: cage.barcode,
+      status: cage.status,
+      welfareFlags: Array.isArray(cage.welfareFlags) ? cage.welfareFlags.map((flag) => String(flag)) : [],
+      cageNumber: cage.cageNumber,
+      roomNumber: cage.room.roomNumber,
+      rackNumber: cage.rack.rackNumber,
+    },
+    occupants: cage.animals.map((animal) => ({
+      id: animal.id,
+      animalId: animal.animalId,
+      sex: animal.sex,
+      status: animal.status,
+      healthStatus: animal.healthStatus ?? "Not recorded",
     })),
     notes: cage.healthNotes.map((note) => ({
       id: note.id,
