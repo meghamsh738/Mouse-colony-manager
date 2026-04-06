@@ -1,15 +1,16 @@
 import { AppShell } from "@/components/app/app-shell";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
-import { getBreedingOverview, getColonyData, getSuggestionSummary } from "@/lib/colony";
+import { getBreedingOverviewView, getBreedingSuggestionSummaryView } from "@/lib/breeding-read";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
 export default async function BreedingPage() {
   const user = await requireUser();
-  await getColonyData();
-  const breedings = getBreedingOverview();
-  const suggestions = getSuggestionSummary();
+  const [breedings, suggestions] = await Promise.all([
+    getBreedingOverviewView(),
+    getBreedingSuggestionSummaryView(),
+  ]);
 
   return (
     <AppShell currentPath="/breeding" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>

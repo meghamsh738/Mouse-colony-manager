@@ -8,6 +8,7 @@ import {
   getBreedingSuggestions,
   getExperimentCandidates,
 } from "@/lib/colony";
+import { getBreedingOverviewView, getBreedingSuggestionsView } from "@/lib/breeding-read";
 import { getCageDetailView, getCageListView, getScanCageViewByBarcode } from "@/lib/cages-read";
 import { buildCsvExport } from "@/lib/export-csv";
 import { getExperimentCandidateView, getExperimentOverviewView } from "@/lib/experiments-read";
@@ -150,5 +151,16 @@ describe("colony logic", () => {
     expect(overview.find((experiment) => experiment.experimentCode === "EXP-LPS-005")?.assignments.length).toBeGreaterThan(0);
     expect(candidates.length).toBeGreaterThan(0);
     expect(candidates[0]?.cageLabel.length).toBeGreaterThan(0);
+  });
+
+  it("builds breeding overview and suggestion reads directly from Prisma data", async () => {
+    const overview = await getBreedingOverviewView();
+    const suggestions = await getBreedingSuggestionsView();
+
+    expect(overview.some((breeding) => breeding.id === "breeding-001")).toBe(true);
+    expect(overview.find((breeding) => breeding.id === "breeding-001")?.adults.length).toBeGreaterThan(0);
+    expect(overview.find((breeding) => breeding.id === "breeding-001")?.litter?.id).toBe("litter-001");
+    expect(suggestions.length).toBeGreaterThan(1);
+    expect(suggestions[0]?.priorityScore).toBeGreaterThan(suggestions[1]?.priorityScore ?? 0);
   });
 });

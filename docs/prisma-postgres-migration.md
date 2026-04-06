@@ -45,3 +45,12 @@ This tracker covers the work required to replace the persisted demo store with r
 - [ ] Remove or archive demo-only data structures once Prisma is the runtime source of truth.
 - [x] Update README and environment docs for Postgres-backed setup.
 - [ ] Commit, push branch, and verify the repo from a clean checkout.
+
+## Remaining Work
+
+- [x] Move the experiments page off the `colony.ts` compatibility layer.
+- [x] Move the breeding page off the `colony.ts` compatibility layer.
+- [ ] Move dashboard metrics, highlights, and suggestion cards to Prisma-native reads.
+- [ ] Move rules and recent audit views in `/settings` to Prisma-native reads.
+- [ ] Remove `AppShell` dependence on compatibility-layer dashboard metrics.
+- [ ] Shrink `colony.ts` to legacy test-only helpers or replace it entirely.

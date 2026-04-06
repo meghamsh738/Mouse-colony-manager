@@ -104,6 +104,15 @@ test("researcher can review experiment overview and candidate helper", async ({ 
   await expect(page.getByText("Included for review despite current blocker").first()).toBeVisible();
 });
 
+test("admin can review breeding overview and generator suggestions", async ({ page }) => {
+  await signInAs(page, "admin");
+  await page.goto("/breeding");
+
+  await expect(page.getByText("breeding-001")).toBeVisible();
+  await expect(page.getByText("litter-001 born").first()).toBeVisible();
+  await expect(page.getByText("Cross can yield desired dual-transgenic pups").first()).toBeVisible();
+});
+
 test("researcher sees reservation conflicts and can reserve an eligible animal", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
 
