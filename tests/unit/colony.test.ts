@@ -15,6 +15,7 @@ import {
   addCageHealthNote,
   createAnimalRecord,
   createBreedingSetup,
+  importGenotypeCsvBatch,
   recordAnimalGenotype,
   recordBreedingLitter,
   reserveAnimalForExperiment,
@@ -303,6 +304,32 @@ describe("colony logic", () => {
     expect(detail?.genotypingRecords[0]?.markerTested).toBe("CreER");
     expect(detail?.genotypingRecords[0]?.resultText).toContain("Expected CreER band present");
     expect(detail?.timeline.some((event) => event.description.includes("CreER +/-"))).toBe(true);
+  });
+
+  it("imports genotype rows from a vendor-style csv batch", async () => {
+    const csv = [
+      "subject_id,marker,call,status,source,assay,sample_date,result_date,result_text,provider,confidence,sample_id",
+      "CM-25009,CreER,+/-,confirmed,manual PCR,gel PCR,2026-04-09,2026-04-09,Imported batch call for CM-25009,,high,PCR-25009-BATCH",
+      "MC-2026-013,CreER,negative,confirmed,external vendor,Transnetyx panel,2026-04-09,2026-04-09,Imported vendor negative call,Transnetyx,high,TX-26013",
+    ].join("\n");
+
+    const result = await importGenotypeCsvBatch(
+      {
+        csvText: csv,
+        fileName: "vendor-genotypes.csv",
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain("Processed 2 genotype rows");
+
+    const [animal009, animal013] = await Promise.all([getAnimalDetailView("animal-009"), getAnimalDetailView("animal-013")]);
+
+    expect(animal009?.genotypeSummary).toContain("CreER +/-");
+    expect(animal009?.genotypingRecords.some((record) => record.resultText.includes("Imported batch call"))).toBe(true);
+    expect(animal013?.genotypeSummary).toContain("CreER WT/WT");
+    expect(animal013?.genotypingRecords.some((record) => record.resultText.includes("Imported vendor negative call"))).toBe(true);
   });
 
   it("builds animal csv exports directly from Prisma data", async () => {

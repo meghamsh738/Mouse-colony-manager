@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test.describe.configure({ timeout: 90_000 });
@@ -217,6 +219,24 @@ test("admin can record a genotype result from the animal detail page", async ({ 
 
   await expect(page.getByText(seed.genotypeExpect).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("genotype-record-history").getByText(resultText)).toBeVisible({ timeout: 30_000 });
+});
+
+test("admin can import genotype rows from a csv upload", async ({ page }) => {
+  const fixturePath = path.join(process.cwd(), "tests/fixtures/genotype-import.csv");
+
+  await signInAs(page, "admin");
+  await page.goto("/animals");
+
+  await page.getByTestId("genotype-import-file").setInputFiles(fixturePath);
+  await submitAfterBlur(page, "genotype-import-submit");
+
+  await expect(page.getByText("Processed 2 genotype rows from genotype-import.csv. 2 succeeded.")).toBeVisible({
+    timeout: 30_000,
+  });
+
+  await page.goto("/animals/animal-013");
+  await expect(page.getByText("Imported vendor batch verification for CM-26013.")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("CreER WT/WT").first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can review rule thresholds and recent audit history", async ({ page }) => {

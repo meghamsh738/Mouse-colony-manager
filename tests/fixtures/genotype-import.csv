@@ -1,0 +1,3 @@
+subject_id,marker,call,status,source,assay,sample_date,result_date,result_text,provider,confidence,sample_id
+CM-26011,CreER,positive,confirmed,manual PCR,gel PCR,2026-04-09,2026-04-09,Imported batch verification for CM-26011.,,high,PCR-26011-BATCH
+MC-2026-013,CreER,negative,confirmed,external vendor,Transnetyx panel,2026-04-09,2026-04-09,Imported vendor batch verification for CM-26013.,Transnetyx,high,TX-26013-BATCH

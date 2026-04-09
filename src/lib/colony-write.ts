@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { parseGenotypeImportCsv } from "@/lib/genotype-import";
 import type { GenotypeCallStatus, HealthNoteType, Sex, UserRole } from "@/lib/types";
 
 type MutationResult =
@@ -80,6 +81,11 @@ type RecordAnimalGenotypeInput = {
   confidence?: string;
   provider?: string;
   sampleId?: string;
+};
+
+type ImportGenotypeCsvInput = {
+  csvText: string;
+  fileName?: string;
 };
 
 function createId(prefix: string) {
@@ -1334,5 +1340,133 @@ export async function recordAnimalGenotype(
     ok: true,
     message: `${allele.name} genotype recorded for ${animal.animalId}.`,
     entityId: recordId,
+  };
+}
+
+export async function importGenotypeCsvBatch(
+  input: ImportGenotypeCsvInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canRecordGenotype(actor.role)) {
+    return { ok: false, message: "Your role cannot import genotyping results." };
+  }
+
+  const parsed = parseGenotypeImportCsv(input.csvText);
+
+  if (!parsed.rows.length) {
+    return {
+      ok: false,
+      message: parsed.errors[0] ?? "No valid genotype rows were found in the uploaded CSV.",
+    };
+  }
+
+  if (parsed.rows.length > 250) {
+    return {
+      ok: false,
+      message: "Limit each batch import to 250 genotype rows so validation and audit remain tractable.",
+    };
+  }
+
+  const [animals, alleles] = await Promise.all([
+    prisma.animal.findMany({
+      select: {
+        id: true,
+        animalId: true,
+        labId: true,
+      },
+    }),
+    prisma.allele.findMany({
+      select: {
+        id: true,
+        name: true,
+        gene: true,
+      },
+    }),
+  ]);
+
+  const animalsByLookup = new Map<string, { id: string; animalId: string; labId: string }>();
+
+  for (const animal of animals) {
+    animalsByLookup.set(animal.animalId.toLowerCase(), animal);
+    animalsByLookup.set(animal.labId.toLowerCase(), animal);
+  }
+
+  const alleleKeyCounts = new Map<string, number>();
+  const allelesByLookup = new Map<string, { id: string; name: string }>();
+
+  for (const allele of alleles) {
+    const keys = new Set([allele.name.toLowerCase(), allele.gene.toLowerCase()]);
+
+    for (const key of keys) {
+      alleleKeyCounts.set(key, (alleleKeyCounts.get(key) ?? 0) + 1);
+      allelesByLookup.set(key, { id: allele.id, name: allele.name });
+    }
+  }
+
+  let successCount = 0;
+  const errors = [...parsed.errors];
+
+  for (const row of parsed.rows) {
+    const animal = animalsByLookup.get(row.animalLookup.toLowerCase());
+
+    if (!animal) {
+      errors.push(`Row ${row.rowNumber}: animal '${row.animalLookup}' was not found.`);
+      continue;
+    }
+
+    const alleleLookupKey = row.alleleLookup.toLowerCase();
+
+    if ((alleleKeyCounts.get(alleleLookupKey) ?? 0) > 1) {
+      errors.push(`Row ${row.rowNumber}: allele lookup '${row.alleleLookup}' is ambiguous. Use the exact allele name.`);
+      continue;
+    }
+
+    const allele = allelesByLookup.get(alleleLookupKey);
+
+    if (!allele) {
+      errors.push(`Row ${row.rowNumber}: allele '${row.alleleLookup}' was not found.`);
+      continue;
+    }
+
+    const result = await recordAnimalGenotype(
+      {
+        animalId: animal.id,
+        alleleId: allele.id,
+        zygosity: row.zygosity,
+        status: row.status,
+        sourceType: row.sourceType,
+        assayType: row.assayType,
+        sampleDate: row.sampleDate,
+        resultDate: row.resultDate,
+        resultText: row.resultText,
+        confidence: row.confidence,
+        provider: row.provider,
+        sampleId: row.sampleId,
+      },
+      actor,
+    );
+
+    if (!result.ok) {
+      errors.push(`Row ${row.rowNumber}: ${result.message}`);
+      continue;
+    }
+
+    successCount += 1;
+  }
+
+  if (!successCount) {
+    return {
+      ok: false,
+      message: errors[0] ?? "The genotype batch import did not create any records.",
+    };
+  }
+
+  const fileLabel = input.fileName ? ` from ${input.fileName}` : "";
+  const errorSummary = errors.length ? ` ${errors.length} row${errors.length === 1 ? "" : "s"} failed.` : "";
+  const firstError = errors.length ? ` First issue: ${errors[0]}` : "";
+
+  return {
+    ok: true,
+    message: `Processed ${parsed.rows.length} genotype row${parsed.rows.length === 1 ? "" : "s"}${fileLabel}. ${successCount} succeeded.${errorSummary}${firstError}`,
   };
 }
