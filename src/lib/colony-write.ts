@@ -50,6 +50,13 @@ type CreateBreedingSetupInput = {
   allowOverride?: boolean;
 };
 
+type CreateLitterInput = {
+  breedingSetupId: string;
+  birthDate: string;
+  litterSizeBirth: number;
+  notes?: string;
+};
+
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -67,6 +74,10 @@ function canReserveAnimal(role: UserRole) {
 }
 
 function canCreateBreeding(role: UserRole) {
+  return role !== "read_only";
+}
+
+function canRecordLitter(role: UserRole) {
   return role !== "read_only";
 }
 
@@ -708,5 +719,114 @@ export async function createBreedingSetup(
     ok: true,
     message: `Breeding setup created for ${sire.animalId} and ${dam.animalId}.`,
     entityId: breedingId,
+  };
+}
+
+export async function recordBreedingLitter(
+  input: CreateLitterInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canRecordLitter(actor.role)) {
+    return { ok: false, message: "Your role cannot record litters." };
+  }
+
+  const breeding = await prisma.breedingSetup.findUnique({
+    where: { id: input.breedingSetupId },
+    select: {
+      id: true,
+      status: true,
+      startDate: true,
+      litters: {
+        orderBy: [{ birthDate: "desc" }, { id: "desc" }],
+        select: {
+          id: true,
+          birthDate: true,
+          litterSizeBirth: true,
+          notes: true,
+        },
+      },
+    },
+  });
+
+  if (!breeding) {
+    return { ok: false, message: "Breeding setup not found." };
+  }
+
+  if (breeding.status !== "active") {
+    return { ok: false, message: "Only active breeding setups can receive a litter record." };
+  }
+
+  const normalizedBirthDate = new Date(input.birthDate);
+
+  if (Number.isNaN(normalizedBirthDate.getTime())) {
+    return { ok: false, message: "Choose a valid litter birth date." };
+  }
+
+  if (normalizedBirthDate.getTime() < breeding.startDate.getTime()) {
+    return { ok: false, message: "Litter birth date cannot be earlier than the breeding start date." };
+  }
+
+  const normalizedBirthKey = normalizedBirthDate.toISOString().slice(0, 10);
+  const normalizedNotes = input.notes?.trim() || null;
+  const matchingLitter = breeding.litters.find(
+    (litter) =>
+      litter.birthDate.toISOString().slice(0, 10) === normalizedBirthKey &&
+      litter.litterSizeBirth === input.litterSizeBirth &&
+      (litter.notes ?? null) === normalizedNotes,
+  );
+
+  if (matchingLitter) {
+    return {
+      ok: true,
+      message: `Litter recorded for ${breeding.id}.`,
+      entityId: matchingLitter.id,
+    };
+  }
+
+  const latestLitter = breeding.litters[0];
+
+  if (latestLitter && normalizedBirthDate.getTime() <= latestLitter.birthDate.getTime()) {
+    return {
+      ok: false,
+      message: "Litter birth date must be later than the latest recorded litter for this breeding setup.",
+    };
+  }
+
+  const litterId = createId("litter");
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.litter.create({
+      data: {
+        id: litterId,
+        breedingSetupId: breeding.id,
+        birthDate: normalizedBirthDate,
+        litterSizeBirth: input.litterSizeBirth,
+        notes: normalizedNotes ?? undefined,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "litter",
+        entityId: litterId,
+        action: "create",
+        newValue: {
+          breedingSetupId: breeding.id,
+          birthDate: normalizedBirthKey,
+          litterSizeBirth: input.litterSizeBirth,
+          notes: normalizedNotes,
+        },
+        timestamp,
+      },
+    });
+  });
+
+  return {
+    ok: true,
+    message: `Litter recorded for ${breeding.id}.`,
+    entityId: litterId,
   };
 }

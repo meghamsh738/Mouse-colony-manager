@@ -15,6 +15,7 @@ import {
   addCageHealthNote,
   createAnimalRecord,
   createBreedingSetup,
+  recordBreedingLitter,
   reserveAnimalForExperiment,
 } from "@/lib/colony-write";
 import { getRecentAuditLogsView, getRuleSummaryView } from "@/lib/settings-read";
@@ -163,6 +164,45 @@ describe("colony logic", () => {
 
     const cage = await getCageDetailView("cage-a102-005");
     expect(cage?.cage.status).toBe("breeding");
+  });
+
+  it("records a litter for an active breeding setup and exposes it on breeding and dashboard reads", async () => {
+    const setup = await createBreedingSetup(
+      {
+        sireId: "animal-008",
+        damId: "animal-009",
+        startDate: "2026-04-08",
+        targetGenotype: "Litter tracking verification",
+        notes: "Create active setup before litter entry.",
+        allowOverride: true,
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(setup.ok).toBe(true);
+    if (!setup.ok || !setup.entityId) {
+      throw new Error("Expected breeding setup creation to return an entity id.");
+    }
+
+    const litter = await recordBreedingLitter(
+      {
+        breedingSetupId: setup.entityId,
+        birthDate: "2026-04-10",
+        litterSizeBirth: 7,
+        notes: "Observed during afternoon breeding room round.",
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(litter.ok).toBe(true);
+
+    const overview = await getBreedingOverviewView();
+    const breeding = overview.find((item) => item.id === setup.entityId);
+    expect(breeding?.litter?.litterSizeBirth).toBe(7);
+    expect(breeding?.litter?.notes).toBe("Observed during afternoon breeding room round.");
+
+    const highlights = await getDashboardHighlightsView();
+    expect(highlights.upcomingWean.some((item) => item.breedingId === setup.entityId)).toBe(true);
   });
 
   it("builds animal csv exports directly from Prisma data", async () => {

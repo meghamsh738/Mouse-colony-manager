@@ -29,6 +29,7 @@ type BreedingOverviewItem = {
         birthDate: string;
         litterSizeBirth: number;
         litterSizeWean?: number;
+        notes?: string;
       }
     | null;
   ageDays: number;
@@ -113,6 +114,7 @@ export async function getBreedingOverviewView(): Promise<BreedingOverviewItem[]>
           birthDate: true,
           litterSizeBirth: true,
           litterSizeWean: true,
+          notes: true,
         },
       },
     },
@@ -137,6 +139,7 @@ export async function getBreedingOverviewView(): Promise<BreedingOverviewItem[]>
             birthDate: latestLitter.birthDate.toISOString(),
             litterSizeBirth: latestLitter.litterSizeBirth,
             litterSizeWean: latestLitter.litterSizeWean ?? undefined,
+            notes: latestLitter.notes ?? undefined,
           }
         : null,
       ageDays: differenceInDays(new Date(referenceDate), breeding.startDate),

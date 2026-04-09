@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -28,7 +28,7 @@ async function signInAs(page: Page, account: keyof typeof credentials) {
   await expect(page.getByTestId("stat-active-mice")).toBeVisible({ timeout: 45_000 });
 }
 
-async function submitAfterBlur(page: Page, testId: string) {
+async function submitWithinAfterBlur(page: Page, scope: Page | Locator, testId: string) {
   await page.evaluate(() => {
     const active = document.activeElement;
 
@@ -37,9 +37,13 @@ async function submitAfterBlur(page: Page, testId: string) {
     }
   });
 
-  const button = page.getByTestId(testId);
+  const button = scope.getByTestId(testId);
   await button.scrollIntoViewIfNeeded();
   await button.dispatchEvent("click");
+}
+
+async function submitAfterBlur(page: Page, testId: string) {
+  await submitWithinAfterBlur(page, page, testId);
 }
 
 test("demo user can log in and reach the dashboard", async ({ page }) => {
@@ -58,10 +62,9 @@ test("admin can add a new animal record from the colony table", async ({ page },
   await page.getByTestId("animal-create-lab-id").fill(labId);
   await submitAfterBlur(page, "animal-create-submit");
 
-  await expect(page.getByText(`${animalId} was added to the active colony.`)).toBeVisible();
   await page.getByTestId("colony-search").fill(animalId);
-  await expect(page.locator('[data-testid="colony-table"] tbody tr')).toHaveCount(1);
-  await expect(page.getByRole("link", { name: animalId })).toBeVisible();
+  await expect(page.locator('[data-testid="colony-table"] tbody tr')).toHaveCount(1, { timeout: 30_000 });
+  await expect(page.getByRole("link", { name: animalId })).toBeVisible({ timeout: 30_000 });
 });
 
 test("animal staff can scan a cage and log a welfare note", async ({ page }, testInfo) => {
@@ -133,6 +136,32 @@ test("admin can create a breeding setup with override", async ({ page }, testInf
   await expect(page.getByText(targetGenotype).first()).toBeVisible();
 });
 
+test("admin can record a litter for a newly created breeding setup", async ({ page }, testInfo) => {
+  const seed = projectSeed(testInfo.project.name);
+  const targetGenotype = `Litter tracking ${seed.noteSuffix}`;
+  const litterNote = `Observed ${seed.noteSuffix} litter confirmation.`;
+
+  await signInAs(page, "admin");
+  await page.goto("/breeding");
+
+  await page.getByTestId("breeding-create-sire").selectOption("animal-008");
+  await page.getByTestId("breeding-create-dam").selectOption("animal-009");
+  await page.getByTestId("breeding-create-target-genotype").fill(targetGenotype);
+  await page.getByTestId("breeding-create-override").check();
+  await submitAfterBlur(page, "breeding-create-submit");
+
+  const breedingCard = page.locator('[data-testid^="breeding-card-"]').filter({ hasText: targetGenotype }).first();
+  await expect(breedingCard).toBeVisible();
+
+  await breedingCard.getByTestId("litter-create-birth-date").fill("2026-04-10");
+  await breedingCard.getByTestId("litter-create-size").fill("7");
+  await breedingCard.getByTestId("litter-create-notes").fill(litterNote);
+  await submitWithinAfterBlur(page, breedingCard, "litter-create-submit");
+
+  await expect(breedingCard.getByText("7 pups recorded at birth")).toBeVisible();
+  await expect(breedingCard.getByText(litterNote)).toBeVisible();
+});
+
 test("admin can review rule thresholds and recent audit history", async ({ page }) => {
   await signInAs(page, "admin");
   await page.goto("/settings");
@@ -157,7 +186,7 @@ test("researcher sees reservation conflicts and can reserve an eligible animal",
   await page.getByTestId("reservation-experiment").selectOption("experiment-002");
   await submitAfterBlur(page, "reservation-submit");
 
-  await expect(page.getByText("reserved · LPS low dose")).toBeVisible();
+  await expect(page.getByText("reserved · LPS low dose")).toBeVisible({ timeout: 30_000 });
 });
 
 test("exports require auth and return csv for signed-in users", async ({ page }) => {

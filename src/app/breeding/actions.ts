@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { createBreedingSetup } from "@/lib/colony-write";
+import { createBreedingSetup, recordBreedingLitter } from "@/lib/colony-write";
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
 import { requireUser } from "@/lib/session";
 
@@ -15,6 +15,13 @@ const createBreedingSchema = z.object({
   targetSex: z.enum(["male", "female", "unknown"]).optional(),
   notes: z.string().trim().max(400).optional(),
   allowOverride: z.boolean().optional(),
+});
+
+const createLitterSchema = z.object({
+  breedingSetupId: z.string().trim().min(1),
+  birthDate: z.string().trim().min(1),
+  litterSizeBirth: z.coerce.number().int().min(1).max(24),
+  notes: z.string().trim().max(400).optional(),
 });
 
 export async function createBreedingAction(
@@ -52,6 +59,44 @@ export async function createBreedingAction(
   revalidatePath("/");
   revalidatePath("/animals");
   revalidatePath("/cages");
+  revalidatePath("/breeding");
+
+  return {
+    status: "success",
+    message: result.message,
+  };
+}
+
+export async function recordLitterAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser();
+  const parsed = createLitterSchema.safeParse({
+    breedingSetupId: formData.get("breedingSetupId"),
+    birthDate: formData.get("birthDate"),
+    litterSizeBirth: formData.get("litterSizeBirth"),
+    notes: formData.get("notes") || undefined,
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Enter a valid birth date and litter size before saving the litter record.",
+    };
+  }
+
+  const result = await recordBreedingLitter(parsed.data, { id: user.id, role: user.role });
+
+  if (!result.ok) {
+    return {
+      status: "error",
+      message: result.message,
+    };
+  }
+
+  revalidatePath("/");
   revalidatePath("/breeding");
 
   return {

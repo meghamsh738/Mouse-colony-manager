@@ -1,4 +1,5 @@
 import { AppShell } from "@/components/app/app-shell";
+import { BreedingLitterForm } from "@/components/app/breeding-litter-form";
 import { BreedingSetupForm } from "@/components/app/breeding-setup-form";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
@@ -19,6 +20,8 @@ export default async function BreedingPage() {
   ]);
   const canCreateBreeding = user.role !== "read_only";
   const canOverride = user.role === "admin";
+  const canRecordLitter = user.role !== "read_only";
+  const defaultBirthDate = (process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString()).slice(0, 10);
 
   return (
     <AppShell currentPath="/breeding" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
@@ -52,7 +55,7 @@ export default async function BreedingPage() {
             <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Active breeding dashboard</p>
             <div className="space-y-3">
               {breedings.map((breeding) => (
-                <article key={breeding.id} className="rounded-2xl border border-[var(--line)] p-4">
+                <article key={breeding.id} className="rounded-2xl border border-[var(--line)] p-4" data-testid={`breeding-card-${breeding.id}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="font-medium">{breeding.id}</p>
@@ -64,9 +67,28 @@ export default async function BreedingPage() {
                     {breeding.adults.map((adult) => `${adult.role}: ${adult.animal?.animalId}`).join(" · ")}
                   </div>
                   <p className="mt-3 text-sm text-[var(--ink)]">{breeding.targetGenotype}</p>
-                  <p className="mt-2 text-sm text-[var(--muted)]">
-                    {breeding.litter ? `${breeding.litter.id} born ${formatDate(breeding.litter.birthDate)}` : "No litter recorded yet"}
-                  </p>
+                  {breeding.litter ? (
+                    <div className="mt-3 space-y-1 text-sm text-[var(--muted)]">
+                      <p>
+                        {breeding.litter.id} born {formatDate(breeding.litter.birthDate)}
+                      </p>
+                      <p>{breeding.litter.litterSizeBirth} pups recorded at birth</p>
+                      {breeding.litter.notes ? <p>{breeding.litter.notes}</p> : null}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-[var(--muted)]">No litter recorded yet.</p>
+                  )}
+                  {canRecordLitter && breeding.status === "active" ? (
+                    <div className="mt-4 border-t border-[var(--line)] pt-4">
+                      <div className="mb-3 space-y-1">
+                        <p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Record litter outcome</p>
+                        <p className="text-sm text-[var(--muted)]">
+                          Enter the confirmed birth date and litter size for this pairing. The latest litter summary updates here immediately.
+                        </p>
+                      </div>
+                      <BreedingLitterForm breedingSetupId={breeding.id} defaultBirthDate={defaultBirthDate} />
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
