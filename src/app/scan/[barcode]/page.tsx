@@ -4,15 +4,19 @@ import { notFound } from "next/navigation";
 import { AlertFeed } from "@/components/app/alert-feed";
 import { AppShell } from "@/components/app/app-shell";
 import { CageHealthNoteForm } from "@/components/app/cage-health-note-form";
+import { CageMoveForm } from "@/components/app/cage-move-form";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
+import { moveCageFromScanAction } from "@/app/scan/[barcode]/actions";
 import { getScanCageViewByBarcode } from "@/lib/cages-read";
 import { requireUser } from "@/lib/session";
+import { formatDate } from "@/lib/utils";
 
 export default async function ScanDetailPage({ params }: { params: Promise<{ barcode: string }> }) {
   const user = await requireUser();
   const { barcode } = await params;
   const snapshot = await getScanCageViewByBarcode(barcode);
+  const canMoveCage = user.role === "admin" || user.role === "colony_manager" || user.role === "animal_staff";
 
   if (!snapshot) {
     notFound();
@@ -64,6 +68,45 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ bar
               </div>
               <CageHealthNoteForm barcode={snapshot.cage.barcode} cageId={snapshot.cage.id} />
             </Surface>
+            {canMoveCage ? (
+              <Surface className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Move cage</p>
+                  <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
+                    Reassign the cage location during the room round.
+                  </h2>
+                  <p className="text-sm leading-7 text-[var(--muted)]">
+                    This keeps the barcode stable while updating the live room, rack, and slot for the cage and its occupants.
+                  </p>
+                </div>
+                <CageMoveForm
+                  key={snapshot.cage.currentLocationLabel}
+                  action={moveCageFromScanAction.bind(null, barcode)}
+                  cageId={snapshot.cage.id}
+                  currentLocationLabel={snapshot.cage.currentLocationLabel}
+                  defaultDate={snapshot.moveForm.defaultDate}
+                  defaultRoomId={snapshot.moveForm.defaultRoomId}
+                  defaultRackId={snapshot.moveForm.defaultRackId}
+                  defaultCageNumber={snapshot.moveForm.defaultCageNumber}
+                  roomOptions={snapshot.moveForm.roomOptions}
+                  rackOptions={snapshot.moveForm.rackOptions}
+                />
+                {snapshot.movementHistory.length ? (
+                  <div className="space-y-3 border-t border-[var(--line)] pt-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Recent moves</p>
+                    {snapshot.movementHistory.map((movement) => (
+                      <article key={movement.id} className="rounded-2xl border border-[var(--line)] p-4">
+                        <p className="font-medium">
+                          {movement.fromLocation} to {movement.toLocation}
+                        </p>
+                        <p className="mt-2 text-sm text-[var(--muted)]">{formatDate(movement.movedAt)}</p>
+                        <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{movement.reason}</p>
+                      </article>
+                    ))}
+                  </div>
+                ) : null}
+              </Surface>
+            ) : null}
             <Surface className="space-y-3">
               <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Linked workspaces</p>
               <div className="grid gap-3">

@@ -33,6 +33,15 @@ type AddCageHealthNoteInput = {
   actionTaken?: string;
 };
 
+type MoveCageInput = {
+  cageId: string;
+  roomId: string;
+  rackId: string;
+  cageNumber: string;
+  movedAt: string;
+  reason: string;
+};
+
 type ReserveAnimalInput = {
   animalId: string;
   experimentId: string;
@@ -104,6 +113,10 @@ function canCreateAnimal(role: UserRole) {
 }
 
 function canCreateHealthNote(role: UserRole) {
+  return role === "admin" || role === "colony_manager" || role === "animal_staff";
+}
+
+function canMoveCage(role: UserRole) {
   return role === "admin" || role === "colony_manager" || role === "animal_staff";
 }
 
@@ -211,6 +224,10 @@ function getLifecycleExperimentalStatus(targetStatus: UpdateAnimalLifecycleInput
     case "archived":
       return "Archived";
   }
+}
+
+function buildLocationLabel(location: { roomNumber: string; rackNumber: string; cageNumber: string }) {
+  return `${location.roomNumber} / ${location.rackNumber} / ${location.cageNumber}`;
 }
 
 export async function createAnimalRecord(
@@ -456,6 +473,190 @@ export async function addCageHealthNote(
     ok: true,
     message: `Health note logged for ${cage.barcode}.`,
     entityId: noteId,
+  };
+}
+
+export async function moveCageLocation(
+  input: MoveCageInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canMoveCage(actor.role)) {
+    return { ok: false, message: "Your role cannot move cages." };
+  }
+
+  const normalizedCageNumber = input.cageNumber.trim();
+  const normalizedReason = input.reason.trim();
+  const normalizedMovedAt = new Date(input.movedAt);
+
+  if (!normalizedCageNumber) {
+    return { ok: false, message: "Enter the destination cage number." };
+  }
+
+  if (normalizedReason.length < 3) {
+    return { ok: false, message: "Enter a concise reason for the cage move." };
+  }
+
+  if (Number.isNaN(normalizedMovedAt.getTime())) {
+    return { ok: false, message: "Choose a valid movement date." };
+  }
+
+  const [cage, room, rack] = await Promise.all([
+    prisma.cage.findUnique({
+      where: { id: input.cageId },
+      select: {
+        id: true,
+        barcode: true,
+        roomId: true,
+        rackId: true,
+        cageNumber: true,
+        active: true,
+        room: {
+          select: {
+            roomNumber: true,
+          },
+        },
+        rack: {
+          select: {
+            rackNumber: true,
+          },
+        },
+      },
+    }),
+    prisma.room.findUnique({
+      where: { id: input.roomId },
+      select: {
+        id: true,
+        roomNumber: true,
+      },
+    }),
+    prisma.rack.findUnique({
+      where: { id: input.rackId },
+      select: {
+        id: true,
+        roomId: true,
+        rackNumber: true,
+        room: {
+          select: {
+            roomNumber: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  if (!cage) {
+    return { ok: false, message: "Cage not found." };
+  }
+
+  if (!cage.active) {
+    return { ok: false, message: `${cage.barcode} is inactive and cannot be moved.` };
+  }
+
+  if (!room || !rack) {
+    return { ok: false, message: "Choose a valid destination room and rack." };
+  }
+
+  if (rack.roomId !== room.id) {
+    return { ok: false, message: "The selected rack does not belong to the selected room." };
+  }
+
+  const fromLocation = buildLocationLabel({
+    roomNumber: cage.room.roomNumber,
+    rackNumber: cage.rack.rackNumber,
+    cageNumber: cage.cageNumber,
+  });
+  const toLocation = buildLocationLabel({
+    roomNumber: room.roomNumber,
+    rackNumber: rack.rackNumber,
+    cageNumber: normalizedCageNumber,
+  });
+
+  if (fromLocation === toLocation) {
+    return { ok: false, message: "Choose a different room, rack, or cage number before saving the move." };
+  }
+
+  const conflictingCage = await prisma.cage.findUnique({
+    where: {
+      rackId_cageNumber: {
+        rackId: rack.id,
+        cageNumber: normalizedCageNumber,
+      },
+    },
+    select: {
+      id: true,
+      barcode: true,
+      room: { select: { roomNumber: true } },
+      rack: { select: { rackNumber: true } },
+      cageNumber: true,
+    },
+  });
+
+  if (conflictingCage && conflictingCage.id !== cage.id) {
+    return {
+      ok: false,
+      message: `${buildLocationLabel({
+        roomNumber: conflictingCage.room.roomNumber,
+        rackNumber: conflictingCage.rack.rackNumber,
+        cageNumber: conflictingCage.cageNumber,
+      })} is already assigned to ${conflictingCage.barcode}.`,
+    };
+  }
+
+  const movementId = createId("cage-move");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.cageMovement.create({
+      data: {
+        id: movementId,
+        cageId: cage.id,
+        fromLocation,
+        toLocation,
+        movedById: actor.id,
+        movedAt: normalizedMovedAt,
+        reason: normalizedReason,
+      },
+    });
+
+    await tx.cage.update({
+      where: { id: cage.id },
+      data: {
+        roomId: room.id,
+        rackId: rack.id,
+        cageNumber: normalizedCageNumber,
+        lastUpdatedAt: normalizedMovedAt,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "cage",
+        entityId: cage.id,
+        action: "move",
+        previousValue: {
+          roomId: cage.roomId,
+          rackId: cage.rackId,
+          cageNumber: cage.cageNumber,
+          location: fromLocation,
+        },
+        newValue: {
+          roomId: room.id,
+          rackId: rack.id,
+          cageNumber: normalizedCageNumber,
+          location: toLocation,
+          movedAt: input.movedAt,
+          reason: normalizedReason,
+        },
+        timestamp: normalizedMovedAt,
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `${cage.barcode} moved to ${toLocation}.`,
+    entityId: movementId,
   };
 }
 

@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { moveCageAction } from "@/app/cages/[cageId]/actions";
 import { AlertFeed } from "@/components/app/alert-feed";
 import { AppShell } from "@/components/app/app-shell";
+import { CageMoveForm } from "@/components/app/cage-move-form";
 import { CageQrCard } from "@/components/app/cage-qr-card";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
@@ -14,6 +16,7 @@ export default async function CageDetailPage({ params }: { params: Promise<{ cag
   const user = await requireUser();
   const { cageId } = await params;
   const snapshot = await getCageDetailView(cageId);
+  const canMoveCage = user.role === "admin" || user.role === "colony_manager" || user.role === "animal_staff";
 
   if (!snapshot) {
     notFound();
@@ -79,10 +82,58 @@ export default async function CageDetailPage({ params }: { params: Promise<{ cag
                 </article>
               ))}
             </div>
+            <div className="space-y-3 border-t border-[var(--line)] pt-4">
+              <div className="space-y-1">
+                <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Movement history</p>
+                <p className="text-sm text-[var(--muted)]">
+                  Every cage relocation is recorded with the prior slot, destination, date, and operator-facing reason.
+                </p>
+              </div>
+              {snapshot.movementHistory.length ? (
+                snapshot.movementHistory.map((movement) => (
+                  <article key={movement.id} className="rounded-2xl border border-[var(--line)] p-4">
+                    <p className="font-medium">
+                      {movement.fromLocation} to {movement.toLocation}
+                    </p>
+                    <p className="mt-2 text-sm text-[var(--muted)]">
+                      {formatDate(movement.movedAt)} by {movement.movedBy}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-[var(--muted)]">{movement.reason}</p>
+                  </article>
+                ))
+              ) : (
+                <p className="text-sm text-[var(--muted)]">No cage moves have been recorded yet.</p>
+              )}
+            </div>
           </Surface>
           <div className="space-y-6">
             <CageQrCard barcode={snapshot.cage.barcode} />
             <AlertFeed alerts={snapshot.alerts} title="Cage alerts" />
+            {canMoveCage ? (
+              <Surface className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Cage movement</p>
+                  <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
+                    Move this cage and log the reason in one step.
+                  </h2>
+                  <p className="text-sm leading-7 text-[var(--muted)]">
+                    Use this when the same barcode-tagged cage is reassigned to a new room, rack, or slot and the occupants stay with it.
+                  </p>
+                </div>
+                <CageMoveForm
+                  key={snapshot.currentLocationLabel}
+                  action={moveCageAction}
+                  cageId={snapshot.cage.id}
+                  currentLocationLabel={snapshot.currentLocationLabel}
+                  defaultDate={snapshot.moveForm.defaultDate}
+                  defaultRoomId={snapshot.moveForm.defaultRoomId}
+                  defaultRackId={snapshot.moveForm.defaultRackId}
+                  defaultCageNumber={snapshot.moveForm.defaultCageNumber}
+                  roomOptions={snapshot.moveForm.roomOptions}
+                  rackOptions={snapshot.moveForm.rackOptions}
+                />
+              </Surface>
+            ) : null}
             <Surface className="space-y-4">
               <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Quick actions</p>
               <div className="grid gap-3">

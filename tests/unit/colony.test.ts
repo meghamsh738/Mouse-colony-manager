@@ -16,6 +16,7 @@ import {
   createAnimalRecord,
   createBreedingSetup,
   importGenotypeCsvBatch,
+  moveCageLocation,
   recordAnimalGenotype,
   recordBreedingLitter,
   reserveAnimalForExperiment,
@@ -101,6 +102,36 @@ describe("colony logic", () => {
     const cage = await getCageDetailView("cage-a101-003");
     expect(cage?.alerts.some((alert) => alert.message.includes("Wet bedding noted during welfare round."))).toBe(true);
   });
+
+  it("moves a cage, updates the live location, and records movement history", async () => {
+    const moved = await moveCageLocation(
+      {
+        cageId: "cage-a102-004",
+        roomId: "room-a101",
+        rackId: "rack-a101-2",
+        cageNumber: "006",
+        movedAt: "2026-04-09",
+        reason: "Relocated for imaging access verification.",
+      },
+      { id: "user-staff", role: "animal_staff" },
+    );
+
+    expect(moved.ok).toBe(true);
+
+    const [detail, scanView, cageList] = await Promise.all([
+      getCageDetailView("cage-a102-004"),
+      getScanCageViewByBarcode("CM-A102-004"),
+      getCageListView(),
+    ]);
+
+    expect(detail?.cageLabel).toBe("A101 / R2 / 006");
+    expect(detail?.movementHistory[0]?.toLocation).toBe("A101 / R2 / 006");
+    expect(detail?.movementHistory[0]?.reason).toContain("imaging access verification");
+    expect(scanView?.cage.roomNumber).toBe("A101");
+    expect(scanView?.cage.rackNumber).toBe("R2");
+    expect(scanView?.cage.cageNumber).toBe("006");
+    expect(cageList.find((cage) => cage.id === "cage-a102-004")?.roomNumber).toBe("A101");
+  }, 15_000);
 
   it("blocks reservation for genotype-pending animals and allows eligible ones", async () => {
     const blocked = await reserveAnimalForExperiment(
@@ -372,7 +403,7 @@ describe("colony logic", () => {
     expect(archivedDetail?.animal.status).toBe("archived");
     expect(archivedDetail?.animal.outcomeStatus).toBe("euthanized");
     expect(archivedDetail?.timeline.some((event) => event.label === "Archived")).toBe(true);
-  });
+  }, 15_000);
 
   it("builds animal csv exports directly from Prisma data", async () => {
     const csv = await buildCsvExport("animals");

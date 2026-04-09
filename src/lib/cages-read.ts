@@ -26,6 +26,10 @@ function buildCageLabel(cage: {
   return `${cage.room.roomNumber} / ${cage.rack.rackNumber} / ${cage.cageNumber}`;
 }
 
+function buildLocationLabel(location: { roomNumber: string; rackNumber: string; cageNumber: string }) {
+  return `${location.roomNumber} / ${location.rackNumber} / ${location.cageNumber}`;
+}
+
 function buildGenotypeSummary(
   alleles: Array<{
     zygosity: string;
@@ -157,6 +161,43 @@ function normalizeManualAlerts(
   }));
 }
 
+async function getCageMoveOptions() {
+  const [rooms, racks] = await Promise.all([
+    prisma.room.findMany({
+      orderBy: { roomNumber: "asc" },
+      select: {
+        id: true,
+        roomNumber: true,
+      },
+    }),
+    prisma.rack.findMany({
+      orderBy: [{ room: { roomNumber: "asc" } }, { rackNumber: "asc" }],
+      select: {
+        id: true,
+        rackNumber: true,
+        roomId: true,
+        room: {
+          select: {
+            roomNumber: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  return {
+    roomOptions: rooms.map((room) => ({
+      id: room.id,
+      label: room.roomNumber,
+    })),
+    rackOptions: racks.map((rack) => ({
+      id: rack.id,
+      roomId: rack.roomId,
+      label: `${rack.room.roomNumber} / ${rack.rackNumber}`,
+    })),
+  };
+}
+
 export async function getCageListView(): Promise<CageListItem[]> {
   const rules = await getCageRuleContext();
   const cages = await prisma.cage.findMany({
@@ -229,36 +270,55 @@ export async function getCageListView(): Promise<CageListItem[]> {
 }
 
 export async function getCageDetailView(cageId: string) {
-  const rules = await getCageRuleContext();
-  const cage = await prisma.cage.findUnique({
-    where: { id: cageId },
-    include: {
-      room: { select: { roomNumber: true } },
-      rack: { select: { rackNumber: true } },
-      animals: {
-        where: { outcomeStatus: "alive" },
-        orderBy: { animalId: "asc" },
-        include: {
-          alleles: {
-            include: {
-              allele: { select: { name: true } },
+  const [rules, cage, moveOptions] = await Promise.all([
+    getCageRuleContext(),
+    prisma.cage.findUnique({
+      where: { id: cageId },
+      include: {
+        room: { select: { roomNumber: true } },
+        rack: { select: { rackNumber: true } },
+        animals: {
+          where: { outcomeStatus: "alive" },
+          orderBy: { animalId: "asc" },
+          include: {
+            alleles: {
+              include: {
+                allele: { select: { name: true } },
+              },
+            },
+          },
+        },
+        healthNotes: {
+          where: { cageId: { not: null } },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            note: true,
+            severity: true,
+            resolved: true,
+            createdAt: true,
+          },
+        },
+        cageMovements: {
+          orderBy: { movedAt: "desc" },
+          select: {
+            id: true,
+            fromLocation: true,
+            toLocation: true,
+            movedAt: true,
+            reason: true,
+            movedBy: {
+              select: {
+                name: true,
+                email: true,
+              },
             },
           },
         },
       },
-      healthNotes: {
-        where: { cageId: { not: null } },
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          note: true,
-          severity: true,
-          resolved: true,
-          createdAt: true,
-        },
-      },
-    },
-  });
+    }),
+    getCageMoveOptions(),
+  ]);
 
   if (!cage) {
     return null;
@@ -299,6 +359,11 @@ export async function getCageDetailView(cageId: string) {
       notes: cage.notes ?? "",
     },
     cageLabel: buildCageLabel(cage),
+    currentLocationLabel: buildLocationLabel({
+      roomNumber: cage.room.roomNumber,
+      rackNumber: cage.rack.rackNumber,
+      cageNumber: cage.cageNumber,
+    }),
     occupants: cage.animals.map((animal) => ({
       id: animal.id,
       animalId: animal.animalId,
@@ -314,41 +379,71 @@ export async function getCageDetailView(cageId: string) {
       note: note.note,
       createdAt: note.createdAt.toISOString(),
     })),
+    movementHistory: cage.cageMovements.map((movement) => ({
+      id: movement.id,
+      fromLocation: movement.fromLocation,
+      toLocation: movement.toLocation,
+      movedAt: movement.movedAt.toISOString(),
+      reason: movement.reason ?? "No reason recorded.",
+      movedBy: movement.movedBy?.name ?? movement.movedBy?.email ?? "Unknown user",
+    })),
+    moveForm: {
+      defaultDate: rules.today.slice(0, 10),
+      defaultRoomId: cage.roomId,
+      defaultRackId: cage.rackId,
+      defaultCageNumber: cage.cageNumber,
+      roomOptions: moveOptions.roomOptions,
+      rackOptions: moveOptions.rackOptions,
+    },
     alerts,
   };
 }
 
 export async function getScanCageViewByBarcode(barcode: string) {
-  const rules = await getCageRuleContext();
-  const cage = await prisma.cage.findUnique({
-    where: { barcode },
-    include: {
-      room: { select: { roomNumber: true } },
-      rack: { select: { rackNumber: true } },
-      animals: {
-        where: { outcomeStatus: "alive" },
-        orderBy: { animalId: "asc" },
-        select: {
-          id: true,
-          animalId: true,
-          sex: true,
-          status: true,
-          healthStatus: true,
+  const [rules, cage, moveOptions] = await Promise.all([
+    getCageRuleContext(),
+    prisma.cage.findUnique({
+      where: { barcode },
+      include: {
+        room: { select: { roomNumber: true } },
+        rack: { select: { rackNumber: true } },
+        animals: {
+          where: { outcomeStatus: "alive" },
+          orderBy: { animalId: "asc" },
+          select: {
+            id: true,
+            animalId: true,
+            sex: true,
+            status: true,
+            healthStatus: true,
+          },
+        },
+        healthNotes: {
+          where: { cageId: { not: null } },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            note: true,
+            severity: true,
+            resolved: true,
+            createdAt: true,
+          },
+        },
+        cageMovements: {
+          orderBy: { movedAt: "desc" },
+          take: 3,
+          select: {
+            id: true,
+            fromLocation: true,
+            toLocation: true,
+            movedAt: true,
+            reason: true,
+          },
         },
       },
-      healthNotes: {
-        where: { cageId: { not: null } },
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          note: true,
-          severity: true,
-          resolved: true,
-          createdAt: true,
-        },
-      },
-    },
-  });
+    }),
+    getCageMoveOptions(),
+  ]);
 
   if (!cage) {
     return null;
@@ -376,6 +471,11 @@ export async function getScanCageViewByBarcode(barcode: string) {
       cageNumber: cage.cageNumber,
       roomNumber: cage.room.roomNumber,
       rackNumber: cage.rack.rackNumber,
+      currentLocationLabel: buildLocationLabel({
+        roomNumber: cage.room.roomNumber,
+        rackNumber: cage.rack.rackNumber,
+        cageNumber: cage.cageNumber,
+      }),
     },
     occupants: cage.animals.map((animal) => ({
       id: animal.id,
@@ -389,6 +489,21 @@ export async function getScanCageViewByBarcode(barcode: string) {
       note: note.note,
       createdAt: note.createdAt.toISOString(),
     })),
+    movementHistory: cage.cageMovements.map((movement) => ({
+      id: movement.id,
+      fromLocation: movement.fromLocation,
+      toLocation: movement.toLocation,
+      movedAt: movement.movedAt.toISOString(),
+      reason: movement.reason ?? "No reason recorded.",
+    })),
+    moveForm: {
+      defaultDate: rules.today.slice(0, 10),
+      defaultRoomId: cage.roomId,
+      defaultRackId: cage.rackId,
+      defaultCageNumber: cage.cageNumber,
+      roomOptions: moveOptions.roomOptions,
+      rackOptions: moveOptions.rackOptions,
+    },
     alerts,
   };
 }

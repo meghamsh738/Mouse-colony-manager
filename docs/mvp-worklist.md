@@ -15,10 +15,10 @@ This checklist tracks the remaining operational workflows needed to close the MV
 - [x] Manual genotype entry from animal detail
 - [x] Batch genotype import for vendor or CSV uploads
 - [x] Animal lifecycle status change UI for euthanasia, death, transfer, and archive
+- [x] Cage movement workflow with movement history entry
 
 ## Next
 
-- [ ] Cage movement workflow with movement history entry
 - [ ] Rule settings write UI for admin-editable thresholds
 - [ ] Export polish for more filtered operational views
 

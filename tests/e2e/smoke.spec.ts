@@ -19,6 +19,10 @@ function projectSeed(projectName: string) {
     reservationAnimalId: isMobile ? "animal-012" : "animal-014",
     lifecycleAnimalId: isMobile ? "animal-014" : "animal-013",
     lifecycleAnimalCode: isMobile ? "CM-26014" : "CM-26013",
+    moveRoomId: isMobile ? "room-a102" : "room-a101",
+    moveRackId: isMobile ? "rack-a102-1" : "rack-a101-2",
+    moveCageNumber: "006",
+    moveLocationLabel: isMobile ? "A102 / R1 / 006" : "A101 / R2 / 006",
     noteSuffix: isMobile ? "mobile" : "desktop",
     genotypeAlleleId: isMobile ? "allele-tdt" : "allele-creer",
     genotypeExpect: isMobile ? "tdTomato +/-" : "CreER +/-",
@@ -106,6 +110,30 @@ test("animal staff can browse cage list and open cage detail", async ({ page }) 
   await expect(page.getByText("CM-A101-003").first()).toBeVisible();
   await expect(page.getByText("CM-26003")).toBeVisible();
   await expect(page.getByRole("link", { name: "Open mobile scan view" })).toBeVisible();
+});
+
+test("animal staff can move a cage from the scan workspace and review the history entry", async ({ page }, testInfo) => {
+  const seed = projectSeed(testInfo.project.name);
+  const moveReason = `Relocated during ${seed.noteSuffix} monitoring sweep.`;
+
+  await signInAs(page, "staff");
+  await page.goto("/scan/CM-A102-004");
+
+  await page.getByTestId("cage-move-room").selectOption(seed.moveRoomId);
+  await page.getByTestId("cage-move-rack").selectOption(seed.moveRackId);
+  await page.getByTestId("cage-move-number").fill(seed.moveCageNumber);
+  await page.getByTestId("cage-move-date").fill("2026-04-09");
+  await page.getByTestId("cage-move-reason").fill(moveReason);
+  await submitAfterBlur(page, "cage-move-submit");
+
+  await expect(page.getByRole("heading", { name: seed.moveLocationLabel })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(seed.moveLocationLabel).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(moveReason).first()).toBeVisible({ timeout: 30_000 });
+
+  await page.goto("/cages/cage-a102-004");
+  await expect(page).toHaveURL(/\/cages\/cage-a102-004$/);
+  await expect(page.getByText(seed.moveLocationLabel).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(moveReason).first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("researcher can review experiment overview and candidate helper", async ({ page }) => {
