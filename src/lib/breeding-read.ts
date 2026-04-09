@@ -234,3 +234,46 @@ export async function getBreedingSuggestionSummaryView(): Promise<BreedingSugges
     probabilityLabel: formatPercent(suggestion.expectedGenotypeProbability),
   }));
 }
+
+export async function getBreedingSetupOptionsView() {
+  const referenceDate = getReferenceDate();
+  const animals = await prisma.animal.findMany({
+    where: {
+      outcomeStatus: "alive",
+      sex: { in: ["male", "female"] },
+      currentCageId: { not: null },
+    },
+    orderBy: [{ sex: "asc" }, { animalId: "asc" }],
+    include: {
+      currentCage: {
+        include: {
+          room: { select: { roomNumber: true } },
+          rack: { select: { rackNumber: true } },
+        },
+      },
+    },
+  });
+
+  const formatOptionLabel = (animal: (typeof animals)[number]) =>
+    [
+      animal.animalId,
+      formatAgeLabel(getAgeDays(animal.dob, referenceDate)),
+      animal.status.replaceAll("_", " "),
+      animal.currentCage ? `${animal.currentCage.room.roomNumber} / ${animal.currentCage.rack.rackNumber} / ${animal.currentCage.cageNumber}` : "Archived",
+    ].join(" · ");
+
+  return {
+    sireOptions: animals
+      .filter((animal) => animal.sex === "male")
+      .map((animal) => ({
+        id: animal.id,
+        label: formatOptionLabel(animal),
+      })),
+    damOptions: animals
+      .filter((animal) => animal.sex === "female")
+      .map((animal) => ({
+        id: animal.id,
+        label: formatOptionLabel(animal),
+      })),
+  };
+}

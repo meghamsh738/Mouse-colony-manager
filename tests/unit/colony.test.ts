@@ -11,7 +11,12 @@ import {
 } from "@/lib/dashboard-read";
 import { buildCsvExport } from "@/lib/export-csv";
 import { getExperimentCandidateView, getExperimentOverviewView } from "@/lib/experiments-read";
-import { addCageHealthNote, createAnimalRecord, reserveAnimalForExperiment } from "@/lib/colony-write";
+import {
+  addCageHealthNote,
+  createAnimalRecord,
+  createBreedingSetup,
+  reserveAnimalForExperiment,
+} from "@/lib/colony-write";
 import { getRecentAuditLogsView, getRuleSummaryView } from "@/lib/settings-read";
 import { seedDatabase } from "../../prisma/seed";
 
@@ -116,6 +121,48 @@ describe("colony logic", () => {
     expect(allowed.ok).toBe(true);
     const animal = await getAnimalDetailView("animal-004");
     expect(animal?.assignments.some((assignment) => assignment.experimentCode === "EXP-LPS-005")).toBe(true);
+  });
+
+  it("blocks underage breeder pairings without creating a setup", async () => {
+    const beforeCount = (await getBreedingOverviewView()).length;
+    const result = await createBreedingSetup(
+      {
+        sireId: "animal-004",
+        damId: "animal-014",
+        startDate: "2026-04-08",
+        targetGenotype: "CreER ; tdTomato",
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(result.ok).toBe(false);
+    const overview = await getBreedingOverviewView();
+    expect(overview.length).toBe(beforeCount);
+  });
+
+  it("creates a breeding setup with admin override and updates breeder state", async () => {
+    const result = await createBreedingSetup(
+      {
+        sireId: "animal-008",
+        damId: "animal-009",
+        startDate: "2026-04-08",
+        targetGenotype: "CreER maintenance verification",
+        notes: "Override duplicate breeder safeguard for migration test.",
+        allowOverride: true,
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(result.ok).toBe(true);
+
+    const overview = await getBreedingOverviewView();
+    expect(overview.some((breeding) => breeding.targetGenotype === "CreER maintenance verification")).toBe(true);
+
+    const animals = await getAnimalListView();
+    expect(animals.find((animal) => animal.id === "animal-009")?.status).toBe("breeding");
+
+    const cage = await getCageDetailView("cage-a102-005");
+    expect(cage?.cage.status).toBe("breeding");
   });
 
   it("builds animal csv exports directly from Prisma data", async () => {

@@ -40,6 +40,16 @@ type ReserveAnimalInput = {
   notes?: string;
 };
 
+type CreateBreedingSetupInput = {
+  sireId: string;
+  damId: string;
+  startDate: string;
+  targetGenotype: string;
+  targetSex?: Sex;
+  notes?: string;
+  allowOverride?: boolean;
+};
+
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -54,6 +64,14 @@ function canCreateHealthNote(role: UserRole) {
 
 function canReserveAnimal(role: UserRole) {
   return role === "admin" || role === "colony_manager" || role === "researcher";
+}
+
+function canCreateBreeding(role: UserRole) {
+  return role !== "read_only";
+}
+
+function getReferenceDate() {
+  return process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString();
 }
 
 export async function createAnimalRecord(
@@ -477,5 +495,218 @@ export async function reserveAnimalForExperiment(
     ok: true,
     message: `${animal.animalId} reserved for ${experiment.experimentCode}.`,
     entityId: assignmentId,
+  };
+}
+
+export async function createBreedingSetup(
+  input: CreateBreedingSetupInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canCreateBreeding(actor.role)) {
+    return { ok: false, message: "Your role cannot create breeding setups." };
+  }
+
+  if (input.allowOverride && actor.role !== "admin") {
+    return { ok: false, message: "Only admins can override duplicate breeding safeguards." };
+  }
+
+  if (input.sireId === input.damId) {
+    return { ok: false, message: "Choose two different animals for the breeding setup." };
+  }
+
+  const [sire, dam, minAgeRule] = await prisma.$transaction([
+    prisma.animal.findUnique({
+      where: { id: input.sireId },
+      include: {
+        breedingAdults: {
+          where: {
+            breedingSetup: {
+              status: { in: ["planned", "active", "paused"] },
+            },
+          },
+          select: { id: true },
+        },
+      },
+    }),
+    prisma.animal.findUnique({
+      where: { id: input.damId },
+      include: {
+        breedingAdults: {
+          where: {
+            breedingSetup: {
+              status: { in: ["planned", "active", "paused"] },
+            },
+          },
+          select: { id: true },
+        },
+      },
+    }),
+    prisma.ruleConfig.findUnique({
+      where: { key: "breeder_min_age_days" },
+      select: { value: true },
+    }),
+  ]);
+
+  if (!sire || sire.outcomeStatus !== "alive") {
+    return { ok: false, message: "Choose a live sire for the breeding setup." };
+  }
+
+  if (!dam || dam.outcomeStatus !== "alive") {
+    return { ok: false, message: "Choose a live dam for the breeding setup." };
+  }
+
+  if (sire.sex !== "male") {
+    return { ok: false, message: `${sire.animalId} is not marked as a male breeder.` };
+  }
+
+  if (dam.sex !== "female") {
+    return { ok: false, message: `${dam.animalId} is not marked as a female breeder.` };
+  }
+
+  if (!sire.currentCageId || !dam.currentCageId) {
+    return { ok: false, message: "Both breeders need an active cage assignment before starting breeding." };
+  }
+
+  const blockedStatuses = new Set([
+    "in_experiment",
+    "experiment_completed",
+    "archived",
+    "dead",
+    "euthanized",
+    "transferred_out",
+  ]);
+
+  if (blockedStatuses.has(sire.status)) {
+    return { ok: false, message: `${sire.animalId} cannot enter breeding from its current lifecycle state.` };
+  }
+
+  if (blockedStatuses.has(dam.status)) {
+    return { ok: false, message: `${dam.animalId} cannot enter breeding from its current lifecycle state.` };
+  }
+
+  if (!input.allowOverride) {
+    if (sire.status === "breeding" || sire.breedingAdults.length > 0) {
+      return { ok: false, message: `${sire.animalId} is already in an active breeding setup.` };
+    }
+
+    if (dam.status === "breeding" || dam.breedingAdults.length > 0) {
+      return { ok: false, message: `${dam.animalId} is already in an active breeding setup.` };
+    }
+  }
+
+  const breederMinAgeDays = Number(minAgeRule?.value ?? 0);
+  const referenceDate = new Date(getReferenceDate());
+  const sireAgeDays = Math.floor((referenceDate.getTime() - sire.dob.getTime()) / 86_400_000);
+  const damAgeDays = Math.floor((referenceDate.getTime() - dam.dob.getTime()) / 86_400_000);
+
+  if (sireAgeDays < breederMinAgeDays) {
+    return {
+      ok: false,
+      message: `${sire.animalId} is not yet old enough for breeding under the configured threshold.`,
+    };
+  }
+
+  if (damAgeDays < breederMinAgeDays) {
+    return {
+      ok: false,
+      message: `${dam.animalId} is not yet old enough for breeding under the configured threshold.`,
+    };
+  }
+
+  const timestamp = new Date();
+  const breedingId = createId("breeding");
+  const targetSex = input.targetSex && input.targetSex !== "unknown" ? input.targetSex : null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.breedingSetup.create({
+      data: {
+        id: breedingId,
+        startDate: new Date(input.startDate),
+        status: "active",
+        targetGenotype: input.targetGenotype.trim(),
+        targetSex,
+        notes: input.notes?.trim() || undefined,
+      },
+    });
+
+    await tx.breedingAdult.createMany({
+      data: [
+        { id: createId("breeding-adult"), breedingSetupId: breedingId, animalId: sire.id, role: "sire" },
+        { id: createId("breeding-adult"), breedingSetupId: breedingId, animalId: dam.id, role: "dam" },
+      ],
+    });
+
+    if (sire.status !== "breeding") {
+      await tx.animal.update({
+        where: { id: sire.id },
+        data: { status: "breeding" },
+      });
+
+      await tx.animalStatusEvent.create({
+        data: {
+          id: createId("status"),
+          animalId: sire.id,
+          fromStatus: sire.status,
+          toStatus: "breeding",
+          happenedAt: timestamp,
+          actorId: actor.id,
+          reason: `Assigned to breeding setup ${breedingId}.`,
+        },
+      });
+    }
+
+    if (dam.status !== "breeding") {
+      await tx.animal.update({
+        where: { id: dam.id },
+        data: { status: "breeding" },
+      });
+
+      await tx.animalStatusEvent.create({
+        data: {
+          id: createId("status"),
+          animalId: dam.id,
+          fromStatus: dam.status,
+          toStatus: "breeding",
+          happenedAt: timestamp,
+          actorId: actor.id,
+          reason: `Assigned to breeding setup ${breedingId}.`,
+        },
+      });
+    }
+
+    if (sire.currentCageId && sire.currentCageId === dam.currentCageId) {
+      await tx.cage.update({
+        where: { id: sire.currentCageId },
+        data: {
+          status: "breeding",
+          lastUpdatedAt: timestamp,
+        },
+      });
+    }
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "breeding_setup",
+        entityId: breedingId,
+        action: "create",
+        newValue: {
+          sireId: sire.id,
+          damId: dam.id,
+          startDate: input.startDate,
+          targetGenotype: input.targetGenotype.trim(),
+          targetSex,
+          allowOverride: Boolean(input.allowOverride),
+        },
+        timestamp,
+      },
+    });
+  });
+
+  return {
+    ok: true,
+    message: `Breeding setup created for ${sire.animalId} and ${dam.animalId}.`,
+    entityId: breedingId,
   };
 }

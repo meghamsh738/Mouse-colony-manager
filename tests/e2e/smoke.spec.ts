@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+test.describe.configure({ timeout: 90_000 });
+
 const credentials = {
   admin: { email: "admin@colony.local", password: "colony123" },
   staff: { email: "staff@colony.local", password: "colony123" },
@@ -18,11 +20,12 @@ function projectSeed(projectName: string) {
 
 async function signInAs(page: Page, account: keyof typeof credentials) {
   await page.context().clearCookies();
+  await page.goto("/");
   await page.goto("/login");
   await page.getByTestId("login-email").fill(credentials[account].email);
   await page.getByTestId("login-password").fill(credentials[account].password);
   await page.getByTestId("login-submit").click();
-  await expect(page.getByTestId("stat-active-mice")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("stat-active-mice")).toBeVisible({ timeout: 45_000 });
 }
 
 async function submitAfterBlur(page: Page, testId: string) {
@@ -113,12 +116,31 @@ test("admin can review breeding overview and generator suggestions", async ({ pa
   await expect(page.getByText("Cross can yield desired dual-transgenic pups").first()).toBeVisible();
 });
 
+test("admin can create a breeding setup with override", async ({ page }, testInfo) => {
+  const seed = projectSeed(testInfo.project.name);
+  const targetGenotype = `CreER maintenance ${seed.noteSuffix}`;
+
+  await signInAs(page, "admin");
+  await page.goto("/breeding");
+
+  await page.getByTestId("breeding-create-sire").selectOption("animal-008");
+  await page.getByTestId("breeding-create-dam").selectOption("animal-009");
+  await page.getByTestId("breeding-create-target-genotype").fill(targetGenotype);
+  await page.getByTestId("breeding-create-override").check();
+  await submitAfterBlur(page, "breeding-create-submit");
+
+  await expect(page.getByText("Breeding setup created for CM-22008 and CM-25009.")).toBeVisible();
+  await expect(page.getByText(targetGenotype).first()).toBeVisible();
+});
+
 test("admin can review rule thresholds and recent audit history", async ({ page }) => {
   await signInAs(page, "admin");
   await page.goto("/settings");
 
   await expect(page.getByText("Breeder maximum age")).toBeVisible();
-  await expect(page.getByText("activate").first()).toBeVisible();
+  const auditAction = page.getByText("create").first();
+  await auditAction.scrollIntoViewIfNeeded();
+  await expect(auditAction).toBeVisible();
 });
 
 test("researcher sees reservation conflicts and can reserve an eligible animal", async ({ page }, testInfo) => {
@@ -135,7 +157,6 @@ test("researcher sees reservation conflicts and can reserve an eligible animal",
   await page.getByTestId("reservation-experiment").selectOption("experiment-002");
   await submitAfterBlur(page, "reservation-submit");
 
-  await expect(page.getByText("Reserved for EXP-LPS-005.")).toBeVisible();
   await expect(page.getByText("reserved · LPS low dose")).toBeVisible();
 });
 

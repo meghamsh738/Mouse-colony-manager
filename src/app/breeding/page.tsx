@@ -1,16 +1,24 @@
 import { AppShell } from "@/components/app/app-shell";
+import { BreedingSetupForm } from "@/components/app/breeding-setup-form";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
-import { getBreedingOverviewView, getBreedingSuggestionSummaryView } from "@/lib/breeding-read";
+import {
+  getBreedingOverviewView,
+  getBreedingSetupOptionsView,
+  getBreedingSuggestionSummaryView,
+} from "@/lib/breeding-read";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
 export default async function BreedingPage() {
   const user = await requireUser();
-  const [breedings, suggestions] = await Promise.all([
+  const [breedings, suggestions, options] = await Promise.all([
     getBreedingOverviewView(),
     getBreedingSuggestionSummaryView(),
+    getBreedingSetupOptionsView(),
   ]);
+  const canCreateBreeding = user.role !== "read_only";
+  const canOverride = user.role === "admin";
 
   return (
     <AppShell currentPath="/breeding" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
@@ -20,7 +28,26 @@ export default async function BreedingPage() {
           title="Active breeding setups and suggested crosses."
           description="Use this area to review active pairs, overdue breedings, litter status, and ranked cross suggestions for the next cohort."
         />
-        <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
+          <Surface className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Create setup</p>
+              <p className="text-sm leading-6 text-[var(--muted)]">
+                Start a new sire and dam pairing from live colony animals. Duplicate breeder safeguards stay on unless an admin explicitly overrides them.
+              </p>
+            </div>
+            {canCreateBreeding ? (
+              <BreedingSetupForm
+                sireOptions={options.sireOptions}
+                damOptions={options.damOptions}
+                allowOverride={canOverride}
+              />
+            ) : (
+              <p className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--muted)]">
+                Read-only users can review breeding state here, but cannot create new setups.
+              </p>
+            )}
+          </Surface>
           <Surface className="space-y-4">
             <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Active breeding dashboard</p>
             <div className="space-y-3">
@@ -44,7 +71,8 @@ export default async function BreedingPage() {
               ))}
             </div>
           </Surface>
-          <Surface className="space-y-4">
+        </div>
+        <Surface className="space-y-4">
             <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Generator suggestions</p>
             <div className="space-y-3">
               {suggestions.map((suggestion) => (
@@ -63,8 +91,7 @@ export default async function BreedingPage() {
                 </article>
               ))}
             </div>
-          </Surface>
-        </div>
+        </Surface>
       </div>
     </AppShell>
   );
