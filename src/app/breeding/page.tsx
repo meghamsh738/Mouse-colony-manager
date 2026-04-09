@@ -1,22 +1,25 @@
 import { AppShell } from "@/components/app/app-shell";
 import { BreedingLitterForm } from "@/components/app/breeding-litter-form";
 import { BreedingSetupForm } from "@/components/app/breeding-setup-form";
+import { BreedingWeanForm } from "@/components/app/breeding-wean-form";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
 import {
   getBreedingOverviewView,
   getBreedingSetupOptionsView,
   getBreedingSuggestionSummaryView,
+  getBreedingWeaningOptionsView,
 } from "@/lib/breeding-read";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
 export default async function BreedingPage() {
   const user = await requireUser();
-  const [breedings, suggestions, options] = await Promise.all([
+  const [breedings, suggestions, options, weaningOptions] = await Promise.all([
     getBreedingOverviewView(),
     getBreedingSuggestionSummaryView(),
     getBreedingSetupOptionsView(),
+    getBreedingWeaningOptionsView(),
   ]);
   const canCreateBreeding = user.role !== "read_only";
   const canOverride = user.role === "admin";
@@ -73,6 +76,8 @@ export default async function BreedingPage() {
                         {breeding.litter.id} born {formatDate(breeding.litter.birthDate)}
                       </p>
                       <p>{breeding.litter.litterSizeBirth} pups recorded at birth</p>
+                      {breeding.litter.litterSizeWean !== undefined ? <p>{breeding.litter.litterSizeWean} pups weaned</p> : null}
+                      <p>{breeding.litter.progenyCount} progeny linked</p>
                       {breeding.litter.notes ? <p>{breeding.litter.notes}</p> : null}
                     </div>
                   ) : (
@@ -87,6 +92,29 @@ export default async function BreedingPage() {
                         </p>
                       </div>
                       <BreedingLitterForm breedingSetupId={breeding.id} defaultBirthDate={defaultBirthDate} />
+                    </div>
+                  ) : null}
+                  {canRecordLitter && breeding.litter && breeding.litter.litterSizeWean === undefined && breeding.litter.progenyCount === 0 ? (
+                    <div className="mt-4 border-t border-[var(--line)] pt-4">
+                      <div className="mb-3 space-y-1">
+                        <p className="text-xs uppercase tracking-[0.16em] text-[var(--muted)]">Wean and assign progeny</p>
+                        <p className="text-sm text-[var(--muted)]">
+                          Split the litter into male and female holding cages, then generate traceable pup records in one step.
+                        </p>
+                      </div>
+                      <BreedingWeanForm
+                        litterId={breeding.litter.id}
+                        defaultWeanDate={new Date(new Date(breeding.litter.birthDate).getTime() + 21 * 86_400_000)
+                          .toISOString()
+                          .slice(0, 10)}
+                        cageOptions={weaningOptions.cageOptions}
+                        strainOptions={weaningOptions.strainOptions}
+                      />
+                    </div>
+                  ) : null}
+                  {breeding.litter && breeding.litter.litterSizeWean === undefined && breeding.litter.progenyCount > 0 ? (
+                    <div className="mt-4 rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--muted)]">
+                      Progeny records already exist for this litter. Review those pups from the colony table instead of creating a second weaning batch.
                     </div>
                   ) : null}
                 </article>

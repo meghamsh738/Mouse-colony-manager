@@ -17,6 +17,7 @@ import {
   createBreedingSetup,
   recordBreedingLitter,
   reserveAnimalForExperiment,
+  weanLitterToCages,
 } from "@/lib/colony-write";
 import { getRecentAuditLogsView, getRuleSummaryView } from "@/lib/settings-read";
 import { seedDatabase } from "../../prisma/seed";
@@ -204,6 +205,74 @@ describe("colony logic", () => {
     const highlights = await getDashboardHighlightsView();
     expect(highlights.upcomingWean.some((item) => item.breedingId === setup.entityId)).toBe(true);
   });
+
+  it("weans a recorded litter into holding cages and creates linked progeny", async () => {
+    const setup = await createBreedingSetup(
+      {
+        sireId: "animal-008",
+        damId: "animal-009",
+        startDate: "2026-04-08",
+        targetGenotype: "Weaning verification",
+        notes: "Create setup before full litter lifecycle test.",
+        allowOverride: true,
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(setup.ok).toBe(true);
+    if (!setup.ok || !setup.entityId) {
+      throw new Error("Expected breeding setup creation to return an entity id.");
+    }
+
+    const litter = await recordBreedingLitter(
+      {
+        breedingSetupId: setup.entityId,
+        birthDate: "2026-04-10",
+        litterSizeBirth: 6,
+        notes: "Observed and ready for weaning assignment.",
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(litter.ok).toBe(true);
+    if (!litter.ok || !litter.entityId) {
+      throw new Error("Expected litter creation to return an entity id.");
+    }
+
+    const beforeAnimals = await getAnimalListView();
+    const beforeMaleCage = await getCageDetailView("cage-a101-002");
+    const beforeFemaleCage = await getCageDetailView("cage-a101-003");
+
+    const result = await weanLitterToCages(
+      {
+        litterId: litter.entityId,
+        weanDate: "2026-05-01",
+        femaleCount: 2,
+        maleCount: 3,
+        femaleCageId: "cage-a101-003",
+        maleCageId: "cage-a101-002",
+        strainId: "strain-creer-tdt",
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(result.ok).toBe(true);
+
+    const afterAnimals = await getAnimalListView();
+    const afterMaleCage = await getCageDetailView("cage-a101-002");
+    const afterFemaleCage = await getCageDetailView("cage-a101-003");
+    const overview = await getBreedingOverviewView();
+    const highlights = await getDashboardHighlightsView();
+    const breeding = overview.find((item) => item.id === setup.entityId);
+
+    expect(afterAnimals.length).toBe(beforeAnimals.length + 5);
+    expect(afterAnimals.filter((animal) => animal.status === "weaned").length).toBeGreaterThan(0);
+    expect(afterMaleCage?.occupants.length).toBe((beforeMaleCage?.occupants.length ?? 0) + 3);
+    expect(afterFemaleCage?.occupants.length).toBe((beforeFemaleCage?.occupants.length ?? 0) + 2);
+    expect(breeding?.litter?.litterSizeWean).toBe(5);
+    expect(breeding?.litter?.progenyCount).toBe(5);
+    expect(highlights.upcomingWean.some((item) => item.breedingId === setup.entityId)).toBe(false);
+  }, 20_000);
 
   it("builds animal csv exports directly from Prisma data", async () => {
     const csv = await buildCsvExport("animals");

@@ -57,6 +57,16 @@ type CreateLitterInput = {
   notes?: string;
 };
 
+type WeanLitterInput = {
+  litterId: string;
+  weanDate: string;
+  femaleCount: number;
+  maleCount: number;
+  femaleCageId?: string;
+  maleCageId?: string;
+  strainId: string;
+};
+
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -81,8 +91,48 @@ function canRecordLitter(role: UserRole) {
   return role !== "read_only";
 }
 
+function canWeanLitter(role: UserRole) {
+  return role !== "read_only";
+}
+
 function getReferenceDate() {
   return process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString();
+}
+
+function parseYearlyAnimalSequence(animalId: string, yearPrefix: string) {
+  const match = animalId.match(new RegExp(`^CM-${yearPrefix}(\\d{3})$`));
+
+  return match ? Number(match[1]) : null;
+}
+
+function parseYearlyLabSequence(labId: string, year: number) {
+  const match = labId.match(new RegExp(`^MC-${year}-(\\d{3})$`));
+
+  return match ? Number(match[1]) : null;
+}
+
+function buildNextAnimalIdentifiers(
+  existingAnimals: Array<{ animalId: string; labId: string }>,
+  year: number,
+  count: number,
+) {
+  const yearPrefix = String(year).slice(-2);
+  let nextSequence =
+    existingAnimals.reduce((max, animal) => {
+      const animalSequence = parseYearlyAnimalSequence(animal.animalId, yearPrefix);
+      const labSequence = parseYearlyLabSequence(animal.labId, year);
+
+      return Math.max(max, animalSequence ?? 0, labSequence ?? 0);
+    }, 0) + 1;
+
+  return Array.from({ length: count }, () => {
+    const currentSequence = nextSequence++;
+
+    return {
+      animalId: `CM-${yearPrefix}${String(currentSequence).padStart(3, "0")}`,
+      labId: `MC-${year}-${String(currentSequence).padStart(3, "0")}`,
+    };
+  });
 }
 
 export async function createAnimalRecord(
@@ -828,5 +878,251 @@ export async function recordBreedingLitter(
     ok: true,
     message: `Litter recorded for ${breeding.id}.`,
     entityId: litterId,
+  };
+}
+
+export async function weanLitterToCages(
+  input: WeanLitterInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canWeanLitter(actor.role)) {
+    return { ok: false, message: "Your role cannot record litter weaning." };
+  }
+
+  const totalWeaned = input.femaleCount + input.maleCount;
+
+  if (totalWeaned <= 0) {
+    return { ok: false, message: "Enter at least one male or female pup for weaning." };
+  }
+
+  if (input.femaleCount > 0 && !input.femaleCageId) {
+    return { ok: false, message: "Choose a female cage before assigning female pups." };
+  }
+
+  if (input.maleCount > 0 && !input.maleCageId) {
+    return { ok: false, message: "Choose a male cage before assigning male pups." };
+  }
+
+  if (input.femaleCount > 0 && input.maleCount > 0 && input.femaleCageId === input.maleCageId) {
+    return { ok: false, message: "Assign male and female pups into separate cages at weaning." };
+  }
+
+  const normalizedWeanDate = new Date(input.weanDate);
+
+  if (Number.isNaN(normalizedWeanDate.getTime())) {
+    return { ok: false, message: "Choose a valid weaning date." };
+  }
+
+  const [litter, strain, femaleCage, maleCage, existingAnimals] = await Promise.all([
+    prisma.litter.findUnique({
+      where: { id: input.litterId },
+      select: {
+        id: true,
+        birthDate: true,
+        litterSizeBirth: true,
+        litterSizeWean: true,
+        breedingSetupId: true,
+        breedingSetup: {
+          select: {
+            id: true,
+            adults: {
+              orderBy: [{ role: "asc" }, { id: "asc" }],
+              select: {
+                role: true,
+                animal: {
+                  select: {
+                    id: true,
+                    animalId: true,
+                    projectSummary: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        litterAnimals: {
+          select: {
+            id: true,
+          },
+        },
+      },
+    }),
+    prisma.strain.findUnique({
+      where: { id: input.strainId },
+      select: { id: true, name: true },
+    }),
+    input.femaleCageId
+      ? prisma.cage.findUnique({
+          where: { id: input.femaleCageId },
+          select: { id: true, status: true, active: true, barcode: true },
+        })
+      : Promise.resolve(null),
+    input.maleCageId
+      ? prisma.cage.findUnique({
+          where: { id: input.maleCageId },
+          select: { id: true, status: true, active: true, barcode: true },
+        })
+      : Promise.resolve(null),
+    prisma.animal.findMany({
+      select: {
+        animalId: true,
+        labId: true,
+      },
+    }),
+  ]);
+
+  if (!litter) {
+    return { ok: false, message: "Litter not found." };
+  }
+
+  if (!strain) {
+    return { ok: false, message: "Choose a valid strain for the weaned progeny." };
+  }
+
+  if (normalizedWeanDate.getTime() < litter.birthDate.getTime()) {
+    return { ok: false, message: "Weaning date cannot be earlier than the litter birth date." };
+  }
+
+  if (totalWeaned > litter.litterSizeBirth) {
+    return { ok: false, message: "Weaning count cannot exceed the recorded litter size at birth." };
+  }
+
+  if (litter.litterSizeWean !== null) {
+    return { ok: false, message: "This litter already has a recorded weaning outcome." };
+  }
+
+  if (litter.litterAnimals.length > 0) {
+    return {
+      ok: false,
+      message: "This litter already has linked progeny records. Review those pups from the colony table instead of creating a second weaning batch.",
+    };
+  }
+
+  const blockedCageStatuses = new Set(["closed", "retired"]);
+
+  if (input.femaleCount > 0 && (!femaleCage || !femaleCage.active || blockedCageStatuses.has(femaleCage.status))) {
+    return { ok: false, message: "Choose an active female holding cage for the weaned litter." };
+  }
+
+  if (input.maleCount > 0 && (!maleCage || !maleCage.active || blockedCageStatuses.has(maleCage.status))) {
+    return { ok: false, message: "Choose an active male holding cage for the weaned litter." };
+  }
+
+  const year = litter.birthDate.getUTCFullYear();
+  const identifiers = buildNextAnimalIdentifiers(existingAnimals, year, totalWeaned);
+  const sire = litter.breedingSetup.adults.find((adult) => adult.role === "sire")?.animal ?? null;
+  const dam = litter.breedingSetup.adults.find((adult) => adult.role === "dam")?.animal ?? null;
+  const projectSummaryCandidates = new Set(
+    litter.breedingSetup.adults
+      .map((adult) => adult.animal?.projectSummary ?? null)
+      .filter((value): value is string => Boolean(value)),
+  );
+  const inheritedProjectSummary = projectSummaryCandidates.size === 1 ? [...projectSummaryCandidates][0] : undefined;
+  const timestamp = new Date();
+  const animalsToCreate = [
+    ...Array.from({ length: input.femaleCount }, (_, index) => ({
+      id: createId("animal"),
+      sex: "female" as const,
+      currentCageId: input.femaleCageId!,
+      identifiers: identifiers[index],
+    })),
+    ...Array.from({ length: input.maleCount }, (_, index) => ({
+      id: createId("animal"),
+      sex: "male" as const,
+      currentCageId: input.maleCageId!,
+      identifiers: identifiers[input.femaleCount + index],
+    })),
+  ];
+
+  await prisma.$transaction(async (tx) => {
+    await tx.animal.createMany({
+      data: animalsToCreate.map((animal) => ({
+        id: animal.id,
+        animalId: animal.identifiers.animalId,
+        labId: animal.identifiers.labId,
+        sex: animal.sex,
+        dob: litter.birthDate,
+        strainId: strain.id,
+        currentCageId: animal.currentCageId,
+        status: "weaned",
+        originType: `litter ${litter.id}`,
+        sireId: sire?.id,
+        damId: dam?.id,
+        healthStatus: "Healthy",
+        projectSummary: inheritedProjectSummary,
+        experimentalStatus: "Awaiting genotype",
+        outcomeStatus: "alive",
+        notes: `Created during weaning from ${litter.id}.`,
+      })),
+    });
+
+    await tx.litterAnimal.createMany({
+      data: animalsToCreate.map((animal) => ({
+        id: createId("litter-animal"),
+        litterId: litter.id,
+        animalId: animal.id,
+      })),
+    });
+
+    await tx.animalStatusEvent.createMany({
+      data: animalsToCreate.map((animal) => ({
+        id: createId("status"),
+        animalId: animal.id,
+        toStatus: "weaned",
+        happenedAt: normalizedWeanDate,
+        actorId: actor.id,
+        reason: `Weaned from ${litter.id} into cage ${animal.currentCageId}.`,
+      })),
+    });
+
+    await tx.litter.update({
+      where: { id: litter.id },
+      data: {
+        litterSizeWean: totalWeaned,
+      },
+    });
+
+    const cageIds = [input.femaleCageId, input.maleCageId].filter((value): value is string => Boolean(value));
+
+    if (cageIds.length > 0) {
+      await tx.cage.updateMany({
+        where: {
+          id: { in: cageIds },
+        },
+        data: {
+          lastUpdatedAt: timestamp,
+        },
+      });
+    }
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "litter",
+        entityId: litter.id,
+        action: "wean",
+        previousValue: {
+          litterSizeWean: litter.litterSizeWean,
+          progenyCount: litter.litterAnimals.length,
+        },
+        newValue: {
+          litterSizeWean: totalWeaned,
+          femaleCount: input.femaleCount,
+          maleCount: input.maleCount,
+          femaleCageId: input.femaleCageId,
+          maleCageId: input.maleCageId,
+          strainId: strain.id,
+          weanDate: input.weanDate,
+        },
+        timestamp,
+      },
+    });
+  });
+
+  return {
+    ok: true,
+    message: `${totalWeaned} pups weaned from ${litter.id} and assigned to holding cages.`,
+    entityId: litter.id,
   };
 }

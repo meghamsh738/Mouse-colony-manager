@@ -30,6 +30,7 @@ type BreedingOverviewItem = {
         litterSizeBirth: number;
         litterSizeWean?: number;
         notes?: string;
+        progenyCount: number;
       }
     | null;
   ageDays: number;
@@ -115,6 +116,11 @@ export async function getBreedingOverviewView(): Promise<BreedingOverviewItem[]>
           litterSizeBirth: true,
           litterSizeWean: true,
           notes: true,
+          _count: {
+            select: {
+              litterAnimals: true,
+            },
+          },
         },
       },
     },
@@ -140,6 +146,7 @@ export async function getBreedingOverviewView(): Promise<BreedingOverviewItem[]>
             litterSizeBirth: latestLitter.litterSizeBirth,
             litterSizeWean: latestLitter.litterSizeWean ?? undefined,
             notes: latestLitter.notes ?? undefined,
+            progenyCount: latestLitter._count.litterAnimals,
           }
         : null,
       ageDays: differenceInDays(new Date(referenceDate), breeding.startDate),
@@ -278,5 +285,42 @@ export async function getBreedingSetupOptionsView() {
         id: animal.id,
         label: formatOptionLabel(animal),
       })),
+  };
+}
+
+export async function getBreedingWeaningOptionsView() {
+  const [cages, strains] = await prisma.$transaction([
+    prisma.cage.findMany({
+      where: {
+        active: true,
+        status: {
+          notIn: ["closed", "retired"],
+        },
+      },
+      orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
+      include: {
+        room: { select: { roomNumber: true } },
+        rack: { select: { rackNumber: true } },
+      },
+    }),
+    prisma.strain.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        background: true,
+      },
+    }),
+  ]);
+
+  return {
+    cageOptions: cages.map((cage) => ({
+      id: cage.id,
+      label: `${cage.room.roomNumber} / ${cage.rack.rackNumber} / ${cage.cageNumber} · ${cage.barcode}`,
+    })),
+    strainOptions: strains.map((strain) => ({
+      id: strain.id,
+      label: strain.background ? `${strain.name} · ${strain.background}` : strain.name,
+    })),
   };
 }

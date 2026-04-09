@@ -151,7 +151,8 @@ test("admin can record a litter for a newly created breeding setup", async ({ pa
   await submitAfterBlur(page, "breeding-create-submit");
 
   const breedingCard = page.locator('[data-testid^="breeding-card-"]').filter({ hasText: targetGenotype }).first();
-  await expect(breedingCard).toBeVisible();
+  await expect(page.getByText("Breeding setup created for CM-22008 and CM-25009.")).toBeVisible({ timeout: 30_000 });
+  await expect(breedingCard).toBeVisible({ timeout: 30_000 });
 
   await breedingCard.getByTestId("litter-create-birth-date").fill("2026-04-10");
   await breedingCard.getByTestId("litter-create-size").fill("7");
@@ -160,6 +161,39 @@ test("admin can record a litter for a newly created breeding setup", async ({ pa
 
   await expect(breedingCard.getByText("7 pups recorded at birth")).toBeVisible();
   await expect(breedingCard.getByText(litterNote)).toBeVisible();
+});
+
+test("admin can wean a recorded litter and assign progeny cages", async ({ page }, testInfo) => {
+  const seed = projectSeed(testInfo.project.name);
+  const targetGenotype = `Weaning lifecycle ${seed.noteSuffix}`;
+
+  await signInAs(page, "admin");
+  await page.goto("/breeding");
+
+  await page.getByTestId("breeding-create-sire").selectOption("animal-008");
+  await page.getByTestId("breeding-create-dam").selectOption("animal-009");
+  await page.getByTestId("breeding-create-target-genotype").fill(targetGenotype);
+  await page.getByTestId("breeding-create-override").check();
+  await submitAfterBlur(page, "breeding-create-submit");
+
+  const breedingCard = page.locator('[data-testid^="breeding-card-"]').filter({ hasText: targetGenotype }).first();
+  await expect(page.getByText("Breeding setup created for CM-22008 and CM-25009.")).toBeVisible({ timeout: 30_000 });
+  await expect(breedingCard).toBeVisible({ timeout: 30_000 });
+
+  await breedingCard.getByTestId("litter-create-birth-date").fill("2026-04-10");
+  await breedingCard.getByTestId("litter-create-size").fill("6");
+  await submitWithinAfterBlur(page, breedingCard, "litter-create-submit");
+
+  await breedingCard.getByTestId("wean-create-date").fill("2026-05-01");
+  await breedingCard.getByTestId("wean-create-female-count").fill("2");
+  await breedingCard.getByTestId("wean-create-male-count").fill("3");
+  await breedingCard.getByTestId("wean-create-strain").selectOption("strain-creer-tdt");
+  await breedingCard.getByTestId("wean-create-female-cage").selectOption("cage-a101-003");
+  await breedingCard.getByTestId("wean-create-male-cage").selectOption("cage-a101-002");
+  await submitWithinAfterBlur(page, breedingCard, "wean-create-submit");
+
+  await expect(breedingCard.getByText("5 pups weaned")).toBeVisible({ timeout: 30_000 });
+  await expect(breedingCard.getByText("5 progeny linked")).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can review rule thresholds and recent audit history", async ({ page }) => {
