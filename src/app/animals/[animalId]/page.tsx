@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 
 import { AlertFeed } from "@/components/app/alert-feed";
 import { AnimalGenotypingForm } from "@/components/app/animal-genotyping-form";
+import { AnimalLifecycleForm } from "@/components/app/animal-lifecycle-form";
 import { AppShell } from "@/components/app/app-shell";
 import { ExperimentReservationForm } from "@/components/app/experiment-reservation-form";
 import { PageHeader } from "@/components/app/page-header";
@@ -27,6 +28,25 @@ function genotypeStatusVariant(status: "pending" | "provisional" | "confirmed" |
   return "warning";
 }
 
+function getLifecycleActions(
+  status: string,
+  outcomeStatus: string,
+): Array<{ value: "euthanized" | "dead" | "transferred_out" | "archived"; label: string }> {
+  if (status === "archived") {
+    return [];
+  }
+
+  if (outcomeStatus === "alive") {
+    return [
+      { value: "euthanized", label: "Mark euthanized" },
+      { value: "dead", label: "Mark found dead" },
+      { value: "transferred_out", label: "Mark transferred out" },
+    ];
+  }
+
+  return [{ value: "archived", label: "Archive record" }];
+}
+
 export default async function AnimalDetailPage({ params }: { params: Promise<{ animalId: string }> }) {
   const user = await requireUser();
   const { animalId } = await params;
@@ -38,6 +58,8 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
 
   const canReserveAnimal = user.role === "admin" || user.role === "colony_manager" || user.role === "researcher";
   const canRecordGenotype = user.role !== "read_only" && snapshot.canRecordGenotype;
+  const canManageLifecycle = user.role === "admin" || user.role === "colony_manager" || user.role === "animal_staff";
+  const lifecycleActions = getLifecycleActions(snapshot.animal.status, snapshot.animal.outcomeStatus);
 
   return (
     <AppShell currentPath="/animals" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
@@ -72,11 +94,27 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                   <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Experimental status</p>
                   <p className="mt-2">{snapshot.animal.experimentalStatus}</p>
                 </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Outcome</p>
+                  <p className="mt-2">{snapshot.animal.outcomeStatus.replaceAll("_", " ")}</p>
+                </div>
               </div>
               <div className="space-y-2 border-t border-[var(--line)] pt-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Genotype summary</p>
                 <p className="font-mono text-sm text-[var(--muted)]">{snapshot.genotypeSummary}</p>
               </div>
+              {snapshot.animal.outcomeStatus !== "alive" || snapshot.animal.status === "archived" ? (
+                <div className="grid gap-4 border-t border-[var(--line)] pt-4 md:grid-cols-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Disposition date</p>
+                    <p className="mt-2">{snapshot.animal.deathDate ? formatDate(snapshot.animal.deathDate) : "See timeline"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Disposition note</p>
+                    <p className="mt-2">{snapshot.animal.deathReason ?? "Captured in timeline event."}</p>
+                  </div>
+                </div>
+              ) : null}
               <div className="space-y-3 border-t border-[var(--line)] pt-4">
                 <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Effective allele calls</p>
                 {snapshot.effectiveAlleles.length ? (
@@ -173,6 +211,29 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
           </div>
           <div className="space-y-6">
             <AlertFeed alerts={snapshot.alerts} title="Animal alerts" />
+            {canManageLifecycle ? (
+              <Surface className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Lifecycle control</p>
+                  <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
+                    Record terminal disposition without deleting the mouse.
+                  </h2>
+                  <p className="text-sm leading-7 text-[var(--muted)]">
+                    Lifecycle changes remove the animal from active colony views, clear cage occupancy, end open allocations,
+                    and preserve a full status-event trail for audits.
+                  </p>
+                </div>
+                {lifecycleActions.length ? (
+                  <AnimalLifecycleForm
+                    animalId={snapshot.animal.id}
+                    allowedActions={lifecycleActions}
+                    defaultDate={snapshot.defaultLifecycleDate}
+                  />
+                ) : (
+                  <p className="text-sm text-[var(--muted)]">This animal is already archived and cannot move to another lifecycle state.</p>
+                )}
+              </Surface>
+            ) : null}
             {canRecordGenotype ? (
               <Surface className="space-y-4">
                 <div className="space-y-2">

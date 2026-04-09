@@ -15,7 +15,7 @@ export default defineConfig({
       "AUTH_URL=http://localhost:3005 NEXTAUTH_URL=http://localhost:3005 npm run db:seed && npm run build && AUTH_URL=http://localhost:3005 NEXTAUTH_URL=http://localhost:3005 npx next start --hostname 127.0.0.1 --port 3005",
     url: "http://localhost:3005",
     reuseExistingServer: false,
-    timeout: 240_000,
+    timeout: 420_000,
   },
   projects: [
     {

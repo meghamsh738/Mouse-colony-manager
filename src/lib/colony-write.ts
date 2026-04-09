@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { parseGenotypeImportCsv } from "@/lib/genotype-import";
-import type { GenotypeCallStatus, HealthNoteType, Sex, UserRole } from "@/lib/types";
+import type { AnimalStatus, GenotypeCallStatus, HealthNoteType, Sex, UserRole } from "@/lib/types";
 
 type MutationResult =
   | {
@@ -88,6 +88,13 @@ type ImportGenotypeCsvInput = {
   fileName?: string;
 };
 
+type UpdateAnimalLifecycleInput = {
+  animalId: string;
+  targetStatus: Extract<AnimalStatus, "euthanized" | "dead" | "transferred_out" | "archived">;
+  happenedAt: string;
+  reason: string;
+};
+
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -118,6 +125,10 @@ function canWeanLitter(role: UserRole) {
 
 function canRecordGenotype(role: UserRole) {
   return role !== "read_only";
+}
+
+function canUpdateAnimalLifecycle(role: UserRole) {
+  return role === "admin" || role === "colony_manager" || role === "animal_staff";
 }
 
 function getReferenceDate() {
@@ -174,6 +185,32 @@ function buildFinalGenotypeCall(alleleName: string, zygosity: string, status: Ge
 
 function shouldClearPendingGenotypeStatus(experimentalStatus?: string | null) {
   return typeof experimentalStatus === "string" && /awaiting genotype|pending genotype/i.test(experimentalStatus);
+}
+
+function getLifecycleOutcomeStatus(targetStatus: UpdateAnimalLifecycleInput["targetStatus"]) {
+  switch (targetStatus) {
+    case "euthanized":
+      return "euthanized" as const;
+    case "dead":
+      return "dead" as const;
+    case "transferred_out":
+      return "transferred" as const;
+    case "archived":
+      return null;
+  }
+}
+
+function getLifecycleExperimentalStatus(targetStatus: UpdateAnimalLifecycleInput["targetStatus"]) {
+  switch (targetStatus) {
+    case "euthanized":
+      return "Euthanized";
+    case "dead":
+      return "Found dead";
+    case "transferred_out":
+      return "Transferred out";
+    case "archived":
+      return "Archived";
+  }
 }
 
 export async function createAnimalRecord(
@@ -1468,5 +1505,198 @@ export async function importGenotypeCsvBatch(
   return {
     ok: true,
     message: `Processed ${parsed.rows.length} genotype row${parsed.rows.length === 1 ? "" : "s"}${fileLabel}. ${successCount} succeeded.${errorSummary}${firstError}`,
+  };
+}
+
+export async function updateAnimalLifecycleStatus(
+  input: UpdateAnimalLifecycleInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canUpdateAnimalLifecycle(actor.role)) {
+    return { ok: false, message: "Your role cannot change terminal lifecycle states." };
+  }
+
+  const animal = await prisma.animal.findUnique({
+    where: { id: input.animalId },
+    select: {
+      id: true,
+      animalId: true,
+      labId: true,
+      dob: true,
+      status: true,
+      outcomeStatus: true,
+      currentCageId: true,
+      deathDate: true,
+      deathReason: true,
+      experimentalStatus: true,
+    },
+  });
+
+  if (!animal) {
+    return { ok: false, message: "Animal not found." };
+  }
+
+  const normalizedReason = input.reason.trim();
+
+  if (normalizedReason.length < 3) {
+    return { ok: false, message: "Enter a clear reason for the lifecycle change." };
+  }
+
+  const normalizedDate = new Date(input.happenedAt);
+
+  if (Number.isNaN(normalizedDate.getTime())) {
+    return { ok: false, message: "Choose a valid lifecycle date." };
+  }
+
+  if (normalizedDate.getTime() < animal.dob.getTime()) {
+    return { ok: false, message: "Lifecycle date cannot be earlier than the animal date of birth." };
+  }
+
+  if (input.targetStatus === "archived") {
+    if (animal.status === "archived") {
+      return {
+        ok: true,
+        message: `${animal.animalId} is already archived.`,
+        entityId: animal.id,
+      };
+    }
+
+    if (animal.outcomeStatus === "alive") {
+      return {
+        ok: false,
+        message: `Archive ${animal.animalId} only after euthanasia, death, or transfer out has been recorded.`,
+      };
+    }
+  } else {
+    if (animal.outcomeStatus !== "alive") {
+      if (animal.status === input.targetStatus) {
+        return {
+          ok: true,
+          message: `${animal.animalId} is already marked ${input.targetStatus.replaceAll("_", " ")}.`,
+          entityId: animal.id,
+        };
+      }
+
+      return {
+        ok: false,
+        message: `${animal.animalId} has already been removed from the active colony. Archive it instead.`,
+      };
+    }
+  }
+
+  const timestamp = new Date();
+  const lifecycleOutcome = getLifecycleOutcomeStatus(input.targetStatus);
+  const lifecycleExperimentalStatus = getLifecycleExperimentalStatus(input.targetStatus);
+  const cancelsAssignments = input.targetStatus !== "archived";
+
+  await prisma.$transaction(async (tx) => {
+    if (animal.currentCageId) {
+      await tx.animalMovement.create({
+        data: {
+          id: createId("animal-move"),
+          animalId: animal.id,
+          fromCageId: animal.currentCageId,
+          toCageId: null,
+          movedById: actor.id,
+          movedAt: normalizedDate,
+          reason: normalizedReason,
+        },
+      });
+
+      await tx.cage.update({
+        where: { id: animal.currentCageId },
+        data: { lastUpdatedAt: normalizedDate },
+      });
+    }
+
+    await tx.animal.update({
+      where: { id: animal.id },
+      data: {
+        status: input.targetStatus,
+        outcomeStatus: lifecycleOutcome ?? undefined,
+        currentCageId: null,
+        deathDate:
+          input.targetStatus === "euthanized" || input.targetStatus === "dead"
+            ? normalizedDate
+            : input.targetStatus === "archived"
+              ? animal.deathDate
+              : null,
+        deathReason:
+          input.targetStatus === "euthanized" || input.targetStatus === "dead"
+            ? normalizedReason
+            : input.targetStatus === "archived"
+              ? animal.deathReason
+              : null,
+        experimentalStatus: lifecycleExperimentalStatus,
+      },
+    });
+
+    if (cancelsAssignments) {
+      await tx.experimentAssignment.updateMany({
+        where: {
+          animalId: animal.id,
+          status: {
+            in: ["planned", "reserved", "active"],
+          },
+        },
+        data: {
+          status: "cancelled",
+          endDate: normalizedDate,
+        },
+      });
+
+      await tx.animalProjectAllocation.updateMany({
+        where: {
+          animalId: animal.id,
+          endedAt: null,
+        },
+        data: {
+          endedAt: normalizedDate,
+        },
+      });
+    }
+
+    await tx.animalStatusEvent.create({
+      data: {
+        id: createId("status"),
+        animalId: animal.id,
+        fromStatus: animal.status,
+        toStatus: input.targetStatus,
+        happenedAt: normalizedDate,
+        actorId: actor.id,
+        reason: normalizedReason,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "animal",
+        entityId: animal.id,
+        action: "lifecycle_update",
+        previousValue: {
+          status: animal.status,
+          outcomeStatus: animal.outcomeStatus,
+          currentCageId: animal.currentCageId,
+          deathDate: animal.deathDate?.toISOString() ?? null,
+          deathReason: animal.deathReason ?? null,
+        },
+        newValue: {
+          status: input.targetStatus,
+          outcomeStatus: lifecycleOutcome ?? animal.outcomeStatus,
+          currentCageId: null,
+          happenedAt: input.happenedAt,
+          reason: normalizedReason,
+        },
+        timestamp,
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `${animal.animalId} marked ${input.targetStatus.replaceAll("_", " ")}.`,
+    entityId: animal.id,
   };
 }

@@ -14,10 +14,10 @@ This checklist tracks the remaining operational workflows needed to close the MV
 - [x] Litter weaning and progeny assignment
 - [x] Manual genotype entry from animal detail
 - [x] Batch genotype import for vendor or CSV uploads
+- [x] Animal lifecycle status change UI for euthanasia, death, transfer, and archive
 
 ## Next
 
-- [ ] Animal lifecycle status change UI for euthanasia, death, transfer, and archive
 - [ ] Cage movement workflow with movement history entry
 - [ ] Rule settings write UI for admin-editable thresholds
 - [ ] Export polish for more filtered operational views
@@ -25,4 +25,4 @@ This checklist tracks the remaining operational workflows needed to close the MV
 ## QA Follow-up
 
 - [x] Add dedicated Playwright coverage for genotype imports once the batch workflow exists
-- [ ] Add coverage for animal lifecycle transitions and archive filtering
+- [x] Add coverage for animal lifecycle transitions and archive filtering

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { recordAnimalGenotype, reserveAnimalForExperiment } from "@/lib/colony-write";
+import { recordAnimalGenotype, reserveAnimalForExperiment, updateAnimalLifecycleStatus } from "@/lib/colony-write";
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
 import { requireUser } from "@/lib/session";
 
@@ -28,6 +28,13 @@ const recordGenotypeSchema = z.object({
   confidence: z.string().trim().max(40).optional(),
   provider: z.string().trim().max(80).optional(),
   sampleId: z.string().trim().max(80).optional(),
+});
+
+const updateLifecycleSchema = z.object({
+  animalId: z.string().trim().min(1),
+  targetStatus: z.enum(["euthanized", "dead", "transferred_out", "archived"]),
+  happenedAt: z.string().trim().min(1),
+  reason: z.string().trim().min(3).max(400),
 });
 
 export async function reserveAnimalAction(
@@ -100,6 +107,48 @@ export async function recordGenotypeAction(
   }
 
   const result = await recordAnimalGenotype(parsed.data, { id: user.id, role: user.role });
+
+  if (!result.ok) {
+    return {
+      status: "error",
+      message: result.message,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/animals");
+  revalidatePath("/breeding");
+  revalidatePath("/cages");
+  revalidatePath("/experiments");
+  revalidatePath(`/animals/${parsed.data.animalId}`);
+
+  return {
+    status: "success",
+    message: result.message,
+  };
+}
+
+export async function updateAnimalLifecycleAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser();
+  const parsed = updateLifecycleSchema.safeParse({
+    animalId: formData.get("animalId"),
+    targetStatus: formData.get("targetStatus"),
+    happenedAt: formData.get("happenedAt"),
+    reason: formData.get("reason"),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Choose a terminal lifecycle action, date, and reason before saving.",
+    };
+  }
+
+  const result = await updateAnimalLifecycleStatus(parsed.data, { id: user.id, role: user.role });
 
   if (!result.ok) {
     return {

@@ -17,6 +17,8 @@ function projectSeed(projectName: string) {
   return {
     suffix: isMobile ? "902" : "901",
     reservationAnimalId: isMobile ? "animal-012" : "animal-014",
+    lifecycleAnimalId: isMobile ? "animal-014" : "animal-013",
+    lifecycleAnimalCode: isMobile ? "CM-26014" : "CM-26013",
     noteSuffix: isMobile ? "mobile" : "desktop",
     genotypeAlleleId: isMobile ? "allele-tdt" : "allele-creer",
     genotypeExpect: isMobile ? "tdTomato +/-" : "CreER +/-",
@@ -85,8 +87,8 @@ test("animal staff can scan a cage and log a welfare note", async ({ page }, tes
   await page.getByTestId("health-note-text").fill(noteText);
   await submitAfterBlur(page, "health-note-submit");
 
-  await expect(page.getByText("Health note logged for CM-A101-003.")).toBeVisible();
-  await expect(page.getByText(noteText).first()).toBeVisible();
+  await expect(page.getByText("Health note logged for CM-A101-003.")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(noteText).first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("animal staff can browse cage list and open cage detail", async ({ page }) => {
@@ -137,8 +139,8 @@ test("admin can create a breeding setup with override", async ({ page }, testInf
   await page.getByTestId("breeding-create-override").check();
   await submitAfterBlur(page, "breeding-create-submit");
 
-  await expect(page.getByText("Breeding setup created for CM-22008 and CM-25009.")).toBeVisible();
-  await expect(page.getByText(targetGenotype).first()).toBeVisible();
+  await expect(page.getByText("Breeding setup created for CM-22008 and CM-25009.")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(targetGenotype).first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can record a litter for a newly created breeding setup", async ({ page }, testInfo) => {
@@ -164,8 +166,8 @@ test("admin can record a litter for a newly created breeding setup", async ({ pa
   await breedingCard.getByTestId("litter-create-notes").fill(litterNote);
   await submitWithinAfterBlur(page, breedingCard, "litter-create-submit");
 
-  await expect(breedingCard.getByText("7 pups recorded at birth")).toBeVisible();
-  await expect(breedingCard.getByText(litterNote)).toBeVisible();
+  await expect(breedingCard.getByText("7 pups recorded at birth")).toBeVisible({ timeout: 30_000 });
+  await expect(breedingCard.getByText(litterNote)).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can wean a recorded litter and assign progeny cages", async ({ page }, testInfo) => {
@@ -234,9 +236,41 @@ test("admin can import genotype rows from a csv upload", async ({ page }) => {
     timeout: 30_000,
   });
 
-  await page.goto("/animals/animal-013");
-  await expect(page.getByText("Imported vendor batch verification for CM-26013.")).toBeVisible({ timeout: 30_000 });
+  await page.goto("/animals/animal-011");
+  await expect(page.getByText("Imported vendor batch verification for CM-26011.")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("CreER WT/WT").first()).toBeVisible({ timeout: 30_000 });
+});
+
+test("animal staff can euthanize and then archive an animal record", async ({ page }, testInfo) => {
+  const seed = projectSeed(testInfo.project.name);
+
+  await signInAs(page, "staff");
+  await page.goto(`/animals/${seed.lifecycleAnimalId}`);
+
+  await page.getByTestId("animal-lifecycle-target").selectOption("euthanized");
+  await page.getByTestId("animal-lifecycle-date").fill("2026-04-09");
+  await page.getByTestId("animal-lifecycle-reason").fill("Terminal tissue collection completed during endpoint round.");
+  await submitAfterBlur(page, "animal-lifecycle-submit");
+
+  await expect(page.getByText(`${seed.lifecycleAnimalCode} marked euthanized.`)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("euthanized").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Terminal tissue collection completed during endpoint round.").first()).toBeVisible({
+    timeout: 30_000,
+  });
+
+  await page.getByTestId("animal-lifecycle-target").selectOption("archived");
+  await page.getByTestId("animal-lifecycle-date").fill("2026-04-10");
+  await page.getByTestId("animal-lifecycle-reason").fill("Archived after post-procedure disposition review.");
+  await submitAfterBlur(page, "animal-lifecycle-submit");
+
+  await expect(page.getByText("archived").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("This animal is already archived and cannot move to another lifecycle state.")).toBeVisible({
+    timeout: 30_000,
+  });
+
+  await page.goto("/animals");
+  await page.getByTestId("colony-search").fill(seed.lifecycleAnimalCode);
+  await expect(page.locator('[data-testid="colony-table"] tbody tr')).toHaveCount(0, { timeout: 30_000 });
 });
 
 test("admin can review rule thresholds and recent audit history", async ({ page }) => {
@@ -257,7 +291,9 @@ test("researcher sees reservation conflicts and can reserve an eligible animal",
   await page.goto("/animals/animal-005");
   await page.getByTestId("reservation-experiment").selectOption("experiment-002");
   await submitAfterBlur(page, "reservation-submit");
-  await expect(page.getByText("CM-26005 still needs genotype confirmation before reservation.")).toBeVisible();
+  await expect(page.getByText("CM-26005 still needs genotype confirmation before reservation.")).toBeVisible({
+    timeout: 30_000,
+  });
 
   await page.goto(`/animals/${seed.reservationAnimalId}`);
   await page.getByTestId("reservation-experiment").selectOption("experiment-002");

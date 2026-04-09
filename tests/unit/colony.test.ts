@@ -19,6 +19,7 @@ import {
   recordAnimalGenotype,
   recordBreedingLitter,
   reserveAnimalForExperiment,
+  updateAnimalLifecycleStatus,
   weanLitterToCages,
 } from "@/lib/colony-write";
 import { getRecentAuditLogsView, getRuleSummaryView } from "@/lib/settings-read";
@@ -310,7 +311,7 @@ describe("colony logic", () => {
     const csv = [
       "subject_id,marker,call,status,source,assay,sample_date,result_date,result_text,provider,confidence,sample_id",
       "CM-25009,CreER,+/-,confirmed,manual PCR,gel PCR,2026-04-09,2026-04-09,Imported batch call for CM-25009,,high,PCR-25009-BATCH",
-      "MC-2026-013,CreER,negative,confirmed,external vendor,Transnetyx panel,2026-04-09,2026-04-09,Imported vendor negative call,Transnetyx,high,TX-26013",
+      "MC-2026-011,CreER,negative,confirmed,external vendor,Transnetyx panel,2026-04-09,2026-04-09,Imported vendor negative call,Transnetyx,high,TX-26011",
     ].join("\n");
 
     const result = await importGenotypeCsvBatch(
@@ -324,12 +325,53 @@ describe("colony logic", () => {
     expect(result.ok).toBe(true);
     expect(result.message).toContain("Processed 2 genotype rows");
 
-    const [animal009, animal013] = await Promise.all([getAnimalDetailView("animal-009"), getAnimalDetailView("animal-013")]);
+    const [animal009, animal011] = await Promise.all([getAnimalDetailView("animal-009"), getAnimalDetailView("animal-011")]);
 
     expect(animal009?.genotypeSummary).toContain("CreER +/-");
     expect(animal009?.genotypingRecords.some((record) => record.resultText.includes("Imported batch call"))).toBe(true);
-    expect(animal013?.genotypeSummary).toContain("CreER WT/WT");
-    expect(animal013?.genotypingRecords.some((record) => record.resultText.includes("Imported vendor negative call"))).toBe(true);
+    expect(animal011?.genotypeSummary).toContain("CreER WT/WT");
+    expect(animal011?.genotypingRecords.some((record) => record.resultText.includes("Imported vendor negative call"))).toBe(true);
+  });
+
+  it("removes a terminal animal from active views and allows later archival", async () => {
+    const euthanized = await updateAnimalLifecycleStatus(
+      {
+        animalId: "animal-014",
+        targetStatus: "euthanized",
+        happenedAt: "2026-04-09",
+        reason: "Terminal tissue collection completed for endpoint verification.",
+      },
+      { id: "user-staff", role: "animal_staff" },
+    );
+
+    expect(euthanized.ok).toBe(true);
+
+    const activeAnimals = await getAnimalListView();
+    const cage = await getCageDetailView("cage-a101-003");
+    const euthanizedDetail = await getAnimalDetailView("animal-014");
+
+    expect(activeAnimals.some((animal) => animal.id === "animal-014")).toBe(false);
+    expect(cage?.occupants.some((animal) => animal.id === "animal-014")).toBe(false);
+    expect(euthanizedDetail?.animal.status).toBe("euthanized");
+    expect(euthanizedDetail?.animal.outcomeStatus).toBe("euthanized");
+    expect(euthanizedDetail?.animal.deathReason).toContain("Terminal tissue collection");
+
+    const archived = await updateAnimalLifecycleStatus(
+      {
+        animalId: "animal-014",
+        targetStatus: "archived",
+        happenedAt: "2026-04-10",
+        reason: "Archived after terminal disposition review.",
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(archived.ok).toBe(true);
+
+    const archivedDetail = await getAnimalDetailView("animal-014");
+    expect(archivedDetail?.animal.status).toBe("archived");
+    expect(archivedDetail?.animal.outcomeStatus).toBe("euthanized");
+    expect(archivedDetail?.timeline.some((event) => event.label === "Archived")).toBe(true);
   });
 
   it("builds animal csv exports directly from Prisma data", async () => {

@@ -514,6 +514,8 @@ export async function getAnimalDetailView(animalId: string) {
       dob: animal.dob.toISOString(),
       outcomeStatus: animal.outcomeStatus,
       experimentalStatus: animal.experimentalStatus,
+      deathDate: animal.deathDate?.toISOString() ?? null,
+      deathReason: animal.deathReason ?? null,
     },
     cageLabel: buildCageLabel(animal.currentCage),
     strainName: animal.strain.name,
@@ -557,6 +559,7 @@ export async function getAnimalDetailView(animalId: string) {
     })),
     canReserve: animal.status === "colony_holding",
     canRecordGenotype: animal.outcomeStatus === "alive",
+    defaultLifecycleDate: rules.today.slice(0, 10),
     alleleOptions: alleleOptions.map((allele) => ({
       id: allele.id,
       label: `${allele.name} · ${allele.gene} · ${allele.type}`,
