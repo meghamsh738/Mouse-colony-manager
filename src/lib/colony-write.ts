@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import type { HealthNoteType, Sex, UserRole } from "@/lib/types";
+import type { GenotypeCallStatus, HealthNoteType, Sex, UserRole } from "@/lib/types";
 
 type MutationResult =
   | {
@@ -67,6 +67,21 @@ type WeanLitterInput = {
   strainId: string;
 };
 
+type RecordAnimalGenotypeInput = {
+  animalId: string;
+  alleleId: string;
+  zygosity: string;
+  status: GenotypeCallStatus;
+  sourceType: string;
+  assayType: string;
+  sampleDate: string;
+  resultDate: string;
+  resultText: string;
+  confidence?: string;
+  provider?: string;
+  sampleId?: string;
+};
+
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -92,6 +107,10 @@ function canRecordLitter(role: UserRole) {
 }
 
 function canWeanLitter(role: UserRole) {
+  return role !== "read_only";
+}
+
+function canRecordGenotype(role: UserRole) {
   return role !== "read_only";
 }
 
@@ -133,6 +152,22 @@ function buildNextAnimalIdentifiers(
       labId: `MC-${year}-${String(currentSequence).padStart(3, "0")}`,
     };
   });
+}
+
+function buildFinalGenotypeCall(alleleName: string, zygosity: string, status: GenotypeCallStatus) {
+  if (status === "pending") {
+    return "Pending";
+  }
+
+  if (status === "conflict") {
+    return `${alleleName} conflict`;
+  }
+
+  return `${alleleName} ${zygosity}`;
+}
+
+function shouldClearPendingGenotypeStatus(experimentalStatus?: string | null) {
+  return typeof experimentalStatus === "string" && /awaiting genotype|pending genotype/i.test(experimentalStatus);
 }
 
 export async function createAnimalRecord(
@@ -1124,5 +1159,180 @@ export async function weanLitterToCages(
     ok: true,
     message: `${totalWeaned} pups weaned from ${litter.id} and assigned to holding cages.`,
     entityId: litter.id,
+  };
+}
+
+export async function recordAnimalGenotype(
+  input: RecordAnimalGenotypeInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canRecordGenotype(actor.role)) {
+    return { ok: false, message: "Your role cannot record genotyping results." };
+  }
+
+  const [animal, allele, existingAlleles] = await Promise.all([
+    prisma.animal.findUnique({
+      where: { id: input.animalId },
+      select: {
+        id: true,
+        animalId: true,
+        experimentalStatus: true,
+        outcomeStatus: true,
+      },
+    }),
+    prisma.allele.findUnique({
+      where: { id: input.alleleId },
+      select: {
+        id: true,
+        name: true,
+      },
+    }),
+    prisma.animalAllele.findMany({
+      where: { animalId: input.animalId },
+      select: {
+        alleleId: true,
+        callStatus: true,
+      },
+    }),
+  ]);
+
+  if (!animal) {
+    return { ok: false, message: "Animal not found." };
+  }
+
+  if (!allele) {
+    return { ok: false, message: "Choose a valid allele or marker." };
+  }
+
+  if (animal.outcomeStatus !== "alive") {
+    return { ok: false, message: "Only live animals can receive new genotyping records." };
+  }
+
+  const normalizedSampleDate = new Date(input.sampleDate);
+  const normalizedResultDate = new Date(input.resultDate);
+
+  if (Number.isNaN(normalizedSampleDate.getTime()) || Number.isNaN(normalizedResultDate.getTime())) {
+    return { ok: false, message: "Choose valid sample and assay dates for the genotype record." };
+  }
+
+  if (normalizedResultDate.getTime() < normalizedSampleDate.getTime()) {
+    return { ok: false, message: "Assay date cannot be earlier than sample collection date." };
+  }
+
+  const normalizedZygosity = input.zygosity.trim();
+  const normalizedResultText = input.resultText.trim();
+  const normalizedConfidence = input.confidence?.trim() || undefined;
+  const normalizedProvider = input.provider?.trim() || undefined;
+  const normalizedSampleId = input.sampleId?.trim() || undefined;
+  const finalCall = buildFinalGenotypeCall(allele.name, normalizedZygosity, input.status);
+  const existingRecord = await prisma.genotypingRecord.findFirst({
+    where: {
+      animalId: animal.id,
+      markerTested: allele.name,
+      status: input.status,
+      sampleDate: normalizedSampleDate,
+      resultDate: normalizedResultDate,
+      finalCall,
+      resultText: normalizedResultText,
+    },
+    orderBy: { resultDate: "desc" },
+    select: { id: true },
+  });
+
+  if (existingRecord) {
+    return {
+      ok: true,
+      message: `${allele.name} genotype recorded for ${animal.animalId}.`,
+      entityId: existingRecord.id,
+    };
+  }
+
+  const recordId = createId("geno");
+  const timestamp = new Date();
+  const effectiveAlleles = [
+    ...existingAlleles.filter((entry) => entry.alleleId !== allele.id),
+    {
+      alleleId: allele.id,
+      callStatus: input.status,
+    },
+  ];
+  const genotypeResolved = effectiveAlleles.length > 0 && effectiveAlleles.every((entry) => entry.callStatus === "confirmed");
+
+  await prisma.$transaction(async (tx) => {
+    await tx.genotypingRecord.create({
+      data: {
+        id: recordId,
+        animalId: animal.id,
+        sourceType: input.sourceType.trim(),
+        assayType: input.assayType.trim(),
+        sampleId: normalizedSampleId,
+        markerTested: allele.name,
+        resultText: normalizedResultText,
+        sampleDate: normalizedSampleDate,
+        resultDate: normalizedResultDate,
+        operatorId: actor.id,
+        provider: normalizedProvider,
+        verifiedById: input.status === "confirmed" ? actor.id : undefined,
+        finalCall,
+        status: input.status,
+        confidence: normalizedConfidence,
+      },
+    });
+
+    await tx.animalAllele.upsert({
+      where: {
+        animalId_alleleId: {
+          animalId: animal.id,
+          alleleId: allele.id,
+        },
+      },
+      create: {
+        id: createId("animal-allele"),
+        animalId: animal.id,
+        alleleId: allele.id,
+        zygosity: normalizedZygosity,
+        callStatus: input.status,
+      },
+      update: {
+        zygosity: normalizedZygosity,
+        callStatus: input.status,
+      },
+    });
+
+    if (shouldClearPendingGenotypeStatus(animal.experimentalStatus) && genotypeResolved) {
+      await tx.animal.update({
+        where: { id: animal.id },
+        data: {
+          experimentalStatus: "Not assigned",
+        },
+      });
+    }
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "genotyping_record",
+        entityId: recordId,
+        action: "create",
+        newValue: {
+          animalId: animal.id,
+          alleleId: allele.id,
+          zygosity: normalizedZygosity,
+          status: input.status,
+          sampleDate: input.sampleDate,
+          resultDate: input.resultDate,
+          sourceType: input.sourceType.trim(),
+          assayType: input.assayType.trim(),
+        },
+        timestamp,
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `${allele.name} genotype recorded for ${animal.animalId}.`,
+    entityId: recordId,
   };
 }

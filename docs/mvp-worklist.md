@@ -1,0 +1,28 @@
+# MVP Worklist
+
+This checklist tracks the remaining operational workflows needed to close the MVP gap after the Prisma/Postgres migration.
+
+## Completed
+
+- [x] Prisma/Postgres runtime migration
+- [x] Auth backed by seeded Prisma users
+- [x] Animal creation workflow
+- [x] Cage health note entry from scan view
+- [x] Experiment reservation with conflict checks
+- [x] Breeding setup creation
+- [x] Litter recording
+- [x] Litter weaning and progeny assignment
+- [x] Manual genotype entry from animal detail
+
+## Next
+
+- [ ] Batch genotype import for vendor or CSV uploads
+- [ ] Animal lifecycle status change UI for euthanasia, death, transfer, and archive
+- [ ] Cage movement workflow with movement history entry
+- [ ] Rule settings write UI for admin-editable thresholds
+- [ ] Export polish for more filtered operational views
+
+## QA Follow-up
+
+- [ ] Add dedicated Playwright coverage for genotype imports once the batch workflow exists
+- [ ] Add coverage for animal lifecycle transitions and archive filtering

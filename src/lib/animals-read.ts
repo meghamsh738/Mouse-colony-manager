@@ -60,6 +60,30 @@ function isGenotypeConfirmed(
   return alleles.length > 0 && alleles.every((allele) => allele.callStatus === "confirmed");
 }
 
+function getPendingGenotypeRecord(
+  alleles: Array<{
+    callStatus: string;
+  }>,
+  genotypingRecords: Array<{
+    sampleDate: Date;
+    status: string;
+  }>,
+) {
+  const pendingRecord = genotypingRecords.find((record) => record.status === "pending");
+
+  if (!pendingRecord) {
+    return null;
+  }
+
+  const hasPendingAllele = alleles.some((allele) => allele.callStatus === "pending");
+
+  if (hasPendingAllele || alleles.length === 0) {
+    return pendingRecord;
+  }
+
+  return null;
+}
+
 function buildRuleAlerts(
   animal: {
     id: string;
@@ -74,6 +98,9 @@ function buildRuleAlerts(
       followupRequired: boolean;
       createdAt: Date;
     }>;
+    alleles: Array<{
+      callStatus: string;
+    }>;
     genotypingRecords: Array<{
       sampleDate: Date;
       status: string;
@@ -85,7 +112,7 @@ function buildRuleAlerts(
   const alerts: Alert[] = [];
   const ageDays = getAgeDays(animal.dob, rules.today);
   const unresolvedHealthNote = animal.healthNotes.find((note) => !note.resolved && note.followupRequired);
-  const pendingRecord = animal.genotypingRecords.find((record) => record.status === "pending");
+  const pendingRecord = getPendingGenotypeRecord(animal.alleles, animal.genotypingRecords);
 
   if (animal.status === "breeding" && ageDays > rules.breederMaxAgeDays) {
     alerts.push({
@@ -341,7 +368,7 @@ export async function getAnimalListView(): Promise<AnimalListItem[]> {
 }
 
 export async function getAnimalDetailView(animalId: string) {
-  const [rules, animal, experiments, manualAlerts] = await Promise.all([
+  const [rules, animal, experiments, alleleOptions, manualAlerts] = await Promise.all([
     getAnimalRuleContext(),
     prisma.animal.findUnique({
       where: { id: animalId },
@@ -389,8 +416,15 @@ export async function getAnimalDetailView(animalId: string) {
           orderBy: { resultDate: "desc" },
           select: {
             id: true,
+            markerTested: true,
+            sourceType: true,
+            assayType: true,
+            sampleId: true,
             status: true,
             resultDate: true,
+            resultText: true,
+            provider: true,
+            confidence: true,
             finalCall: true,
             sampleDate: true,
           },
@@ -410,6 +444,15 @@ export async function getAnimalDetailView(animalId: string) {
       where: { status: { in: ["planned", "active"] } },
       orderBy: { experimentCode: "asc" },
       select: { id: true, experimentCode: true, title: true },
+    }),
+    prisma.allele.findMany({
+      orderBy: [{ gene: "asc" }, { name: "asc" }],
+      select: {
+        id: true,
+        gene: true,
+        name: true,
+        type: true,
+      },
     }),
     prisma.alert.findMany({
       where: {
@@ -469,10 +512,33 @@ export async function getAnimalDetailView(animalId: string) {
       labId: animal.labId,
       status: animal.status,
       dob: animal.dob.toISOString(),
+      outcomeStatus: animal.outcomeStatus,
+      experimentalStatus: animal.experimentalStatus,
     },
     cageLabel: buildCageLabel(animal.currentCage),
     strainName: animal.strain.name,
     genotypeSummary: buildGenotypeSummary(animal.alleles),
+    effectiveAlleles: animal.alleles.map((entry) => ({
+      id: entry.id,
+      alleleId: entry.alleleId,
+      alleleName: entry.allele.name,
+      zygosity: entry.zygosity,
+      callStatus: entry.callStatus,
+    })),
+    genotypingRecords: animal.genotypingRecords.map((record) => ({
+      id: record.id,
+      markerTested: record.markerTested,
+      sourceType: record.sourceType,
+      assayType: record.assayType,
+      sampleId: record.sampleId ?? null,
+      status: record.status,
+      sampleDate: record.sampleDate.toISOString(),
+      resultDate: record.resultDate.toISOString(),
+      resultText: record.resultText,
+      provider: record.provider ?? null,
+      confidence: record.confidence ?? null,
+      finalCall: record.finalCall,
+    })),
     sireAnimalId: animal.sire?.animalId ?? null,
     damAnimalId: animal.dam?.animalId ?? null,
     alerts,
@@ -490,6 +556,12 @@ export async function getAnimalDetailView(animalId: string) {
       createdAt: note.createdAt.toISOString(),
     })),
     canReserve: animal.status === "colony_holding",
+    canRecordGenotype: animal.outcomeStatus === "alive",
+    alleleOptions: alleleOptions.map((allele) => ({
+      id: allele.id,
+      label: `${allele.name} · ${allele.gene} · ${allele.type}`,
+    })),
+    defaultGenotypeDate: rules.today.slice(0, 10),
     experimentOptions: experiments.map((experiment) => ({
       id: experiment.id,
       label: `${experiment.experimentCode} · ${experiment.title}`,

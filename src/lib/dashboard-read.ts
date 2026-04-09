@@ -100,6 +100,7 @@ async function getDashboardData() {
         alleles: {
           select: {
             zygosity: true,
+            callStatus: true,
           },
         },
         healthNotes: {
@@ -187,6 +188,8 @@ async function getDashboardData() {
     const ageDays = getAgeDays(animal.dob, rules.today);
     const unresolvedHealthNote = animal.healthNotes.find((note) => note.followupRequired);
     const pendingRecord = animal.genotypingRecords.find((record) => record.status === "pending");
+    const hasPendingAllele = animal.alleles.some((allele) => allele.callStatus === "pending");
+    const effectivePendingRecord = pendingRecord && (hasPendingAllele || animal.alleles.length === 0) ? pendingRecord : null;
 
     if (animal.status === "breeding" && ageDays > rules.breederMaxAgeDays) {
       ruleAlerts.push({
@@ -216,7 +219,10 @@ async function getDashboardData() {
       });
     }
 
-    if (pendingRecord && differenceInDays(new Date(rules.today), pendingRecord.sampleDate) > rules.genotypePendingDays) {
+    if (
+      effectivePendingRecord &&
+      differenceInDays(new Date(rules.today), effectivePendingRecord.sampleDate) > rules.genotypePendingDays
+    ) {
       ruleAlerts.push({
         id: `rule-genotype-pending-${animal.id}`,
         entityType: "animal",
@@ -385,7 +391,7 @@ export async function getDashboardMetricsView() {
   return {
     activeAnimals: animals.length,
     activeBreeders: animals.filter((animal) => animal.status === "breeding").length,
-    pendingGenotypes: animals.filter((animal) => animal.genotypingRecords.some((record) => record.status === "pending")).length,
+    pendingGenotypes: animals.filter((animal) => animal.alleles.some((allele) => allele.callStatus === "pending")).length,
     availableForExperiment,
     openAlerts: alerts.filter((alert) => alert.status === "open").length,
     oldBreeders: animals.filter(

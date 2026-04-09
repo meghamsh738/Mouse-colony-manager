@@ -10,11 +10,14 @@ const credentials = {
 
 function projectSeed(projectName: string) {
   const normalized = projectName.toLowerCase();
+  const isMobile = normalized === "mobile";
 
   return {
-    suffix: normalized === "mobile" ? "902" : "901",
-    reservationAnimalId: normalized === "mobile" ? "animal-012" : "animal-014",
-    noteSuffix: normalized === "mobile" ? "mobile" : "desktop",
+    suffix: isMobile ? "902" : "901",
+    reservationAnimalId: isMobile ? "animal-012" : "animal-014",
+    noteSuffix: isMobile ? "mobile" : "desktop",
+    genotypeAlleleId: isMobile ? "allele-tdt" : "allele-creer",
+    genotypeExpect: isMobile ? "tdTomato +/-" : "CreER +/-",
   };
 }
 
@@ -194,6 +197,26 @@ test("admin can wean a recorded litter and assign progeny cages", async ({ page 
 
   await expect(breedingCard.getByText("5 pups weaned")).toBeVisible({ timeout: 30_000 });
   await expect(breedingCard.getByText("5 progeny linked")).toBeVisible({ timeout: 30_000 });
+});
+
+test("admin can record a genotype result from the animal detail page", async ({ page }, testInfo) => {
+  const seed = projectSeed(testInfo.project.name);
+  const resultText = `Expected ${seed.noteSuffix} genotype band present.`;
+
+  await signInAs(page, "admin");
+  await page.goto("/animals/animal-009");
+
+  await page.getByTestId("genotype-record-allele").selectOption(seed.genotypeAlleleId);
+  await page.getByTestId("genotype-record-zygosity").fill("+/-");
+  await page.getByTestId("genotype-record-source-type").selectOption("manual PCR");
+  await page.getByTestId("genotype-record-assay-type").fill("gel PCR");
+  await page.getByTestId("genotype-record-sample-date").fill("2026-04-09");
+  await page.getByTestId("genotype-record-result-date").fill("2026-04-09");
+  await page.getByTestId("genotype-record-result-text").fill(resultText);
+  await submitAfterBlur(page, "genotype-record-submit");
+
+  await expect(page.getByText(seed.genotypeExpect).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("genotype-record-history").getByText(resultText)).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can review rule thresholds and recent audit history", async ({ page }) => {

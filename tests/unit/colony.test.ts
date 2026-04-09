@@ -15,6 +15,7 @@ import {
   addCageHealthNote,
   createAnimalRecord,
   createBreedingSetup,
+  recordAnimalGenotype,
   recordBreedingLitter,
   reserveAnimalForExperiment,
   weanLitterToCages,
@@ -273,6 +274,36 @@ describe("colony logic", () => {
     expect(breeding?.litter?.progenyCount).toBe(5);
     expect(highlights.upcomingWean.some((item) => item.breedingId === setup.entityId)).toBe(false);
   }, 20_000);
+
+  it("records a genotype result and updates the animal detail genotype views", async () => {
+    const result = await recordAnimalGenotype(
+      {
+        animalId: "animal-009",
+        alleleId: "allele-creer",
+        zygosity: "+/-",
+        status: "confirmed",
+        sourceType: "manual PCR",
+        assayType: "gel PCR",
+        sampleDate: "2026-04-09",
+        resultDate: "2026-04-09",
+        resultText: "Expected CreER band present at the correct size.",
+        confidence: "high",
+        sampleId: "PCR-25009",
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(result.ok).toBe(true);
+
+    const detail = await getAnimalDetailView("animal-009");
+    expect(detail?.genotypeSummary).toContain("CreER +/-");
+    expect(detail?.effectiveAlleles.some((allele) => allele.alleleName === "CreER" && allele.callStatus === "confirmed")).toBe(
+      true,
+    );
+    expect(detail?.genotypingRecords[0]?.markerTested).toBe("CreER");
+    expect(detail?.genotypingRecords[0]?.resultText).toContain("Expected CreER band present");
+    expect(detail?.timeline.some((event) => event.description.includes("CreER +/-"))).toBe(true);
+  });
 
   it("builds animal csv exports directly from Prisma data", async () => {
     const csv = await buildCsvExport("animals");

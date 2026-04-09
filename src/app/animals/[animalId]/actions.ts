@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { reserveAnimalForExperiment } from "@/lib/colony-write";
+import { recordAnimalGenotype, reserveAnimalForExperiment } from "@/lib/colony-write";
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
 import { requireUser } from "@/lib/session";
 
@@ -13,6 +13,21 @@ const reserveAnimalSchema = z.object({
   startDate: z.string().trim().min(1),
   treatmentGroup: z.string().trim().max(200).optional(),
   notes: z.string().trim().max(400).optional(),
+});
+
+const recordGenotypeSchema = z.object({
+  animalId: z.string().trim().min(1),
+  alleleId: z.string().trim().min(1),
+  zygosity: z.string().trim().min(1).max(40),
+  status: z.enum(["pending", "provisional", "confirmed", "conflict"]),
+  sourceType: z.string().trim().min(2).max(80),
+  assayType: z.string().trim().min(2).max(80),
+  sampleDate: z.string().trim().min(1),
+  resultDate: z.string().trim().min(1),
+  resultText: z.string().trim().min(3).max(400),
+  confidence: z.string().trim().max(40).optional(),
+  provider: z.string().trim().max(80).optional(),
+  sampleId: z.string().trim().max(80).optional(),
 });
 
 export async function reserveAnimalAction(
@@ -47,6 +62,56 @@ export async function reserveAnimalAction(
 
   revalidatePath("/");
   revalidatePath("/animals");
+  revalidatePath("/experiments");
+  revalidatePath(`/animals/${parsed.data.animalId}`);
+
+  return {
+    status: "success",
+    message: result.message,
+  };
+}
+
+export async function recordGenotypeAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser();
+  const parsed = recordGenotypeSchema.safeParse({
+    animalId: formData.get("animalId"),
+    alleleId: formData.get("alleleId"),
+    zygosity: formData.get("zygosity"),
+    status: formData.get("status"),
+    sourceType: formData.get("sourceType"),
+    assayType: formData.get("assayType"),
+    sampleDate: formData.get("sampleDate"),
+    resultDate: formData.get("resultDate"),
+    resultText: formData.get("resultText"),
+    confidence: formData.get("confidence") || undefined,
+    provider: formData.get("provider") || undefined,
+    sampleId: formData.get("sampleId") || undefined,
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Choose an allele, enter the assay dates, and add a genotype result before saving.",
+    };
+  }
+
+  const result = await recordAnimalGenotype(parsed.data, { id: user.id, role: user.role });
+
+  if (!result.ok) {
+    return {
+      status: "error",
+      message: result.message,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/animals");
+  revalidatePath("/breeding");
+  revalidatePath("/cages");
   revalidatePath("/experiments");
   revalidatePath(`/animals/${parsed.data.animalId}`);
 
