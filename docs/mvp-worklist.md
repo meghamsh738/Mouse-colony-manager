@@ -17,10 +17,10 @@ This checklist tracks the remaining operational workflows needed to close the MV
 - [x] Animal lifecycle status change UI for euthanasia, death, transfer, and archive
 - [x] Cage movement workflow with movement history entry
 - [x] Rule settings write UI for admin-editable thresholds
+- [x] Export polish for more filtered operational views
 
 ## Next
-
-- [ ] Export polish for more filtered operational views
+- [ ] Validate or replace the blocked Vitest worker bootstrap path for unit coverage
 
 ## QA Follow-up
 

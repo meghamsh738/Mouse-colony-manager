@@ -437,6 +437,34 @@ describe("colony logic", () => {
     expect(csv).toContain("MC-2026-005");
   });
 
+  it("filters animal csv exports using the current colony-table search state", async () => {
+    const animals = await getAnimalListView();
+    const target = animals.find((animal) => animal.animalId === "CM-26005");
+    const otherAnimal = animals.find((animal) => animal.animalId !== "CM-26005");
+    const csv = await buildCsvExport("animals", { search: "CM-26005" });
+
+    expect(target).toBeDefined();
+    expect(otherAnimal).toBeDefined();
+    expect(csv?.split("\n")).toHaveLength(2);
+    expect(csv).toContain(target?.animalId ?? "");
+    expect(csv).not.toContain(otherAnimal?.animalId ?? "");
+  });
+
+  it("filters cage csv exports down to warning-bearing operational cages", async () => {
+    const cages = await getCageListView();
+    const warningCage = cages.find((cage) => cage.warningCount > 0);
+    const quietCage = cages.find((cage) => cage.warningCount === 0);
+    const csv = await buildCsvExport("cages", { warningsOnly: true });
+
+    expect(warningCage).toBeDefined();
+    expect(csv).toContain("cage,room,rack,barcode,status,occupants,sexComposition,strainSummary,warningCount");
+    expect(csv).toContain(warningCage?.barcode ?? "");
+
+    if (quietCage) {
+      expect(csv).not.toContain(quietCage.barcode);
+    }
+  });
+
   it("builds cage list and detail views directly from Prisma data", async () => {
     const cages = await getCageListView();
     const detail = await getCageDetailView("cage-a101-003");

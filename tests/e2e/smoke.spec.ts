@@ -361,3 +361,54 @@ test("exports require auth and return csv for signed-in users", async ({ page })
   expect(authorized.contentType).toContain("text/csv");
   expect(authorized.body).toContain("animalId");
 });
+
+test("animal and cage export controls follow the active table filters", async ({ page }) => {
+  await signInAs(page, "admin");
+
+  await page.goto("/animals");
+  await page.getByTestId("colony-search").fill("CM-26005");
+
+  const animalExportHref = await page.getByTestId("animal-export-current").getAttribute("href");
+  expect(animalExportHref).toContain("search=CM-26005");
+
+  const animalExport = await page.evaluate(async (href) => {
+    const response = await fetch(href!);
+
+    return {
+      status: response.status,
+      disposition: response.headers.get("content-disposition"),
+      body: await response.text(),
+    };
+  }, animalExportHref);
+
+  expect(animalExport.status).toBe(200);
+  expect(animalExport.disposition).toContain('animals-filtered.csv');
+  expect(animalExport.body).toContain("CM-26005");
+  expect(animalExport.body).not.toContain("CM-26003");
+
+  await page.goto("/cages");
+  await page.getByLabel("Warnings only").check();
+  const warningBarcode = (await page.getByTestId("cage-row").first().getByTestId("cage-row-barcode").textContent())?.trim();
+
+  expect(warningBarcode).toBeTruthy();
+
+  await page.getByTestId("cage-search").fill(warningBarcode ?? "");
+
+  const cageExportHref = await page.getByTestId("cage-export-current").getAttribute("href");
+  expect(cageExportHref).toContain(`search=${warningBarcode}`);
+  expect(cageExportHref).toContain("warningsOnly=true");
+
+  const cageExport = await page.evaluate(async (href) => {
+    const response = await fetch(href!);
+
+    return {
+      status: response.status,
+      disposition: response.headers.get("content-disposition"),
+      body: await response.text(),
+    };
+  }, cageExportHref);
+
+  expect(cageExport.status).toBe(200);
+  expect(cageExport.disposition).toContain('cages-filtered.csv');
+  expect(cageExport.body).toContain(warningBarcode ?? "");
+});

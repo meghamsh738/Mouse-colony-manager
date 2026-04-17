@@ -49,6 +49,26 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
     [availabilityFilter, data, search, statusFilter],
   );
 
+  const currentViewExportHref = useMemo(() => {
+    const params = new URLSearchParams();
+
+    if (search.trim()) {
+      params.set("search", search.trim());
+    }
+
+    if (statusFilter !== "all") {
+      params.set("status", statusFilter);
+    }
+
+    if (availabilityFilter) {
+      params.set("availableOnly", "true");
+    }
+
+    const query = params.toString();
+
+    return `/api/exports/animals${query ? `?${query}` : ""}`;
+  }, [availabilityFilter, search, statusFilter]);
+
   const columns = useMemo(
     () => [
       columnHelper.accessor("animalId", {
@@ -113,32 +133,58 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
 
   return (
     <div className="space-y-5" data-testid="colony-table">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center">
-        <Input
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search animal ID, lab ID, genotype, strain, or cage"
-          data-testid="colony-search"
-        />
-        <select
-          value={statusFilter}
-          onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-          className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
-        >
-          <option value="all">All statuses</option>
-          <option value="colony_holding">Colony holding</option>
-          <option value="breeding">Breeding</option>
-          <option value="reserved">Reserved</option>
-          <option value="in_experiment">In experiment</option>
-        </select>
-        <label className="flex items-center gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
-          <input
-            checked={availabilityFilter}
-            onChange={(event) => setAvailabilityFilter(event.target.checked)}
-            type="checkbox"
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search animal ID, lab ID, genotype, strain, or cage"
+            data-testid="colony-search"
           />
-          Available for experiment only
-        </label>
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+            className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
+          >
+            <option value="all">All statuses</option>
+            <option value="colony_holding">Colony holding</option>
+            <option value="breeding">Breeding</option>
+            <option value="reserved">Reserved</option>
+            <option value="in_experiment">In experiment</option>
+          </select>
+          <label className="flex items-center gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
+            <input
+              checked={availabilityFilter}
+              onChange={(event) => setAvailabilityFilter(event.target.checked)}
+              type="checkbox"
+            />
+            Available for experiment only
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
+          <p className="text-sm text-[var(--muted)]">
+            Showing <span className="font-medium text-[var(--ink)]">{filteredData.length}</span> of{" "}
+            <span className="font-medium text-[var(--ink)]">{data.length}</span> active mice
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={currentViewExportHref}
+              prefetch={false}
+              className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--accent)] px-4 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
+              data-testid="animal-export-current"
+            >
+              Export current view
+            </Link>
+            <Link
+              href="/api/exports/animals"
+              prefetch={false}
+              className="inline-flex h-10 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--surface)] px-4 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
+              data-testid="animal-export-all"
+            >
+              Export all animals
+            </Link>
+          </div>
+        </div>
       </div>
       <div className="overflow-x-auto rounded-[24px] border border-[var(--line)]">
         <table className="min-w-full border-collapse text-left">
@@ -166,6 +212,12 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
           </tbody>
         </table>
       </div>
+      {table.getRowModel().rows.length ? null : (
+        <div className="rounded-[24px] border border-dashed border-[var(--line)] bg-[var(--surface-2)] px-4 py-6 text-center text-sm text-[var(--muted)]">
+          No animals match the current filters. Clear the search, widen the status filter, or export the full colony
+          list instead.
+        </div>
+      )}
     </div>
   );
 }

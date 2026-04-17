@@ -1,46 +1,22 @@
 import { format } from "date-fns";
 
+import { getAnimalListView } from "@/lib/animals-read";
+import { getCageListView } from "@/lib/cages-read";
 import { prisma } from "@/lib/prisma";
-import { formatAgeLabel, getAgeInDays } from "@/lib/utils";
+import type { AnimalListItem, CageListItem } from "@/lib/types";
 
 type ExportEntity = "animals" | "cages" | "alerts" | "experiments";
 type CsvRow = Record<string, string | number>;
 
-function getReferenceDate() {
-  return process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString();
-}
+export type CsvExportFilters = {
+  search?: string;
+  status?: string;
+  availableOnly?: boolean;
+  warningsOnly?: boolean;
+};
 
 function formatDateCell(value?: Date | null) {
   return value ? format(value, "dd MMM yyyy") : "";
-}
-
-function formatGenotypeSummary(
-  alleles: Array<{
-    zygosity: string;
-    allele: {
-      name: string;
-    };
-  }>,
-) {
-  if (!alleles.length) {
-    return "Genotype not recorded";
-  }
-
-  return alleles
-    .map(({ allele, zygosity }) => `${allele.name}${zygosity === "WT/WT" ? " WT/WT" : ` ${zygosity}`}`)
-    .join(" ; ");
-}
-
-function formatCageLabel(cage?: {
-  cageNumber: string;
-  room: { roomNumber: string };
-  rack: { rackNumber: string };
-} | null) {
-  if (!cage) {
-    return "Archived";
-  }
-
-  return `${cage.room.roomNumber} / ${cage.rack.rackNumber} / ${cage.cageNumber}`;
 }
 
 function toCsv(rows: CsvRow[]) {
@@ -54,123 +30,78 @@ function toCsv(rows: CsvRow[]) {
   return [headers.join(","), ...rows.map((row) => headers.map((header) => escapeValue(row[header])).join(","))].join("\n");
 }
 
-async function buildAnimalExportRows() {
-  const referenceDate = getReferenceDate();
-  const [animals, alerts] = await prisma.$transaction([
-    prisma.animal.findMany({
-      orderBy: { animalId: "asc" },
-      include: {
-        strain: { select: { name: true } },
-        currentCage: {
-          select: {
-            cageNumber: true,
-            room: { select: { roomNumber: true } },
-            rack: { select: { rackNumber: true } },
-          },
-        },
-        alleles: {
-          include: {
-            allele: {
-              select: { name: true },
-            },
-          },
-        },
-        projectAllocations: {
-          where: { endedAt: null },
-          include: {
-            project: { select: { projectCode: true } },
-          },
-        },
-      },
-    }),
-    prisma.alert.findMany({
-      where: {
-        entityType: "animal",
-        status: "open",
-      },
-      orderBy: { generatedAt: "desc" },
-      select: {
-        entityId: true,
-        message: true,
-      },
-    }),
-  ]);
+function normalizeSearch(search?: string) {
+  return search?.trim().toLowerCase() ?? "";
+}
 
-  const warningsByAnimalId = new Map<string, string[]>();
+function filterAnimals(animals: AnimalListItem[], filters: CsvExportFilters) {
+  const search = normalizeSearch(filters.search);
 
-  for (const alert of alerts) {
-    const warnings = warningsByAnimalId.get(alert.entityId) ?? [];
-    warnings.push(alert.message);
-    warningsByAnimalId.set(alert.entityId, warnings);
-  }
+  return animals.filter((animal) => {
+    const haystack = [animal.animalId, animal.labId, animal.strain, animal.genotypeSummary, animal.cageLabel]
+      .join(" ")
+      .toLowerCase();
+    const matchesSearch = search ? haystack.includes(search) : true;
+    const matchesStatus = filters.status && filters.status !== "all" ? animal.status === filters.status : true;
+    const matchesAvailability = filters.availableOnly ? animal.availableForExperiment : true;
+
+    return matchesSearch && matchesStatus && matchesAvailability;
+  });
+}
+
+function filterCages(cages: CageListItem[], filters: CsvExportFilters) {
+  const search = normalizeSearch(filters.search);
+
+  return cages.filter((cage) => {
+    const haystack = [
+      cage.roomNumber,
+      cage.rackNumber,
+      cage.cageNumber,
+      cage.barcode,
+      cage.sexComposition,
+      cage.strainSummary,
+    ]
+      .join(" ")
+      .toLowerCase();
+    const matchesSearch = search ? haystack.includes(search) : true;
+    const matchesStatus = filters.status && filters.status !== "all" ? cage.status === filters.status : true;
+    const matchesWarnings = filters.warningsOnly ? cage.warningCount > 0 : true;
+
+    return matchesSearch && matchesStatus && matchesWarnings;
+  });
+}
+
+async function buildAnimalExportRows(filters: CsvExportFilters) {
+  const animals = filterAnimals(await getAnimalListView(), filters);
 
   return animals.map<CsvRow>((animal) => ({
     animalId: animal.animalId,
     labId: animal.labId,
     sex: animal.sex,
-    age: formatAgeLabel(getAgeInDays(animal.dob.toISOString(), referenceDate)),
-    strain: animal.strain.name,
-    genotype: formatGenotypeSummary(animal.alleles),
-    cage: formatCageLabel(animal.currentCage),
+    age: animal.ageLabel,
+    strain: animal.strain,
+    genotype: animal.genotypeSummary,
+    cage: animal.cageLabel,
     status: animal.status,
-    projects: animal.projectAllocations.map((allocation) => allocation.project.projectCode).join("; "),
-    warnings: (warningsByAnimalId.get(animal.id) ?? []).join(" | "),
+    projects: animal.projectCodes.join("; "),
+    warnings: animal.warnings.join(" | "),
   }));
 }
 
-async function buildCageExportRows() {
-  const [cages, alerts] = await prisma.$transaction([
-    prisma.cage.findMany({
-      orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
-      include: {
-        room: { select: { roomNumber: true } },
-        rack: { select: { rackNumber: true } },
-        animals: {
-          where: { outcomeStatus: "alive" },
-          include: {
-            strain: { select: { name: true } },
-          },
-        },
-      },
-    }),
-    prisma.alert.findMany({
-      where: {
-        entityType: "cage",
-        status: "open",
-      },
-      select: {
-        entityId: true,
-      },
-    }),
-  ]);
+async function buildCageExportRows(filters: CsvExportFilters) {
+  const cages = filterCages(await getCageListView(), filters);
 
-  const warningCountByCageId = new Map<string, number>();
-
-  for (const alert of alerts) {
-    warningCountByCageId.set(alert.entityId, (warningCountByCageId.get(alert.entityId) ?? 0) + 1);
-  }
-
-  return cages.map<CsvRow>((cage) => {
-    const sexComposition = cage.animals.reduce<Record<string, number>>((composition, animal) => {
-      composition[animal.sex] = (composition[animal.sex] ?? 0) + 1;
-      return composition;
-    }, {});
-    const strainSummary = [...new Set(cage.animals.map((animal) => animal.strain.name))].join("; ");
-
-    return {
-      cage: cage.cageNumber,
-      room: cage.room.roomNumber,
-      rack: cage.rack.rackNumber,
-      barcode: cage.barcode,
-      status: cage.status,
-      occupants: cage.animals.length,
-      sexComposition: Object.entries(sexComposition)
-        .map(([sex, count]) => `${sex} ${count}`)
-        .join(" / "),
-      strainSummary,
-      warningCount: warningCountByCageId.get(cage.id) ?? 0,
-    };
-  });
+  return cages.map<CsvRow>((cage) => ({
+    cage: cage.cageNumber,
+    room: cage.roomNumber,
+    rack: cage.rackNumber,
+    barcode: cage.barcode,
+    status: cage.status,
+    occupants: cage.occupantCount,
+    sexComposition: cage.sexComposition,
+    strainSummary: cage.strainSummary,
+    warningCount: cage.warningCount,
+  }));
 }
 
 async function buildAlertExportRows() {
@@ -207,17 +138,26 @@ async function buildExperimentExportRows() {
   }));
 }
 
-export async function buildCsvExport(entity: string) {
+export function hasActiveExportFilters(filters: CsvExportFilters) {
+  return Boolean(
+    normalizeSearch(filters.search) ||
+      (filters.status && filters.status !== "all") ||
+      filters.availableOnly ||
+      filters.warningsOnly,
+  );
+}
+
+export async function buildCsvExport(entity: string, filters: CsvExportFilters = {}) {
   const normalizedEntity = entity as ExportEntity;
 
   let rows: CsvRow[] = [];
 
   switch (normalizedEntity) {
     case "animals":
-      rows = await buildAnimalExportRows();
+      rows = await buildAnimalExportRows(filters);
       break;
     case "cages":
-      rows = await buildCageExportRows();
+      rows = await buildCageExportRows(filters);
       break;
     case "alerts":
       rows = await buildAlertExportRows();
@@ -229,5 +169,5 @@ export async function buildCsvExport(entity: string) {
       return null;
   }
 
-  return rows.length ? toCsv(rows) : "";
+  return toCsv(rows);
 }
