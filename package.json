@@ -11,6 +11,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "verify": "npm run prisma:validate && npm run typecheck && npm run lint && npm test && npm run build",
+    "verify:e2e": "playwright test --reporter=line",
+    "db:migrate": "prisma migrate deploy",
+    "db:prepare": "npm run db:migrate && npm run db:seed",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "db:seed": "tsx prisma/seed.ts"

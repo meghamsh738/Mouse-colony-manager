@@ -57,7 +57,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run test:e2e
+npm run verify
 npm run db:seed
+npm run db:prepare
 ```
 
 ## What Is Persisted
@@ -79,11 +81,8 @@ The runtime app path is fully Postgres-backed through Prisma. The remaining demo
 Current repo checks:
 
 ```bash
-npm run typecheck
-npm run lint
-npm test
+npm run verify
 LD_LIBRARY_PATH="$PWD/.runtime-libs/usr/lib/x86_64-linux-gnu" npm run test:e2e -- --reporter=line
-npm run build
 ```
 
 GitHub Actions mirrors this verification flow in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) with a fresh PostgreSQL service, a separate Playwright job, and artifact upload on e2e failures.
@@ -92,10 +91,6 @@ Clean-checkout verification was also run from a disposable clone with:
 
 ```bash
 npm ci
-npx prisma validate
-npm run db:seed
-npm run typecheck
-npm run lint
-npm test
-npm run build
+npm run db:prepare
+npm run verify
 ```
