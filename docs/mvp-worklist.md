@@ -18,9 +18,10 @@ This checklist tracks the remaining operational workflows needed to close the MV
 - [x] Cage movement workflow with movement history entry
 - [x] Rule settings write UI for admin-editable thresholds
 - [x] Export polish for more filtered operational views
+- [x] Vitest worker bootstrap path resolved for unit coverage
 
 ## Next
-- [ ] Validate or replace the blocked Vitest worker bootstrap path for unit coverage
+- [ ] No remaining MVP workflow gaps tracked in this checklist
 
 ## QA Follow-up
 
