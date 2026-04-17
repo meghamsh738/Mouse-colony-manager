@@ -20,6 +20,7 @@ import {
   recordAnimalGenotype,
   recordBreedingLitter,
   reserveAnimalForExperiment,
+  updateRuleConfig,
   updateAnimalLifecycleStatus,
   weanLitterToCages,
 } from "@/lib/colony-write";
@@ -403,6 +404,29 @@ describe("colony logic", () => {
     expect(archivedDetail?.animal.status).toBe("archived");
     expect(archivedDetail?.animal.outcomeStatus).toBe("euthanized");
     expect(archivedDetail?.timeline.some((event) => event.label === "Archived")).toBe(true);
+  }, 15_000);
+
+  it("updates a rule threshold and applies the new value to downstream alerts", async () => {
+    const updated = await updateRuleConfig(
+      {
+        ruleId: "rule-006",
+        valueInput: "1",
+        criticalBlock: true,
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(updated.ok).toBe(true);
+
+    const [rules, cageDetail, auditLogs] = await Promise.all([
+      getRuleSummaryView(),
+      getCageDetailView("cage-a101-002"),
+      getRecentAuditLogsView(),
+    ]);
+
+    expect(rules.find((rule) => rule.id === "rule-006")?.displayValue).toBe("1");
+    expect(cageDetail?.alerts.some((alert) => alert.alertType === "cage_overcapacity")).toBe(true);
+    expect(auditLogs[0]?.entityType).toBe("rule_config");
   }, 15_000);
 
   it("builds animal csv exports directly from Prisma data", async () => {

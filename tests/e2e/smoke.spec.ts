@@ -19,6 +19,7 @@ function projectSeed(projectName: string) {
     reservationAnimalId: isMobile ? "animal-012" : "animal-014",
     lifecycleAnimalId: isMobile ? "animal-014" : "animal-013",
     lifecycleAnimalCode: isMobile ? "CM-26014" : "CM-26013",
+    ruleGraceDays: isMobile ? "16" : "15",
     moveRoomId: isMobile ? "room-a102" : "room-a101",
     moveRackId: isMobile ? "rack-a102-1" : "rack-a101-2",
     moveCageNumber: "006",
@@ -301,14 +302,17 @@ test("animal staff can euthanize and then archive an animal record", async ({ pa
   await expect(page.locator('[data-testid="colony-table"] tbody tr')).toHaveCount(0, { timeout: 30_000 });
 });
 
-test("admin can review rule thresholds and recent audit history", async ({ page }) => {
+test("admin can update a rule threshold and see the audit trail", async ({ page }, testInfo) => {
+  const seed = projectSeed(testInfo.project.name);
+
   await signInAs(page, "admin");
   await page.goto("/settings");
 
-  await expect(page.getByText("Breeder maximum age")).toBeVisible();
-  const auditAction = page.getByText("create").first();
-  await auditAction.scrollIntoViewIfNeeded();
-  await expect(auditAction).toBeVisible();
+  await page.getByTestId("rule-value-reservation_start_grace_days").fill(seed.ruleGraceDays);
+  await submitAfterBlur(page, "rule-save-reservation_start_grace_days");
+
+  await expect(page.getByTestId("rule-value-reservation_start_grace_days")).toHaveValue(seed.ruleGraceDays, { timeout: 30_000 });
+  await expect(page.getByText("updated rule_config rule-008").first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("researcher sees reservation conflicts and can reserve an eligible animal", async ({ page }, testInfo) => {

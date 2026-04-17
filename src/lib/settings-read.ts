@@ -1,13 +1,16 @@
 import { prisma } from "@/lib/prisma";
+import { formatRuleDisplayValue, formatRuleEditorValue } from "@/lib/rule-config";
 
 export async function getRuleSummaryView() {
   const rules = await prisma.ruleConfig.findMany({
     orderBy: [{ category: "asc" }, { label: "asc" }],
     select: {
       id: true,
+      key: true,
       label: true,
       description: true,
       category: true,
+      valueType: true,
       value: true,
       criticalBlock: true,
     },
@@ -16,7 +19,8 @@ export async function getRuleSummaryView() {
   return rules.map((rule) => ({
     ...rule,
     description: rule.description ?? "",
-    displayValue: Array.isArray(rule.value) ? rule.value.join("; ") : String(rule.value),
+    displayValue: formatRuleDisplayValue(rule.value),
+    editorValue: formatRuleEditorValue(rule.valueType, rule.value),
   }));
 }
 

@@ -1,5 +1,7 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseGenotypeImportCsv } from "@/lib/genotype-import";
+import { parseRuleInputValue } from "@/lib/rule-config";
 import type { AnimalStatus, GenotypeCallStatus, HealthNoteType, Sex, UserRole } from "@/lib/types";
 
 type MutationResult =
@@ -104,6 +106,12 @@ type UpdateAnimalLifecycleInput = {
   reason: string;
 };
 
+type UpdateRuleConfigInput = {
+  ruleId: string;
+  valueInput: string;
+  criticalBlock: boolean;
+};
+
 function createId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -142,6 +150,10 @@ function canRecordGenotype(role: UserRole) {
 
 function canUpdateAnimalLifecycle(role: UserRole) {
   return role === "admin" || role === "colony_manager" || role === "animal_staff";
+}
+
+function canUpdateRuleConfig(role: UserRole) {
+  return role === "admin";
 }
 
 function getReferenceDate() {
@@ -1899,5 +1911,84 @@ export async function updateAnimalLifecycleStatus(
     ok: true,
     message: `${animal.animalId} marked ${input.targetStatus.replaceAll("_", " ")}.`,
     entityId: animal.id,
+  };
+}
+
+export async function updateRuleConfig(
+  input: UpdateRuleConfigInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canUpdateRuleConfig(actor.role)) {
+    return { ok: false, message: "Only admins can update rule settings." };
+  }
+
+  const rule = await prisma.ruleConfig.findUnique({
+    where: { id: input.ruleId },
+    select: {
+      id: true,
+      key: true,
+      label: true,
+      valueType: true,
+      value: true,
+      criticalBlock: true,
+    },
+  });
+
+  if (!rule) {
+    return { ok: false, message: "Rule not found." };
+  }
+
+  const parsedValue = parseRuleInputValue(rule.valueType, input.valueInput);
+
+  if (!parsedValue.ok) {
+    return { ok: false, message: parsedValue.message };
+  }
+
+  const nextValue = parsedValue.value as Prisma.InputJsonValue;
+  const sameValue = JSON.stringify(rule.value) === JSON.stringify(nextValue);
+
+  if (sameValue && rule.criticalBlock === input.criticalBlock) {
+    return {
+      ok: true,
+      message: `${rule.label} is already up to date.`,
+      entityId: rule.id,
+    };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.ruleConfig.update({
+      where: { id: rule.id },
+      data: {
+        value: nextValue as never,
+        criticalBlock: input.criticalBlock,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "rule_config",
+        entityId: rule.id,
+        action: "update",
+        previousValue: {
+          key: rule.key,
+          value: rule.value,
+          criticalBlock: rule.criticalBlock,
+        },
+        newValue: {
+          key: rule.key,
+          value: nextValue,
+          criticalBlock: input.criticalBlock,
+        },
+        timestamp: new Date(),
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `${rule.label} updated.`,
+    entityId: rule.id,
   };
 }
