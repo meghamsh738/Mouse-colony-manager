@@ -86,6 +86,8 @@ LD_LIBRARY_PATH="$PWD/.runtime-libs/usr/lib/x86_64-linux-gnu" npm run test:e2e -
 npm run build
 ```
 
+GitHub Actions mirrors this verification flow in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) with a fresh PostgreSQL service and a separate Playwright job.
+
 Clean-checkout verification was also run from a disposable clone with:
 
 ```bash
