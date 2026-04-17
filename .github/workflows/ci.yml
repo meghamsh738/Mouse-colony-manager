@@ -51,7 +51,7 @@ jobs:
         run: npm ci
 
       - name: Prepare database
-        run: npm run db:prepare
+        run: npm run db:prepare:ci
 
       - name: Static, unit, and build verification
         run: npm run verify
@@ -99,7 +99,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Prepare database
-        run: npm run db:prepare
+        run: npm run db:prepare:ci
 
       - name: Playwright tests
         run: npm run verify:e2e

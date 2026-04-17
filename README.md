@@ -21,13 +21,12 @@ Mouse Colony Manager is a Next.js + Prisma colony operations app for cage-first 
 npx prisma dev -d -n colony-maintenance
 ```
 
-2. Copy `.env.example` to `.env` and point both URLs at that Postgres instance.
+2. Copy `.env.example` to `.env` and point both database URLs at that Postgres instance.
 
 3. Apply the schema and seed the dev dataset:
 
 ```bash
-npx prisma db push
-npm run db:seed
+npm run db:prepare
 ```
 
 4. Start the app:
@@ -59,7 +58,9 @@ npm test
 npm run test:e2e
 npm run verify
 npm run db:seed
+npm run db:push
 npm run db:prepare
+npm run db:prepare:ci
 ```
 
 ## What Is Persisted
@@ -91,6 +92,7 @@ Clean-checkout verification was also run from a disposable clone with:
 
 ```bash
 npm ci
+cp .env.example .env
 npm run db:prepare
 npm run verify
 ```

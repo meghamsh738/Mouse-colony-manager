@@ -14,7 +14,9 @@
     "verify": "npm run prisma:validate && npm run typecheck && npm run lint && npm test && npm run build",
     "verify:e2e": "playwright test --reporter=line",
     "db:migrate": "prisma migrate deploy",
-    "db:prepare": "npm run db:migrate && npm run db:seed",
+    "db:push": "prisma db push",
+    "db:prepare": "npm run db:push && npm run db:seed",
+    "db:prepare:ci": "npm run db:migrate && npm run db:seed",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "db:seed": "tsx prisma/seed.ts"
