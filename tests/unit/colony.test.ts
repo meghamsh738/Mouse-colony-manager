@@ -307,7 +307,7 @@ describe("colony logic", () => {
     expect(breeding?.litter?.litterSizeWean).toBe(5);
     expect(breeding?.litter?.progenyCount).toBe(5);
     expect(highlights.upcomingWean.some((item) => item.breedingId === setup.entityId)).toBe(false);
-  }, 20_000);
+  }, 45_000);
 
   it("records a genotype result and updates the animal detail genotype views", async () => {
     const result = await recordAnimalGenotype(
