@@ -315,6 +315,16 @@ test("admin can record a cryostorage item and find it in the backup inventory wo
   await expect(page.getByTestId("cryostorage-table").getByText(recoveryNote)).toBeVisible({ timeout: 30_000 });
 });
 
+test("researcher can review the forecast workspace", async ({ page }) => {
+  await signInAs(page, "researcher");
+  await page.goto("/forecast");
+
+  await expect(page.getByText("Projected breeding output and experiment-ready runway.")).toBeVisible();
+  await expect(page.getByTestId("stat-pups-in-30d")).toBeVisible();
+  await expect(page.getByTestId("forecast-table").getByText("x").first()).toBeVisible();
+  await expect(page.getByRole("link", { name: "Inspect frozen backups" })).toBeVisible();
+});
+
 test("admin can import genotype rows from a csv upload", async ({ page }) => {
   const fixturePath = path.join(process.cwd(), "tests/fixtures/genotype-import.csv");
 

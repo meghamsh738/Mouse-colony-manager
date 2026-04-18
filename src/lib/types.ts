@@ -491,3 +491,24 @@ export interface CryostorageInventoryItem {
   recoveryNotes?: string | null;
   notes?: string | null;
 }
+
+export interface BreedingForecastItem {
+  id: string;
+  pairLabel: string;
+  targetGenotype: string;
+  projectedNextLitterDate: string;
+  projectedExperimentReadyDate: string;
+  expectedLitterSize: number;
+  expectedUsablePups: number;
+  expectedProbability: number;
+  warnings: string[];
+}
+
+export interface ForecastSummary {
+  projectedPups30Days: number;
+  projectedExperimentReady45Days: number;
+  activeBreedingForecasts: number;
+  cryostorageBackups: number;
+  availableNow: number;
+  reservedPressure: number;
+}

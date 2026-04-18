@@ -11,6 +11,7 @@ import {
 } from "@/lib/dashboard-read";
 import { buildCsvExport } from "@/lib/export-csv";
 import { getExperimentCandidateView, getExperimentOverviewView } from "@/lib/experiments-read";
+import { getBreedingForecastView, getForecastSummaryView } from "@/lib/forecast-read";
 import {
   addCageHealthNote,
   createAnimalRecord,
@@ -69,6 +70,16 @@ describe("colony logic", () => {
 
     expect(candidates.length).toBeGreaterThan(0);
     expect(candidates[0]?.score).toBeGreaterThan(0);
+  });
+
+  it("builds a live colony forecast from active breedings and backup inventory", async () => {
+    const [summary, rows] = await Promise.all([getForecastSummaryView(), getBreedingForecastView()]);
+
+    expect(summary.activeBreedingForecasts).toBeGreaterThan(0);
+    expect(summary.cryostorageBackups).toBeGreaterThan(0);
+    expect(summary.projectedPups30Days).toBeGreaterThan(0);
+    expect(rows[0]?.pairLabel).toContain("CM-");
+    expect(rows[0]?.expectedUsablePups).toBeGreaterThan(0);
   });
 
   it("creates a new animal record and exposes it through alert and candidate helpers", async () => {
