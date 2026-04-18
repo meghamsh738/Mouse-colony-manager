@@ -191,6 +191,29 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                     ))}
                   </select>
                 </label>
+                <label className="space-y-2 text-sm">
+                  <span className="text-[var(--muted)]">Treatment groups</span>
+                  <input
+                    className="h-11 w-full rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-base text-[var(--ink)] outline-none transition focus:border-[var(--line-strong)] focus:ring-2 focus:ring-[var(--focus)] md:text-sm"
+                    defaultValue={String(planner.filters.groupCount)}
+                    max={6}
+                    min={2}
+                    name="groupCount"
+                    type="number"
+                    data-testid="planner-group-count"
+                  />
+                </label>
+                <label className="space-y-2 text-sm">
+                  <span className="text-[var(--muted)]">Randomization seed</span>
+                  <input
+                    className="h-11 w-full rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-base text-[var(--ink)] outline-none transition focus:border-[var(--line-strong)] focus:ring-2 focus:ring-[var(--focus)] md:text-sm"
+                    defaultValue={planner.filters.randomSeed}
+                    name="randomSeed"
+                    placeholder="colony-balance"
+                    type="text"
+                    data-testid="planner-random-seed"
+                  />
+                </label>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="flex items-start gap-3 rounded-3xl border border-[var(--line)] px-4 py-4 text-sm">
@@ -247,6 +270,34 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                   <span>
                     <span className="block font-medium text-[var(--ink)]">Avoid sibling clustering</span>
                     <span className="mt-1 block text-[var(--muted)]">Prefer animals from different sire and dam pairs where possible.</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 rounded-3xl border border-[var(--line)] px-4 py-4 text-sm">
+                  <input
+                    className="mt-1 h-5 w-5 rounded border-[var(--line)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                    defaultChecked={planner.filters.blockBySex}
+                    name="blockBySex"
+                    type="checkbox"
+                    value="true"
+                    data-testid="planner-block-sex"
+                  />
+                  <span>
+                    <span className="block font-medium text-[var(--ink)]">Block by sex in randomization</span>
+                    <span className="mt-1 block text-[var(--muted)]">Keep treatment arms mixed as evenly as the selected cohort allows.</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 rounded-3xl border border-[var(--line)] px-4 py-4 text-sm">
+                  <input
+                    className="mt-1 h-5 w-5 rounded border-[var(--line)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                    defaultChecked={planner.filters.blockBySiblingGroup}
+                    name="blockBySiblingGroup"
+                    type="checkbox"
+                    value="true"
+                    data-testid="planner-block-siblings"
+                  />
+                  <span>
+                    <span className="block font-medium text-[var(--ink)]">Block by sibling group in randomization</span>
+                    <span className="mt-1 block text-[var(--muted)]">Avoid loading one treatment arm from the same sire and dam pair first.</span>
                   </span>
                 </label>
               </div>
@@ -321,6 +372,56 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                     or remove the project constraint.
                   </p>
                 )}
+              </div>
+            </Surface>
+            <Surface className="space-y-4" data-testid="experiment-randomization">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Randomization helper</p>
+                  <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em]">Seeded treatment-arm layout</h2>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    Deterministic grouping from the selected cohort. Reuse the same seed to regenerate the same arm layout.
+                  </p>
+                </div>
+                <p className="text-sm text-[var(--muted)]">Seed {planner.randomization.seed}</p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-sm text-[var(--muted)]">
+                {planner.randomization.strategy.map((step) => (
+                  <span key={step} className="rounded-full border border-[var(--line)] px-3 py-1.5">
+                    {step}
+                  </span>
+                ))}
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                {planner.randomization.groups.map((group) => (
+                  <article key={group.name} className="rounded-3xl border border-[var(--line)] p-4" data-testid="planner-group-card">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium">{group.name}</p>
+                        <p className="text-sm text-[var(--muted)]">
+                          {group.summary.total} animals · {group.summary.males} male · {group.summary.females} female
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {group.members.length ? (
+                        group.members.map((member) => (
+                          <div key={member.animalId} className="rounded-2xl bg-[var(--surface-2)] px-4 py-3 text-sm">
+                            <p className="font-medium">{member.animalId}</p>
+                            <p className="mt-1 text-[var(--muted)]">
+                              {titleCase(member.sex)} · {member.ageLabel} · {member.cageLabel}
+                            </p>
+                            <p className="mt-1 text-[var(--muted)]">{member.genotypeSummary}</p>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="rounded-2xl border border-dashed border-[var(--line)] px-4 py-4 text-sm text-[var(--muted)]">
+                          No members assigned. Increase the selected cohort or reduce the group count.
+                        </p>
+                      )}
+                    </div>
+                  </article>
+                ))}
               </div>
             </Surface>
             <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">

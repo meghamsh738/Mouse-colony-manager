@@ -481,6 +481,10 @@ export interface ExperimentPlannerFilters {
   allowOverlap: boolean;
   balanceByCage: boolean;
   avoidSiblingClustering: boolean;
+  groupCount: number;
+  randomSeed: string;
+  blockBySex: boolean;
+  blockBySiblingGroup: boolean;
 }
 
 export interface ExperimentGroupSuggestion {
@@ -500,6 +504,26 @@ export interface ExperimentPlannerView {
   candidates: ExperimentCandidate[];
   selected: ExperimentGroupSuggestion[];
   alternates: ExperimentGroupSuggestion[];
+  randomization: {
+    groups: Array<{
+      name: string;
+      members: Array<{
+        animalId: string;
+        sex: Sex;
+        ageLabel: string;
+        cageLabel: string;
+        genotypeSummary: string;
+        siblingGroup: string;
+      }>;
+      summary: {
+        total: number;
+        males: number;
+        females: number;
+      };
+    }>;
+    seed: string;
+    strategy: string[];
+  };
   exclusions: ExperimentExclusionSummary[];
   summary: {
     totalReviewed: number;

@@ -152,12 +152,18 @@ test("researcher can review experiment overview and tune the distribution helper
   await page.getByTestId("planner-sex").selectOption("male");
   await page.getByTestId("planner-desired-number").fill("2");
   await page.getByTestId("planner-genotype").fill("Cre");
+  await page.getByTestId("planner-group-count").fill("2");
+  await page.getByTestId("planner-random-seed").fill("seed-77");
   await submitAfterBlur(page, "planner-apply");
 
   await expect(page).toHaveURL(/sex=male/);
   await expect(page).toHaveURL(/desiredNumber=2/);
+  await expect(page).toHaveURL(/randomSeed=seed-77/);
   await expect(page.getByTestId("experiment-ranked-candidates")).toContainText("Male", { timeout: 30_000 });
   await expect(page.getByTestId("experiment-exclusions")).toContainText("Sex filter mismatch", { timeout: 30_000 });
+  await expect(page.getByTestId("experiment-randomization")).toContainText("Seed seed-77", { timeout: 30_000 });
+  await expect(page.getByTestId("planner-group-card")).toHaveCount(2, { timeout: 30_000 });
+  await expect(page.getByTestId("planner-group-card").first()).toContainText("Group A", { timeout: 30_000 });
 });
 
 test("admin can review breeding overview and generator suggestions", async ({ page }) => {

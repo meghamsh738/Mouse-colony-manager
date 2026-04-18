@@ -53,6 +53,22 @@ function parseBoolean(value: string | undefined, fallback = false) {
   return value === "true" || value === "on" || value === "1";
 }
 
+function normalizeSeed(value: string | undefined) {
+  return value?.trim() || "colony-balance";
+}
+
+function seededScore(seed: string, value: string) {
+  const input = `${seed}:${value}`;
+  let hash = 2166136261;
+
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return (hash >>> 0) / 4294967295;
+}
+
 function buildGenotypeSummary(
   alleles: Array<{
     zygosity: string;
@@ -185,6 +201,90 @@ export function parseExperimentPlannerFilters(searchParams?: PlannerSearchParams
     allowOverlap: parseBoolean(asString(searchParams?.allowOverlap), false),
     balanceByCage: parseBoolean(asString(searchParams?.balanceByCage), true),
     avoidSiblingClustering: parseBoolean(asString(searchParams?.avoidSiblingClustering), true),
+    groupCount: parseNumber(asString(searchParams?.groupCount), 2, { min: 2, max: 6 }),
+    randomSeed: normalizeSeed(asString(searchParams?.randomSeed)),
+    blockBySex: parseBoolean(asString(searchParams?.blockBySex), true),
+    blockBySiblingGroup: parseBoolean(asString(searchParams?.blockBySiblingGroup), true),
+  };
+}
+
+function buildRandomizationPlan(
+  selected: ExperimentGroupSuggestion[],
+  ranked: ExperimentCandidate[],
+  filters: ExperimentPlannerFilters,
+) {
+  const selectedCandidates = selected
+    .map((entry) => ranked.find((candidate) => candidate.animalId === entry.animalId))
+    .filter((candidate): candidate is ExperimentCandidate => Boolean(candidate));
+
+  const groups = Array.from({ length: filters.groupCount }, (_, index) => ({
+    name: `Group ${String.fromCharCode(65 + index)}`,
+    members: [] as Array<{
+      animalId: string;
+      sex: ExperimentCandidate["sex"];
+      ageLabel: string;
+      cageLabel: string;
+      genotypeSummary: string;
+      siblingGroup: string;
+    }>,
+    summary: {
+      total: 0,
+      males: 0,
+      females: 0,
+    },
+  }));
+
+  const strategy = [
+    "Seeded ordering from the selected cohort",
+    ...(filters.blockBySex ? ["Block by sex before assignment"] : []),
+    ...(filters.blockBySiblingGroup ? ["Keep sibling groups from front-loading the same treatment arm"] : []),
+    "Serpentine distribution across groups",
+  ];
+
+  const ordered = [...selectedCandidates].sort((left, right) => {
+    const leftBlock = [
+      filters.blockBySex ? left.sex : "",
+      filters.blockBySiblingGroup ? left.siblingGroup : "",
+    ].join("|");
+    const rightBlock = [
+      filters.blockBySex ? right.sex : "",
+      filters.blockBySiblingGroup ? right.siblingGroup : "",
+    ].join("|");
+
+    if (leftBlock !== rightBlock) {
+      return leftBlock.localeCompare(rightBlock);
+    }
+
+    return (
+      seededScore(filters.randomSeed, `${left.animalId}:${leftBlock}`) -
+        seededScore(filters.randomSeed, `${right.animalId}:${rightBlock}`) ||
+      left.animalId.localeCompare(right.animalId)
+    );
+  });
+
+  for (const [index, candidate] of ordered.entries()) {
+    const cycle = Math.floor(index / groups.length);
+    const position = index % groups.length;
+    const groupIndex = cycle % 2 === 0 ? position : groups.length - 1 - position;
+    const targetGroup = groups[groupIndex];
+
+    targetGroup.members.push({
+      animalId: candidate.animalId,
+      sex: candidate.sex,
+      ageLabel: candidate.ageLabel,
+      cageLabel: candidate.cageLabel,
+      genotypeSummary: candidate.genotypeSummary,
+      siblingGroup: candidate.siblingGroup,
+    });
+    targetGroup.summary.total += 1;
+    targetGroup.summary.males += candidate.sex === "male" ? 1 : 0;
+    targetGroup.summary.females += candidate.sex === "female" ? 1 : 0;
+  }
+
+  return {
+    groups,
+    seed: filters.randomSeed,
+    strategy,
   };
 }
 
@@ -385,12 +485,14 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
 
   const ranked = candidates.sort((left, right) => right.score - left.score || left.animalId.localeCompare(right.animalId));
   const { selected, alternates } = pickBalancedCohort(ranked, filters);
+  const randomization = buildRandomizationPlan(selected, ranked, filters);
 
   return {
     filters,
     candidates: ranked,
     selected,
     alternates,
+    randomization,
     exclusions: summarizeExclusions(reasonCounts),
     summary: {
       totalReviewed: animals.length,
@@ -419,6 +521,10 @@ export async function getExperimentCandidateView(
     allowOverlap: true,
     balanceByCage: true,
     avoidSiblingClustering: true,
+    groupCount: 2,
+    randomSeed: "colony-balance",
+    blockBySex: true,
+    blockBySiblingGroup: true,
   });
 
   return view.candidates;

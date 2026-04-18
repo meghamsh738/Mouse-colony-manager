@@ -85,6 +85,8 @@ describe("colony logic", () => {
         minAgeDays: "35",
         maxAgeDays: "140",
         genotypeKeyword: "Cre",
+        groupCount: "2",
+        randomSeed: "seed-42",
         includeReserved: "false",
         allowOverlap: "false",
       }),
@@ -94,6 +96,9 @@ describe("colony logic", () => {
     expect(planner.selected.length).toBeLessThanOrEqual(3);
     expect(planner.selected.length).toBeGreaterThan(0);
     expect(planner.candidates.every((candidate) => candidate.ageDays >= 35 && candidate.ageDays <= 140)).toBe(true);
+    expect(planner.randomization.groups).toHaveLength(2);
+    expect(planner.randomization.seed).toBe("seed-42");
+    expect(planner.randomization.groups.reduce((sum, group) => sum + group.members.length, 0)).toBe(planner.selected.length);
     expect(planner.exclusions.some((item) => item.reason.length > 0 && item.count > 0)).toBe(true);
   });
 
