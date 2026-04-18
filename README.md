@@ -108,6 +108,8 @@ If you want to debug the production-like e2e server outside Playwright, you can 
 npm run e2e:server
 ```
 
+That server bootstrap now applies the local schema automatically with `db:prepare`. In CI, the same script falls back to `db:seed` because migrations are already applied earlier in the workflow.
+
 On Ubuntu/Debian WSL without `sudo`, Playwright can fail to launch Chromium because shared libraries such as `libnspr4.so` are not present. Use the rootless wrapper scripts below to download and extract the required packages into `~/.cache/colony-maintenance/playwright-libs` and rerun Playwright with the correct `LD_LIBRARY_PATH`:
 
 ```bash
