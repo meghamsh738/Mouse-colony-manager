@@ -25,6 +25,7 @@ import {
   createSampleRecord,
   importGenotypeCsvBatch,
   moveCageLocation,
+  planExperimentCohortAssignments,
   recordAnimalGenotype,
   recordBreedingLitter,
   reserveAnimalForExperiment,
@@ -100,6 +101,42 @@ describe("colony logic", () => {
     expect(planner.randomization.seed).toBe("seed-42");
     expect(planner.randomization.groups.reduce((sum, group) => sum + group.members.length, 0)).toBe(planner.selected.length);
     expect(planner.exclusions.some((item) => item.reason.length > 0 && item.count > 0)).toBe(true);
+  });
+
+  it("persists the current experiment planner cohort as planned assignments", async () => {
+    const planner = await getExperimentPlannerView(
+      parseExperimentPlannerFilters({
+        desiredNumber: "2",
+        sex: "male",
+        minAgeDays: "35",
+        maxAgeDays: "140",
+        genotypeKeyword: "Cre",
+        groupCount: "2",
+        randomSeed: "plan-seed-99",
+      }),
+    );
+
+    const result = await planExperimentCohortAssignments(
+      {
+        experimentId: "experiment-001",
+        startDate: "2026-04-15",
+        notes: "Unit-test cohort planning coverage.",
+        selectedAnimals: planner.randomization.groups.flatMap((group) =>
+          group.members.map((member) => ({
+            animalId: member.animalId,
+            treatmentGroup: group.name,
+          })),
+        ),
+      },
+      { id: "user-researcher", role: "researcher" },
+    );
+
+    expect(result.ok).toBe(true);
+
+    const overview = await getExperimentOverviewView();
+    const experiment = overview.find((item) => item.experimentCode === "EXP-TAM-041");
+
+    expect(experiment?.assignments.some((assignment) => assignment.status === "planned")).toBe(true);
   });
 
   it("builds a live colony forecast from active breedings and backup inventory", async () => {

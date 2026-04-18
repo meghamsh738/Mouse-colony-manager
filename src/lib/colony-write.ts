@@ -60,6 +60,16 @@ type ReserveAnimalInput = {
   notes?: string;
 };
 
+type PlanExperimentCohortInput = {
+  experimentId: string;
+  startDate: string;
+  notes?: string;
+  selectedAnimals: Array<{
+    animalId: string;
+    treatmentGroup: string;
+  }>;
+};
+
 type CreateBreedingSetupInput = {
   sireId: string;
   damId: string;
@@ -888,6 +898,124 @@ export async function reserveAnimalForExperiment(
     ok: true,
     message: `${animal.animalId} reserved for ${experiment.experimentCode}.`,
     entityId: assignmentId,
+  };
+}
+
+export async function planExperimentCohortAssignments(
+  input: PlanExperimentCohortInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canReserveAnimal(actor.role)) {
+    return { ok: false, message: "Your role cannot plan experiment cohorts." };
+  }
+
+  const normalizedStartDate = new Date(input.startDate);
+
+  if (Number.isNaN(normalizedStartDate.getTime())) {
+    return { ok: false, message: "Choose a valid planned start date." };
+  }
+
+  if (!input.selectedAnimals.length) {
+    return { ok: false, message: "Select at least one candidate in the planner before saving a cohort." };
+  }
+
+  const experiment = await prisma.experiment.findUnique({
+    where: { id: input.experimentId },
+    select: {
+      id: true,
+      experimentCode: true,
+      status: true,
+    },
+  });
+
+  if (!experiment || experiment.status === "completed" || experiment.status === "cancelled") {
+    return { ok: false, message: "Choose an active or planned experiment for the cohort." };
+  }
+
+  const requestedAnimalIds = [...new Set(input.selectedAnimals.map((animal) => animal.animalId))];
+  const treatmentGroupByAnimalId = new Map(
+    input.selectedAnimals.map((animal) => [animal.animalId, animal.treatmentGroup.trim() || "Group A"]),
+  );
+  const animals = await prisma.animal.findMany({
+    where: {
+      animalId: { in: requestedAnimalIds },
+      outcomeStatus: "alive",
+    },
+    select: {
+      id: true,
+      animalId: true,
+      status: true,
+      experimentAssignments: {
+        where: {
+          experimentId: input.experimentId,
+          status: { in: ["planned", "reserved", "active", "completed"] },
+        },
+        select: {
+          id: true,
+        },
+      },
+    },
+  });
+
+  const animalsByAnimalId = new Map(animals.map((animal) => [animal.animalId, animal]));
+  const creatableAnimals = requestedAnimalIds
+    .map((animalId) => animalsByAnimalId.get(animalId))
+    .filter((animal): animal is (typeof animals)[number] => {
+      if (!animal) {
+        return false;
+      }
+
+      return ["colony_holding", "reserved", "experiment_completed"].includes(animal.status) && animal.experimentAssignments.length === 0;
+    });
+
+  if (!creatableAnimals.length) {
+    return { ok: false, message: `No new planned assignments were created for ${experiment.experimentCode}.` };
+  }
+
+  const skippedCount = requestedAnimalIds.length - creatableAnimals.length;
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    for (const animal of creatableAnimals) {
+      const assignmentId = createId("assign");
+      const treatmentGroup = treatmentGroupByAnimalId.get(animal.animalId) ?? "Group A";
+
+      await tx.experimentAssignment.create({
+        data: {
+          id: assignmentId,
+          animalId: animal.id,
+          experimentId: experiment.id,
+          status: "planned",
+          startDate: normalizedStartDate,
+          treatmentGroup,
+          notes: input.notes?.trim() || undefined,
+          isPrimary: false,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "experiment_assignment",
+          entityId: assignmentId,
+          action: "plan",
+          newValue: {
+            experimentId: experiment.id,
+            animalId: animal.id,
+            startDate: input.startDate,
+            treatmentGroup,
+            notes: input.notes?.trim() || undefined,
+          },
+          timestamp,
+        },
+      });
+    }
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `Planned ${creatableAnimals.length} cohort assignment${creatableAnimals.length === 1 ? "" : "s"} for ${experiment.experimentCode}.${skippedCount ? ` Skipped ${skippedCount} animal${skippedCount === 1 ? "" : "s"} already linked or no longer eligible.` : ""}`,
   };
 }
 

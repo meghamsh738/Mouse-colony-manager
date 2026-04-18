@@ -147,7 +147,7 @@ test("researcher can review experiment overview and tune the distribution helper
   await signInAs(page, "researcher");
   await page.goto("/experiments");
 
-  await expect(page.getByText("EXP-LPS-005")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Assignment conflicts and cohort planning." })).toBeVisible();
   await expect(page.getByTestId("experiment-cohort")).toBeVisible();
   await page.getByTestId("planner-sex").selectOption("male");
   await page.getByTestId("planner-desired-number").fill("2");
@@ -164,6 +164,14 @@ test("researcher can review experiment overview and tune the distribution helper
   await expect(page.getByTestId("experiment-randomization")).toContainText("Seed seed-77", { timeout: 30_000 });
   await expect(page.getByTestId("planner-group-card")).toHaveCount(2, { timeout: 30_000 });
   await expect(page.getByTestId("planner-group-card").first()).toContainText("Group A", { timeout: 30_000 });
+
+  await page.getByTestId("planner-save-experiment").selectOption("experiment-001");
+  await page.getByTestId("planner-save-start-date").fill("2026-04-15");
+  await page.getByTestId("planner-save-notes").fill("Persisted from the distribution helper during smoke coverage.");
+  await submitAfterBlur(page, "planner-save-submit");
+
+  await expect(page.getByText("Planned 2 cohort assignments for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("planned · starts 15 Apr 2026").first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can review breeding overview and generator suggestions", async ({ page }) => {

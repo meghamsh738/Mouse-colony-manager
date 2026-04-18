@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app/app-shell";
+import { ExperimentPlanSaveForm } from "@/components/app/experiment-plan-save-form";
 import { PageHeader } from "@/components/app/page-header";
 import { StatStrip } from "@/components/app/stat-strip";
 import { Surface } from "@/components/app/surface";
@@ -423,6 +424,18 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                   </article>
                 ))}
               </div>
+            </Surface>
+            <Surface className="space-y-4" data-testid="experiment-plan-save">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Persist cohort</p>
+                  <h2 className="mt-2 text-xl font-semibold tracking-[-0.03em]">Write the current layout into experiment planning</h2>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    This saves the selected cohort as `planned` experiment assignments and preserves the seeded treatment groups.
+                  </p>
+                </div>
+              </div>
+              <ExperimentPlanSaveForm experimentOptions={options.experimentOptions} filters={planner.filters} />
             </Surface>
             <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
               <Surface className="space-y-4" data-testid="experiment-ranked-candidates">

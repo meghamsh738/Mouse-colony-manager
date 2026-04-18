@@ -326,7 +326,7 @@ export async function getExperimentOverviewView(): Promise<ExperimentOverviewIte
 }
 
 export async function getExperimentPlannerOptions() {
-  const [projects, strains] = await prisma.$transaction([
+  const [projects, strains, experiments] = await prisma.$transaction([
     prisma.project.findMany({
       orderBy: { projectCode: "asc" },
       select: { id: true, projectCode: true, title: true },
@@ -334,6 +334,17 @@ export async function getExperimentPlannerOptions() {
     prisma.strain.findMany({
       orderBy: { name: "asc" },
       select: { id: true, name: true },
+    }),
+    prisma.experiment.findMany({
+      where: {
+        status: { in: ["planned", "active"] },
+      },
+      orderBy: [{ status: "asc" }, { experimentCode: "asc" }],
+      select: {
+        id: true,
+        experimentCode: true,
+        title: true,
+      },
     }),
   ]);
 
@@ -345,6 +356,10 @@ export async function getExperimentPlannerOptions() {
     strainOptions: strains.map((strain) => ({
       id: strain.id,
       label: strain.name,
+    })),
+    experimentOptions: experiments.map((experiment) => ({
+      id: experiment.id,
+      label: `${experiment.experimentCode} · ${experiment.title}`,
     })),
   };
 }
