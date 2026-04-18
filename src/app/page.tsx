@@ -11,6 +11,7 @@ import {
   getDashboardHighlightsView,
   getDashboardMetricsView,
 } from "@/lib/dashboard-read";
+import { SEED_REFERENCE_DATE } from "@/lib/seed-metadata";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
@@ -149,7 +150,7 @@ export default async function DashboardPage() {
               </Link>
             </div>
             <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] p-4 text-sm text-[var(--muted)]">
-              Seed dataset reference date: {formatDate("2026-04-05T09:00:00.000Z")}
+              Seed dataset reference date: {formatDate(SEED_REFERENCE_DATE)}
             </div>
           </Surface>
         </div>

@@ -1,9 +1,10 @@
 import type { SeedColonyData } from "@/lib/types";
+import { SEED_REFERENCE_DATE } from "@/lib/seed-metadata";
 
 import { seededDevUsers } from "../src/lib/dev-accounts";
 
 export const seedColonyData: SeedColonyData = {
-  today: "2026-04-05T09:00:00.000Z",
+  today: SEED_REFERENCE_DATE,
   users: seededDevUsers,
   facilities: [
     {

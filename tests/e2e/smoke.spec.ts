@@ -1,13 +1,14 @@
 import path from "node:path";
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { SEEDED_DEV_EMAILS, SEEDED_DEV_PASSWORD } from "../../src/lib/seed-metadata";
 
 test.describe.configure({ timeout: 90_000 });
 
 const credentials = {
-  admin: { email: "admin@colony.local", password: "colony123" },
-  staff: { email: "staff@colony.local", password: "colony123" },
-  researcher: { email: "researcher@colony.local", password: "colony123" },
+  admin: { email: SEEDED_DEV_EMAILS.admin, password: SEEDED_DEV_PASSWORD },
+  staff: { email: SEEDED_DEV_EMAILS.staff, password: SEEDED_DEV_PASSWORD },
+  researcher: { email: SEEDED_DEV_EMAILS.researcher, password: SEEDED_DEV_PASSWORD },
 } as const;
 
 function projectSeed(projectName: string) {
