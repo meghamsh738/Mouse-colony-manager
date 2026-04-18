@@ -55,8 +55,15 @@ npm run build
 npm run lint
 npm run typecheck
 npm test
+npm run e2e:install
+npm run e2e:install:wsl
 npm run test:e2e
+npm run test:e2e:wsl
 npm run verify
+npm run verify:e2e
+npm run verify:e2e:wsl
+npm run verify:all
+npm run verify:all:wsl
 npm run db:seed
 npm run db:push
 npm run db:prepare
@@ -88,11 +95,19 @@ npm run verify:e2e
 
 GitHub Actions mirrors this verification flow in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) with a fresh PostgreSQL service, a separate Playwright job, and artifact upload on e2e failures.
 
+For a full local gate in one command:
+
+```bash
+npm run verify:all
+```
+
 On Ubuntu/Debian WSL without `sudo`, Playwright can fail to launch Chromium because shared libraries such as `libnspr4.so` are not present. Use the rootless wrapper scripts below to download and extract the required packages into `~/.cache/colony-maintenance/playwright-libs` and rerun Playwright with the correct `LD_LIBRARY_PATH`:
 
 ```bash
+npm run e2e:install:wsl
 npm run test:e2e:wsl
 npm run verify:e2e:wsl
+npm run verify:all:wsl
 ```
 
 Clean-checkout verification was also run from a disposable clone with:
