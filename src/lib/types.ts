@@ -62,6 +62,7 @@ export type HealthNoteType =
 export type AlertSeverity = "info" | "warning" | "critical";
 export type AlertStatus = "open" | "acknowledged" | "resolved";
 export type GenotypeCallStatus = "pending" | "provisional" | "confirmed" | "conflict";
+export type SampleStatus = "collected" | "stored" | "allocated" | "consumed" | "discarded";
 export type BreedingStatus = "planned" | "active" | "paused" | "retired" | "failed";
 export type BreedingAdultRole = "sire" | "dam" | "support";
 export type RuleCategory =
@@ -179,6 +180,21 @@ export interface GenotypingRecord {
   finalCall: string;
   status: GenotypeCallStatus;
   confidence?: string;
+}
+
+export interface SampleRecord {
+  id: string;
+  animalId: string;
+  projectId?: string;
+  sampleLabel: string;
+  sampleType: string;
+  status: SampleStatus;
+  collectedAt: string;
+  storageLocation?: string;
+  quantityLabel?: string;
+  notes?: string;
+  createdById?: string;
+  createdAt?: string;
 }
 
 export interface BreedingSetup {
@@ -364,6 +380,7 @@ export interface SeedColonyData {
   projectAllocations: AnimalProjectAllocation[];
   experiments: Experiment[];
   experimentAssignments: ExperimentAssignment[];
+  sampleRecords: SampleRecord[];
   healthNotes: HealthNote[];
   attachments: Attachment[];
   animalStatusEvents: AnimalStatusEvent[];
@@ -425,4 +442,19 @@ export interface ExperimentCandidate {
   inclusionReason: string;
   warnings: string[];
   cageLabel: string;
+}
+
+export interface SampleInventoryItem {
+  id: string;
+  sampleLabel: string;
+  sampleType: string;
+  status: SampleStatus;
+  collectedAt: string;
+  animalId: string;
+  animalCode: string;
+  labId: string;
+  projectCode?: string | null;
+  storageLocation?: string | null;
+  quantityLabel?: string | null;
+  notes?: string | null;
 }

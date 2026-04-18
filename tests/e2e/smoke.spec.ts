@@ -253,6 +253,36 @@ test("admin can record a genotype result from the animal detail page", async ({ 
   await expect(page.getByTestId("genotype-record-history").getByText(resultText)).toBeVisible({ timeout: 30_000 });
 });
 
+test("admin can record a sample and find it in the inventory workspace", async ({ page }, testInfo) => {
+  const seed = projectSeed(testInfo.project.name);
+  const sampleLabel = `DNA-${seed.suffix}-26004`;
+  const sampleNote = `Recorded during ${seed.noteSuffix} sample inventory verification.`;
+
+  await signInAs(page, "admin");
+  await page.goto("/animals/animal-004");
+
+  await page.getByTestId("sample-record-label").fill(sampleLabel);
+  await page.getByTestId("sample-record-type").fill("Tail DNA");
+  await page.getByTestId("sample-record-status").selectOption("stored");
+  await page.getByTestId("sample-record-collected-at").fill("2026-04-11");
+  await page.getByTestId("sample-record-project").selectOption("project-neuro");
+  await page.getByTestId("sample-record-storage").fill("Freezer 2 / Box D / D04");
+  await page.getByTestId("sample-record-quantity").fill("1 x 40 uL");
+  await page.getByTestId("sample-record-notes").fill(sampleNote);
+  await submitAfterBlur(page, "sample-record-submit");
+
+  await expect(page.getByText(`Sample ${sampleLabel} recorded for CM-26004.`)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sample-record-history").getByText(sampleLabel)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sample-record-history").getByText(sampleNote)).toBeVisible({ timeout: 30_000 });
+
+  await page.goto("/samples");
+  await page.getByTestId("sample-search").fill(sampleLabel);
+
+  await expect(page.getByTestId("sample-table").getByText(sampleLabel)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sample-table").getByText("CM-26004")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sample-table").getByText(sampleNote)).toBeVisible({ timeout: 30_000 });
+});
+
 test("admin can import genotype rows from a csv upload", async ({ page }) => {
   const fixturePath = path.join(process.cwd(), "tests/fixtures/genotype-import.csv");
 

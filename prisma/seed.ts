@@ -22,6 +22,7 @@ export async function seedDatabase() {
     prisma.experimentAssignment.deleteMany(),
     prisma.experiment.deleteMany(),
     prisma.animalProjectAllocation.deleteMany(),
+    prisma.sampleRecord.deleteMany(),
     prisma.project.deleteMany(),
     prisma.litterAnimal.deleteMany(),
     prisma.litter.deleteMany(),
@@ -105,6 +106,13 @@ export async function seedDatabase() {
       ...assignment,
       startDate: new Date(assignment.startDate),
       endDate: asDate(assignment.endDate),
+    })),
+  });
+  await prisma.sampleRecord.createMany({
+    data: seedColonyData.sampleRecords.map((record) => ({
+      ...record,
+      collectedAt: new Date(record.collectedAt),
+      createdAt: asDate(record.createdAt),
     })),
   });
   await prisma.healthNote.createMany({

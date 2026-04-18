@@ -103,6 +103,14 @@ enum GenotypeCallStatus {
   conflict
 }
 
+enum SampleStatus {
+  collected
+  stored
+  allocated
+  consumed
+  discarded
+}
+
 enum BreedingStatus {
   planned
   active
@@ -142,6 +150,7 @@ model User {
   statusEvents       AnimalStatusEvent[] @relation("StatusEventActor")
   genotypesPerformed GenotypingRecord[]  @relation("GenotypeOperator")
   genotypesVerified  GenotypingRecord[]  @relation("GenotypeVerifier")
+  sampleRecordsCreated SampleRecord[]    @relation("SampleRecordCreator")
 }
 
 model Facility {
@@ -252,6 +261,7 @@ model Animal {
   experimentAssignments ExperimentAssignment[]
   healthNotes           HealthNote[]
   attachments           Attachment[]
+  sampleRecords         SampleRecord[]
   statusEvents          AnimalStatusEvent[]
   animalMovements       AnimalMovement[]
 
@@ -350,6 +360,7 @@ model Project {
   owner             User                     @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Restrict)
   animalAllocations AnimalProjectAllocation[]
   experiments       Experiment[]
+  sampleRecords     SampleRecord[]
 }
 
 model AnimalProjectAllocation {
@@ -395,6 +406,30 @@ model ExperimentAssignment {
 
   @@index([animalId])
   @@index([experimentId])
+}
+
+model SampleRecord {
+  id              String       @id
+  animalId        String
+  projectId       String?
+  sampleLabel     String       @unique
+  sampleType      String
+  status          SampleStatus @default(stored)
+  collectedAt     DateTime
+  storageLocation String?
+  quantityLabel   String?
+  notes           String?
+  createdById     String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  animal          Animal       @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  project         Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdBy       User?        @relation("SampleRecordCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([animalId])
+  @@index([projectId])
+  @@index([status])
+  @@index([collectedAt])
 }
 
 model HealthNote {

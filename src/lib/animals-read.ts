@@ -368,7 +368,7 @@ export async function getAnimalListView(): Promise<AnimalListItem[]> {
 }
 
 export async function getAnimalDetailView(animalId: string) {
-  const [rules, animal, experiments, alleleOptions, manualAlerts] = await Promise.all([
+  const [rules, animal, experiments, alleleOptions, projectOptions, manualAlerts] = await Promise.all([
     getAnimalRuleContext(),
     prisma.animal.findUnique({
       where: { id: animalId },
@@ -429,6 +429,25 @@ export async function getAnimalDetailView(animalId: string) {
             sampleDate: true,
           },
         },
+        sampleRecords: {
+          orderBy: [{ collectedAt: "desc" }, { createdAt: "desc" }],
+          select: {
+            id: true,
+            sampleLabel: true,
+            sampleType: true,
+            status: true,
+            collectedAt: true,
+            storageLocation: true,
+            quantityLabel: true,
+            notes: true,
+            project: {
+              select: {
+                id: true,
+                projectCode: true,
+              },
+            },
+          },
+        },
         statusEvents: {
           orderBy: { happenedAt: "desc" },
           select: {
@@ -452,6 +471,14 @@ export async function getAnimalDetailView(animalId: string) {
         gene: true,
         name: true,
         type: true,
+      },
+    }),
+    prisma.project.findMany({
+      orderBy: { projectCode: "asc" },
+      select: {
+        id: true,
+        projectCode: true,
+        title: true,
       },
     }),
     prisma.alert.findMany({
@@ -490,6 +517,12 @@ export async function getAnimalDetailView(animalId: string) {
       date: record.resultDate.toISOString(),
       label: `Genotype ${record.status}`,
       description: record.finalCall,
+    })),
+    ...animal.sampleRecords.map((record) => ({
+      id: `sample-${record.id}`,
+      date: record.collectedAt.toISOString(),
+      label: `Sample ${titleCase(record.status)}`,
+      description: `${record.sampleLabel} · ${record.sampleType}${record.project?.projectCode ? ` · ${record.project.projectCode}` : ""}`,
     })),
     ...animal.statusEvents.map((event) => ({
       id: event.id,
@@ -541,6 +574,17 @@ export async function getAnimalDetailView(animalId: string) {
       confidence: record.confidence ?? null,
       finalCall: record.finalCall,
     })),
+    sampleRecords: animal.sampleRecords.map((record) => ({
+      id: record.id,
+      sampleLabel: record.sampleLabel,
+      sampleType: record.sampleType,
+      status: record.status,
+      collectedAt: record.collectedAt.toISOString(),
+      storageLocation: record.storageLocation ?? null,
+      quantityLabel: record.quantityLabel ?? null,
+      notes: record.notes ?? null,
+      projectCode: record.project?.projectCode ?? null,
+    })),
     sireAnimalId: animal.sire?.animalId ?? null,
     damAnimalId: animal.dam?.animalId ?? null,
     alerts,
@@ -559,6 +603,7 @@ export async function getAnimalDetailView(animalId: string) {
     })),
     canReserve: animal.status === "colony_holding",
     canRecordGenotype: animal.outcomeStatus === "alive",
+    canRecordSample: animal.status !== "archived",
     defaultLifecycleDate: rules.today.slice(0, 10),
     alleleOptions: alleleOptions.map((allele) => ({
       id: allele.id,
@@ -569,6 +614,12 @@ export async function getAnimalDetailView(animalId: string) {
       id: experiment.id,
       label: `${experiment.experimentCode} · ${experiment.title}`,
     })),
+    projectOptions: projectOptions.map((project) => ({
+      id: project.id,
+      label: `${project.projectCode} · ${project.title}`,
+    })),
+    defaultSampleDate: rules.today.slice(0, 10),
+    defaultSampleProjectId: animal.projectAllocations[0]?.project.id ?? null,
     projectCodes: animal.projectAllocations.map((allocation) => allocation.project.projectCode),
   };
 }

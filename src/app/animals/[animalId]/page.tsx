@@ -6,6 +6,7 @@ import { AnimalLifecycleForm } from "@/components/app/animal-lifecycle-form";
 import { AppShell } from "@/components/app/app-shell";
 import { ExperimentReservationForm } from "@/components/app/experiment-reservation-form";
 import { PageHeader } from "@/components/app/page-header";
+import { SampleCreateForm } from "@/components/app/sample-create-form";
 import { Surface } from "@/components/app/surface";
 import { Badge } from "@/components/ui/badge";
 import { getAnimalDetailView } from "@/lib/animals-read";
@@ -58,6 +59,7 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
 
   const canReserveAnimal = user.role === "admin" || user.role === "colony_manager" || user.role === "researcher";
   const canRecordGenotype = user.role !== "read_only" && snapshot.canRecordGenotype;
+  const canRecordSample = user.role !== "read_only" && snapshot.canRecordSample;
   const canManageLifecycle = user.role === "admin" || user.role === "colony_manager" || user.role === "animal_staff";
   const lifecycleActions = getLifecycleActions(snapshot.animal.status, snapshot.animal.outcomeStatus);
 
@@ -194,6 +196,35 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                 )}
               </div>
             </Surface>
+            <Surface className="space-y-4" data-testid="sample-record-history">
+              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Sample history</p>
+              <div className="space-y-3">
+                {snapshot.sampleRecords.length ? (
+                  snapshot.sampleRecords.map((record) => (
+                    <article key={record.id} className="rounded-2xl border border-[var(--line)] p-4">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <p className="font-medium">{record.sampleLabel}</p>
+                        <Badge variant={record.status === "stored" ? "success" : record.status === "discarded" ? "danger" : "info"}>
+                          {record.status}
+                        </Badge>
+                        <span className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+                          {formatDate(record.collectedAt)}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-sm text-[var(--muted)]">{record.sampleType}</p>
+                      <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm text-[var(--muted)]">
+                        {record.projectCode ? <span>{record.projectCode}</span> : null}
+                        {record.storageLocation ? <span>{record.storageLocation}</span> : <span>Storage pending</span>}
+                        {record.quantityLabel ? <span>{record.quantityLabel}</span> : null}
+                      </div>
+                      {record.notes ? <p className="mt-3 text-sm leading-6 text-[var(--ink)]">{record.notes}</p> : null}
+                    </article>
+                  ))
+                ) : (
+                  <p className="text-sm text-[var(--muted)]">No sample records are linked to this animal yet.</p>
+                )}
+              </div>
+            </Surface>
             <Surface className="space-y-4">
               <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Timeline</p>
               <div className="space-y-3">
@@ -250,6 +281,32 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                   animalId={snapshot.animal.id}
                   alleleOptions={snapshot.alleleOptions}
                   defaultDate={snapshot.defaultGenotypeDate}
+                />
+              </Surface>
+            ) : null}
+            {canRecordSample ? (
+              <Surface className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Sample entry</p>
+                  <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
+                    Record tissue, DNA, or aliquot inventory against this mouse.
+                  </h2>
+                  <p className="text-sm leading-7 text-[var(--muted)]">
+                    Each sample stays linked to the source animal and optional project so downstream storage and usage remain traceable.
+                  </p>
+                </div>
+                <SampleCreateForm
+                  animalOptions={[
+                    {
+                      id: snapshot.animal.id,
+                      label: `${snapshot.animal.animalId} · ${snapshot.animal.labId}`,
+                    },
+                  ]}
+                  projectOptions={snapshot.projectOptions}
+                  defaultAnimalId={snapshot.animal.id}
+                  animalSelectDisabled
+                  defaultCollectedAt={snapshot.defaultSampleDate}
+                  defaultProjectId={snapshot.defaultSampleProjectId}
                 />
               </Surface>
             ) : null}

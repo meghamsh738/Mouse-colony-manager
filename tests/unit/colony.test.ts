@@ -15,6 +15,7 @@ import {
   addCageHealthNote,
   createAnimalRecord,
   createBreedingSetup,
+  createSampleRecord,
   importGenotypeCsvBatch,
   moveCageLocation,
   recordAnimalGenotype,
@@ -25,6 +26,7 @@ import {
   weanLitterToCages,
 } from "@/lib/colony-write";
 import { getRecentAuditLogsView, getRuleSummaryView } from "@/lib/settings-read";
+import { getSampleInventoryView } from "@/lib/samples-read";
 import { seedDatabase } from "../../prisma/seed";
 
 async function resetColonyState() {
@@ -84,6 +86,32 @@ describe("colony logic", () => {
     expect(result.ok).toBe(true);
     const animals = await getAnimalListView();
     expect(animals.some((animal) => animal.animalId === "CM-TEST-101")).toBe(true);
+  });
+
+  it("records a sample inventory entry and exposes it in the inventory and animal timeline", async () => {
+    const sampleLabel = "DNA-26004-B";
+    const result = await createSampleRecord(
+      {
+        animalId: "animal-004",
+        projectId: "project-neuro",
+        sampleLabel,
+        sampleType: "Tail DNA",
+        status: "stored",
+        collectedAt: "2026-04-09",
+        storageLocation: "Freezer 2 / Box D / D04",
+        quantityLabel: "1 x 40 uL",
+        notes: "Verification aliquot for migration coverage.",
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(result.ok).toBe(true);
+
+    const [inventory, animal] = await Promise.all([getSampleInventoryView(), getAnimalDetailView("animal-004")]);
+
+    expect(inventory.some((record) => record.sampleLabel === sampleLabel && record.animalCode === "CM-26004")).toBe(true);
+    expect(animal?.sampleRecords.some((record) => record.sampleLabel === sampleLabel)).toBe(true);
+    expect(animal?.timeline.some((event) => event.description.includes(sampleLabel))).toBe(true);
   });
 
   it("adds a cage health note that surfaces as a cage alert", async () => {

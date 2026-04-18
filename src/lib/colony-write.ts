@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseGenotypeImportCsv } from "@/lib/genotype-import";
 import { parseRuleInputValue } from "@/lib/rule-config";
-import type { AnimalStatus, GenotypeCallStatus, HealthNoteType, Sex, UserRole } from "@/lib/types";
+import type { AnimalStatus, GenotypeCallStatus, HealthNoteType, SampleStatus, Sex, UserRole } from "@/lib/types";
 
 type MutationResult =
   | {
@@ -94,6 +94,18 @@ type RecordAnimalGenotypeInput = {
   sampleId?: string;
 };
 
+type CreateSampleRecordInput = {
+  animalId: string;
+  projectId?: string;
+  sampleLabel: string;
+  sampleType: string;
+  status: SampleStatus;
+  collectedAt: string;
+  storageLocation?: string;
+  quantityLabel?: string;
+  notes?: string;
+};
+
 type ImportGenotypeCsvInput = {
   csvText: string;
   fileName?: string;
@@ -145,6 +157,10 @@ function canWeanLitter(role: UserRole) {
 }
 
 function canRecordGenotype(role: UserRole) {
+  return role !== "read_only";
+}
+
+function canRecordSample(role: UserRole) {
   return role !== "read_only";
 }
 
@@ -392,7 +408,7 @@ export async function createAnimalRecord(
         timestamp,
       },
     });
-  });
+  }, { timeout: 15_000, maxWait: 10_000 });
 
   return {
     ok: true,
@@ -479,7 +495,7 @@ export async function addCageHealthNote(
         timestamp,
       },
     });
-  });
+  }, { timeout: 15_000, maxWait: 10_000 });
 
   return {
     ok: true,
@@ -841,7 +857,7 @@ export async function reserveAnimalForExperiment(
         timestamp,
       },
     });
-  });
+  }, { timeout: 15_000, maxWait: 10_000 });
 
   return {
     ok: true,
@@ -1054,7 +1070,7 @@ export async function createBreedingSetup(
         timestamp,
       },
     });
-  });
+  }, { timeout: 15_000, maxWait: 10_000 });
 
   return {
     ok: true,
@@ -1163,7 +1179,7 @@ export async function recordBreedingLitter(
         timestamp,
       },
     });
-  });
+  }, { timeout: 15_000, maxWait: 10_000 });
 
   return {
     ok: true,
@@ -1409,7 +1425,7 @@ export async function weanLitterToCages(
         timestamp,
       },
     });
-  });
+  }, { timeout: 15_000, maxWait: 10_000 });
 
   return {
     ok: true,
@@ -1718,6 +1734,138 @@ export async function importGenotypeCsvBatch(
   return {
     ok: true,
     message: `Processed ${parsed.rows.length} genotype row${parsed.rows.length === 1 ? "" : "s"}${fileLabel}. ${successCount} succeeded.${errorSummary}${firstError}`,
+  };
+}
+
+export async function createSampleRecord(
+  input: CreateSampleRecordInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canRecordSample(actor.role)) {
+    return { ok: false, message: "Your role cannot record new sample inventory." };
+  }
+
+  const [animal, project] = await Promise.all([
+    prisma.animal.findUnique({
+      where: { id: input.animalId },
+      select: {
+        id: true,
+        animalId: true,
+        labId: true,
+        dob: true,
+        status: true,
+      },
+    }),
+    input.projectId
+      ? prisma.project.findUnique({
+          where: { id: input.projectId },
+          select: {
+            id: true,
+            projectCode: true,
+          },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!animal) {
+    return { ok: false, message: "Animal not found." };
+  }
+
+  if (input.projectId && !project) {
+    return { ok: false, message: "Choose a valid project for the sample record." };
+  }
+
+  const normalizedCollectedAt = new Date(input.collectedAt);
+
+  if (Number.isNaN(normalizedCollectedAt.getTime())) {
+    return { ok: false, message: "Choose a valid collection date for the sample record." };
+  }
+
+  if (normalizedCollectedAt.getTime() < animal.dob.getTime()) {
+    return { ok: false, message: "Sample collection date cannot be earlier than the animal date of birth." };
+  }
+
+  const normalizedSampleLabel = input.sampleLabel.trim();
+  const normalizedSampleType = input.sampleType.trim();
+  const normalizedStorageLocation = input.storageLocation?.trim() || undefined;
+  const normalizedQuantityLabel = input.quantityLabel?.trim() || undefined;
+  const normalizedNotes = input.notes?.trim() || undefined;
+
+  if (normalizedSampleLabel.length < 3) {
+    return { ok: false, message: "Enter a unique sample label with at least 3 characters." };
+  }
+
+  if (normalizedSampleType.length < 2) {
+    return { ok: false, message: "Enter a sample type before saving." };
+  }
+
+  const existingRecord = await prisma.sampleRecord.findUnique({
+    where: { sampleLabel: normalizedSampleLabel },
+    select: {
+      id: true,
+      animalId: true,
+    },
+  });
+
+  if (existingRecord) {
+    if (existingRecord.animalId === animal.id) {
+      return {
+        ok: true,
+        message: `Sample ${normalizedSampleLabel} is already recorded for ${animal.animalId}.`,
+        entityId: existingRecord.id,
+      };
+    }
+
+    return { ok: false, message: "Sample label already exists. Use a unique label for this inventory record." };
+  }
+
+  const recordId = createId("sample");
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.sampleRecord.create({
+      data: {
+        id: recordId,
+        animalId: animal.id,
+        projectId: project?.id,
+        sampleLabel: normalizedSampleLabel,
+        sampleType: normalizedSampleType,
+        status: input.status,
+        collectedAt: normalizedCollectedAt,
+        storageLocation: normalizedStorageLocation,
+        quantityLabel: normalizedQuantityLabel,
+        notes: normalizedNotes,
+        createdById: actor.id,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "sample_record",
+        entityId: recordId,
+        action: "create",
+        newValue: {
+          animalId: animal.id,
+          projectId: project?.id ?? null,
+          sampleLabel: normalizedSampleLabel,
+          sampleType: normalizedSampleType,
+          status: input.status,
+          collectedAt: input.collectedAt,
+          storageLocation: normalizedStorageLocation ?? null,
+          quantityLabel: normalizedQuantityLabel ?? null,
+          notes: normalizedNotes ?? null,
+        },
+        timestamp,
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `Sample ${normalizedSampleLabel} recorded for ${animal.animalId}.`,
+    entityId: recordId,
   };
 }
 

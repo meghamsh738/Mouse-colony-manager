@@ -1,0 +1,245 @@
+"use client";
+
+import Link from "next/link";
+import { useMemo, useState } from "react";
+import {
+  createColumnHelper,
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
+
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import type { SampleInventoryItem } from "@/lib/types";
+import { formatDate } from "@/lib/utils";
+
+const columnHelper = createColumnHelper<SampleInventoryItem>();
+
+function statusVariant(status: SampleInventoryItem["status"]) {
+  if (status === "stored") {
+    return "success";
+  }
+
+  if (status === "allocated") {
+    return "info";
+  }
+
+  if (status === "discarded") {
+    return "danger";
+  }
+
+  if (status === "collected") {
+    return "warning";
+  }
+
+  return "neutral";
+}
+
+export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | SampleInventoryItem["status"]>("all");
+  const [typeFilter, setTypeFilter] = useState("all");
+
+  const sampleTypes = useMemo(
+    () => Array.from(new Set(data.map((record) => record.sampleType))).sort((left, right) => left.localeCompare(right)),
+    [data],
+  );
+
+  const filteredData = useMemo(
+    () =>
+      data.filter((record) => {
+        const haystack = [
+          record.sampleLabel,
+          record.sampleType,
+          record.animalCode,
+          record.labId,
+          record.projectCode ?? "",
+          record.storageLocation ?? "",
+          record.quantityLabel ?? "",
+          record.notes ?? "",
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        const matchesSearch = haystack.includes(search.toLowerCase());
+        const matchesStatus = statusFilter === "all" ? true : record.status === statusFilter;
+        const matchesType = typeFilter === "all" ? true : record.sampleType === typeFilter;
+
+        return matchesSearch && matchesStatus && matchesType;
+      }),
+    [data, search, statusFilter, typeFilter],
+  );
+
+  const counts = useMemo(
+    () =>
+      filteredData.reduce(
+        (summary, record) => {
+          summary.total += 1;
+          summary[record.status] += 1;
+          return summary;
+        },
+        {
+          total: 0,
+          collected: 0,
+          stored: 0,
+          allocated: 0,
+          consumed: 0,
+          discarded: 0,
+        },
+      ),
+    [filteredData],
+  );
+
+  const columns = useMemo(
+    () => [
+      columnHelper.accessor("sampleLabel", {
+        header: "Sample",
+        cell: (info) => (
+          <div className="space-y-1">
+            <p className="font-medium text-[var(--ink)]">{info.getValue()}</p>
+            <p className="text-sm text-[var(--muted)]">{info.row.original.sampleType}</p>
+            {info.row.original.quantityLabel ? (
+              <p className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{info.row.original.quantityLabel}</p>
+            ) : null}
+          </div>
+        ),
+      }),
+      columnHelper.accessor("status", {
+        header: "Status",
+        cell: (info) => <Badge variant={statusVariant(info.getValue())}>{info.getValue()}</Badge>,
+      }),
+      columnHelper.accessor("collectedAt", {
+        header: "Collected",
+        cell: (info) => formatDate(info.getValue()),
+      }),
+      columnHelper.display({
+        id: "animal",
+        header: "Animal",
+        cell: (info) => (
+          <div className="space-y-1">
+            <Link href={`/animals/${info.row.original.animalId}`} className="font-medium hover:text-[var(--accent)]">
+              {info.row.original.animalCode}
+            </Link>
+            <p className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{info.row.original.labId}</p>
+          </div>
+        ),
+      }),
+      columnHelper.accessor("projectCode", {
+        header: "Project",
+        cell: (info) => info.getValue() ?? <span className="text-sm text-[var(--muted)]">None</span>,
+      }),
+      columnHelper.accessor("storageLocation", {
+        header: "Storage",
+        cell: (info) => info.getValue() ?? <span className="text-sm text-[var(--muted)]">Pending</span>,
+      }),
+      columnHelper.accessor("notes", {
+        header: "Notes",
+        cell: (info) =>
+          info.getValue() ? (
+            <p className="max-w-[320px] text-sm leading-6 text-[var(--muted)]">{info.getValue()}</p>
+          ) : (
+            <span className="text-sm text-[var(--muted)]">None</span>
+          ),
+      }),
+    ],
+    [],
+  );
+
+  // TanStack Table owns stateful table instance creation here; disabling the
+  // React Compiler compatibility warning is appropriate for this boundary.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const table = useReactTable({
+    data: filteredData,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
+
+  return (
+    <div className="space-y-5" data-testid="sample-table">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search sample label, animal ID, project, storage, or notes"
+            data-testid="sample-search"
+          />
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+            className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
+          >
+            <option value="all">All statuses</option>
+            <option value="stored">Stored</option>
+            <option value="collected">Collected</option>
+            <option value="allocated">Allocated</option>
+            <option value="consumed">Consumed</option>
+            <option value="discarded">Discarded</option>
+          </select>
+          <select
+            value={typeFilter}
+            onChange={(event) => setTypeFilter(event.target.value)}
+            className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
+          >
+            <option value="all">All sample types</option>
+            {sampleTypes.map((sampleType) => (
+              <option key={sampleType} value={sampleType}>
+                {sampleType}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 rounded-[24px] border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--muted)]">
+          <span>
+            Showing <span className="font-medium text-[var(--ink)]">{counts.total}</span> records
+          </span>
+          <span>
+            <span className="font-medium text-[var(--ink)]">{counts.stored}</span> stored
+          </span>
+          <span>
+            <span className="font-medium text-[var(--ink)]">{counts.allocated}</span> allocated
+          </span>
+          <span>
+            <span className="font-medium text-[var(--ink)]">{counts.consumed + counts.discarded}</span> closed out
+          </span>
+        </div>
+      </div>
+      <div className="overflow-x-auto rounded-[24px] border border-[var(--line)]">
+        <table className="min-w-full border-collapse text-left">
+          <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <th key={header.id} className="px-4 py-3 font-medium">
+                    {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                  </th>
+                ))}
+              </tr>
+            ))}
+          </thead>
+          <tbody className="divide-y divide-[var(--line)] bg-white/70">
+            {table.getRowModel().rows.map((row) => (
+              <tr key={row.id} className="align-top">
+                {row.getVisibleCells().map((cell) => (
+                  <td key={cell.id} className="px-4 py-4 text-sm text-[var(--ink)]">
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {table.getRowModel().rows.length ? null : (
+        <div className="rounded-[24px] border border-dashed border-[var(--line)] bg-[var(--surface-2)] px-4 py-6 text-center text-sm text-[var(--muted)]">
+          No samples match the current filters. Clear the search or widen the status and type filters to review the full inventory.
+        </div>
+      )}
+    </div>
+  );
+}
