@@ -57,6 +57,7 @@ npm run typecheck
 npm test
 npm run e2e:install
 npm run e2e:install:wsl
+npm run e2e:server
 npm run test:e2e
 npm run test:e2e:wsl
 npm run verify
@@ -99,6 +100,12 @@ For a full local gate in one command:
 
 ```bash
 npm run verify:all
+```
+
+If you want to debug the production-like e2e server outside Playwright, you can start the same seeded test server directly:
+
+```bash
+npm run e2e:server
 ```
 
 On Ubuntu/Debian WSL without `sudo`, Playwright can fail to launch Chromium because shared libraries such as `libnspr4.so` are not present. Use the rootless wrapper scripts below to download and extract the required packages into `~/.cache/colony-maintenance/playwright-libs` and rerun Playwright with the correct `LD_LIBRARY_PATH`:
