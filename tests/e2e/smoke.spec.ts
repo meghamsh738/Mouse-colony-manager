@@ -143,13 +143,21 @@ test("animal staff can move a cage from the scan workspace and review the histor
   await expect(page.getByText(moveReason).first()).toBeVisible({ timeout: 30_000 });
 });
 
-test("researcher can review experiment overview and candidate helper", async ({ page }) => {
+test("researcher can review experiment overview and tune the distribution helper", async ({ page }) => {
   await signInAs(page, "researcher");
   await page.goto("/experiments");
 
   await expect(page.getByText("EXP-LPS-005")).toBeVisible();
-  await expect(page.getByText("PRJ-NEURO-07")).toBeVisible();
-  await expect(page.getByText("Included for review despite current blocker").first()).toBeVisible();
+  await expect(page.getByTestId("experiment-cohort")).toBeVisible();
+  await page.getByTestId("planner-sex").selectOption("male");
+  await page.getByTestId("planner-desired-number").fill("2");
+  await page.getByTestId("planner-genotype").fill("Cre");
+  await submitAfterBlur(page, "planner-apply");
+
+  await expect(page).toHaveURL(/sex=male/);
+  await expect(page).toHaveURL(/desiredNumber=2/);
+  await expect(page.getByTestId("experiment-ranked-candidates")).toContainText("Male", { timeout: 30_000 });
+  await expect(page.getByTestId("experiment-exclusions")).toContainText("Sex filter mismatch", { timeout: 30_000 });
 });
 
 test("admin can review breeding overview and generator suggestions", async ({ page }) => {

@@ -10,7 +10,12 @@ import {
   getDashboardMetricsView,
 } from "@/lib/dashboard-read";
 import { buildCsvExport } from "@/lib/export-csv";
-import { getExperimentCandidateView, getExperimentOverviewView } from "@/lib/experiments-read";
+import {
+  getExperimentCandidateView,
+  getExperimentOverviewView,
+  getExperimentPlannerView,
+  parseExperimentPlannerFilters,
+} from "@/lib/experiments-read";
 import { getBreedingForecastView, getForecastSummaryView } from "@/lib/forecast-read";
 import {
   addCageHealthNote,
@@ -70,6 +75,26 @@ describe("colony logic", () => {
 
     expect(candidates.length).toBeGreaterThan(0);
     expect(candidates[0]?.score).toBeGreaterThan(0);
+  });
+
+  it("builds a filtered experiment planner with cohort picks and exclusion reasons", async () => {
+    const planner = await getExperimentPlannerView(
+      parseExperimentPlannerFilters({
+        desiredNumber: "3",
+        sex: "either",
+        minAgeDays: "35",
+        maxAgeDays: "140",
+        genotypeKeyword: "Cre",
+        includeReserved: "false",
+        allowOverlap: "false",
+      }),
+    );
+
+    expect(planner.summary.totalReviewed).toBeGreaterThan(0);
+    expect(planner.selected.length).toBeLessThanOrEqual(3);
+    expect(planner.selected.length).toBeGreaterThan(0);
+    expect(planner.candidates.every((candidate) => candidate.ageDays >= 35 && candidate.ageDays <= 140)).toBe(true);
+    expect(planner.exclusions.some((item) => item.reason.length > 0 && item.count > 0)).toBe(true);
   });
 
   it("builds a live colony forecast from active breedings and backup inventory", async () => {

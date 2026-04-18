@@ -460,6 +460,54 @@ export interface ExperimentCandidate {
   inclusionReason: string;
   warnings: string[];
   cageLabel: string;
+  sex: Sex;
+  ageDays: number;
+  ageLabel: string;
+  strain: string;
+  genotypeSummary: string;
+  projectCodes: string[];
+  siblingGroup: string;
+}
+
+export interface ExperimentPlannerFilters {
+  desiredNumber: number;
+  desiredSex: "male" | "female" | "either";
+  minAgeDays: number;
+  maxAgeDays: number;
+  genotypeKeyword: string;
+  strainId?: string;
+  projectId?: string;
+  includeReserved: boolean;
+  allowOverlap: boolean;
+  balanceByCage: boolean;
+  avoidSiblingClustering: boolean;
+}
+
+export interface ExperimentGroupSuggestion {
+  animalId: string;
+  rank: number;
+  adjustedScore: number;
+  reasons: string[];
+}
+
+export interface ExperimentExclusionSummary {
+  reason: string;
+  count: number;
+}
+
+export interface ExperimentPlannerView {
+  filters: ExperimentPlannerFilters;
+  candidates: ExperimentCandidate[];
+  selected: ExperimentGroupSuggestion[];
+  alternates: ExperimentGroupSuggestion[];
+  exclusions: ExperimentExclusionSummary[];
+  summary: {
+    totalReviewed: number;
+    included: number;
+    selected: number;
+    alternates: number;
+    excluded: number;
+  };
 }
 
 export interface SampleInventoryItem {
