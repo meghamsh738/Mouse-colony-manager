@@ -59,7 +59,9 @@ npm run e2e:install
 npm run e2e:install:wsl
 npm run e2e:server
 npm run test:e2e
+npm run test:e2e:smoke
 npm run test:e2e:wsl
+npm run test:e2e:smoke:wsl
 npm run verify
 npm run verify:e2e
 npm run verify:e2e:wsl
@@ -109,6 +111,13 @@ npm run e2e:server
 ```
 
 That server bootstrap now applies the local schema automatically with `db:prepare`. In CI, the same script falls back to `db:seed` because migrations are already applied earlier in the workflow.
+
+For the fastest meaningful browser check, use the seeded-login smoke:
+
+```bash
+npm run test:e2e:smoke
+npm run test:e2e:smoke:wsl
+```
 
 On Ubuntu/Debian WSL without `sudo`, Playwright can fail to launch Chromium because shared libraries such as `libnspr4.so` are not present. Use the rootless wrapper scripts below to download and extract the required packages into `~/.cache/colony-maintenance/playwright-libs` and rerun Playwright with the correct `LD_LIBRARY_PATH`:
 
