@@ -7,14 +7,14 @@ import { authenticateAction } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-type DemoAccount = {
+type SeededAccount = {
   name: string;
   email: string;
   password: string;
   role: string;
 };
 
-export function LoginForm({ demoAccounts }: { demoAccounts: DemoAccount[] }) {
+export function LoginForm({ seededAccounts }: { seededAccounts: SeededAccount[] }) {
   const [errorMessage, action, pending] = useActionState(authenticateAction, undefined);
 
   return (
@@ -59,7 +59,7 @@ export function LoginForm({ demoAccounts }: { demoAccounts: DemoAccount[] }) {
       <section className="rounded-[32px] border border-[var(--line)] bg-[var(--surface)] p-8 backdrop-blur-sm shadow-[0_16px_40px_rgba(19,24,39,0.04)]">
         <form action={action} className="space-y-5">
           <div className="space-y-2">
-            <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Demo access</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Seeded access</p>
             <h2 className="font-display text-2xl font-semibold tracking-[-0.04em]">Open the workspace</h2>
             <p className="text-sm leading-7 text-[var(--muted)]">
               Use one of the seeded roles to inspect staff, researcher, and admin workflows.
@@ -68,12 +68,12 @@ export function LoginForm({ demoAccounts }: { demoAccounts: DemoAccount[] }) {
           <div className="space-y-3">
             <label className="space-y-2 text-sm text-[var(--muted)]">
               Email
-              <Input defaultValue={demoAccounts[0]?.email} name="email" data-testid="login-email" />
+              <Input defaultValue={seededAccounts[0]?.email} name="email" data-testid="login-email" />
             </label>
             <label className="space-y-2 text-sm text-[var(--muted)]">
               Password
               <Input
-                defaultValue={demoAccounts[0]?.password}
+                defaultValue={seededAccounts[0]?.password}
                 name="password"
                 type="password"
                 data-testid="login-password"
@@ -89,7 +89,7 @@ export function LoginForm({ demoAccounts }: { demoAccounts: DemoAccount[] }) {
         <div className="mt-6 space-y-3 border-t border-[var(--line)] pt-5">
           <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Seeded roles</p>
           <div className="space-y-3">
-            {demoAccounts.map((account) => (
+            {seededAccounts.map((account) => (
               <div key={account.email} className="rounded-2xl border border-[var(--line)] bg-white/55 px-4 py-3 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-medium text-[var(--ink)]">{account.name}</span>

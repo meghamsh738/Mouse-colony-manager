@@ -1,49 +1,10 @@
-import type { DemoColonyData } from "@/lib/types";
+import type { SeedColonyData } from "@/lib/types";
 
-export const demoColonyData: DemoColonyData = {
+import { seededDevUsers } from "../src/lib/dev-accounts";
+
+export const seedColonyData: SeedColonyData = {
   today: "2026-04-05T09:00:00.000Z",
-  users: [
-    {
-      id: "user-admin",
-      name: "Maeve O'Connell",
-      email: "admin@colony.local",
-      password: "colony123",
-      role: "admin",
-      active: true,
-    },
-    {
-      id: "user-manager",
-      name: "Patrick Byrne",
-      email: "manager@colony.local",
-      password: "colony123",
-      role: "colony_manager",
-      active: true,
-    },
-    {
-      id: "user-staff",
-      name: "Aisling Murphy",
-      email: "staff@colony.local",
-      password: "colony123",
-      role: "animal_staff",
-      active: true,
-    },
-    {
-      id: "user-researcher",
-      name: "Nora Walsh",
-      email: "researcher@colony.local",
-      password: "colony123",
-      role: "researcher",
-      active: true,
-    },
-    {
-      id: "user-readonly",
-      name: "Rory Flynn",
-      email: "readonly@colony.local",
-      password: "colony123",
-      role: "read_only",
-      active: true,
-    },
-  ],
+  users: seededDevUsers,
   facilities: [
     {
       id: "facility-tcd",

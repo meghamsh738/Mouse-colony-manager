@@ -2,7 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import { Prisma, PrismaClient } from "@prisma/client";
 
-import { demoColonyData } from "../src/data/demo-colony";
+import { seedColonyData } from "./seed-data";
 import { hashPassword } from "../src/lib/password";
 
 const prisma = new PrismaClient();
@@ -40,7 +40,7 @@ export async function seedDatabase() {
   ]);
 
   await prisma.user.createMany({
-    data: demoColonyData.users.map((user) => ({
+    data: seedColonyData.users.map((user) => ({
       id: user.id,
       name: user.name,
       email: user.email,
@@ -50,98 +50,98 @@ export async function seedDatabase() {
     })),
   });
 
-  await prisma.facility.createMany({ data: demoColonyData.facilities });
-  await prisma.room.createMany({ data: demoColonyData.rooms });
-  await prisma.rack.createMany({ data: demoColonyData.racks });
+  await prisma.facility.createMany({ data: seedColonyData.facilities });
+  await prisma.room.createMany({ data: seedColonyData.rooms });
+  await prisma.rack.createMany({ data: seedColonyData.racks });
   await prisma.cage.createMany({
-    data: demoColonyData.cages.map((cage) => ({
+    data: seedColonyData.cages.map((cage) => ({
       ...cage,
       lastUpdatedAt: new Date(cage.lastUpdatedAt),
     })),
   });
-  await prisma.strain.createMany({ data: demoColonyData.strains });
-  await prisma.allele.createMany({ data: demoColonyData.alleles });
+  await prisma.strain.createMany({ data: seedColonyData.strains });
+  await prisma.allele.createMany({ data: seedColonyData.alleles });
   await prisma.animal.createMany({
-    data: demoColonyData.animals.map((animal) => ({
+    data: seedColonyData.animals.map((animal) => ({
       ...animal,
       dob: new Date(animal.dob),
       deathDate: asDate(animal.deathDate),
     })),
   });
-  await prisma.animalAllele.createMany({ data: demoColonyData.animalAlleles });
+  await prisma.animalAllele.createMany({ data: seedColonyData.animalAlleles });
   await prisma.genotypingRecord.createMany({
-    data: demoColonyData.genotypingRecords.map((record) => ({
+    data: seedColonyData.genotypingRecords.map((record) => ({
       ...record,
       sampleDate: new Date(record.sampleDate),
       resultDate: new Date(record.resultDate),
     })),
   });
   await prisma.breedingSetup.createMany({
-    data: demoColonyData.breedingSetups.map((setup) => ({
+    data: seedColonyData.breedingSetups.map((setup) => ({
       ...setup,
       startDate: new Date(setup.startDate),
       endDate: asDate(setup.endDate),
     })),
   });
-  await prisma.breedingAdult.createMany({ data: demoColonyData.breedingAdults });
+  await prisma.breedingAdult.createMany({ data: seedColonyData.breedingAdults });
   await prisma.litter.createMany({
-    data: demoColonyData.litters.map((litter) => ({
+    data: seedColonyData.litters.map((litter) => ({
       ...litter,
       birthDate: new Date(litter.birthDate),
     })),
   });
-  await prisma.litterAnimal.createMany({ data: demoColonyData.litterAnimals });
-  await prisma.project.createMany({ data: demoColonyData.projects });
+  await prisma.litterAnimal.createMany({ data: seedColonyData.litterAnimals });
+  await prisma.project.createMany({ data: seedColonyData.projects });
   await prisma.animalProjectAllocation.createMany({
-    data: demoColonyData.projectAllocations.map((allocation) => ({
+    data: seedColonyData.projectAllocations.map((allocation) => ({
       ...allocation,
       startedAt: new Date(allocation.startedAt),
       endedAt: asDate(allocation.endedAt),
     })),
   });
-  await prisma.experiment.createMany({ data: demoColonyData.experiments });
+  await prisma.experiment.createMany({ data: seedColonyData.experiments });
   await prisma.experimentAssignment.createMany({
-    data: demoColonyData.experimentAssignments.map((assignment) => ({
+    data: seedColonyData.experimentAssignments.map((assignment) => ({
       ...assignment,
       startDate: new Date(assignment.startDate),
       endDate: asDate(assignment.endDate),
     })),
   });
   await prisma.healthNote.createMany({
-    data: demoColonyData.healthNotes.map((note) => ({
+    data: seedColonyData.healthNotes.map((note) => ({
       ...note,
       createdAt: new Date(note.createdAt),
     })),
   });
-  await prisma.attachment.createMany({ data: demoColonyData.attachments });
+  await prisma.attachment.createMany({ data: seedColonyData.attachments });
   await prisma.animalStatusEvent.createMany({
-    data: demoColonyData.animalStatusEvents.map((event) => ({
+    data: seedColonyData.animalStatusEvents.map((event) => ({
       ...event,
       happenedAt: new Date(event.happenedAt),
     })),
   });
   await prisma.animalMovement.createMany({
-    data: demoColonyData.animalMovements.map((movement) => ({
+    data: seedColonyData.animalMovements.map((movement) => ({
       ...movement,
       movedAt: new Date(movement.movedAt),
     })),
   });
   await prisma.cageMovement.createMany({
-    data: demoColonyData.cageMovements.map((movement) => ({
+    data: seedColonyData.cageMovements.map((movement) => ({
       ...movement,
       movedAt: new Date(movement.movedAt),
     })),
   });
-  await prisma.ruleConfig.createMany({ data: demoColonyData.ruleConfigs });
+  await prisma.ruleConfig.createMany({ data: seedColonyData.ruleConfigs });
   await prisma.alert.createMany({
-    data: demoColonyData.manualAlerts.map((alert) => ({
+    data: seedColonyData.manualAlerts.map((alert) => ({
       ...alert,
       generatedAt: new Date(alert.generatedAt),
       resolvedAt: asDate(alert.resolvedAt),
     })),
   });
   await prisma.auditLog.createMany({
-    data: demoColonyData.auditLogs.map((log) => ({
+    data: seedColonyData.auditLogs.map((log) => ({
       ...log,
       previousValue: log.previousValue as Prisma.InputJsonValue | undefined,
       newValue: log.newValue as Prisma.InputJsonValue | undefined,

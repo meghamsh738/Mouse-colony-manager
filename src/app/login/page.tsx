@@ -14,7 +14,7 @@ export default async function LoginPage() {
   return (
     <main className="min-h-screen bg-[var(--page)] px-5 py-5 md:px-8 md:py-8">
       <div className="mx-auto flex min-h-[calc(100vh-2.5rem)] max-w-[1480px] items-stretch">
-        <LoginForm demoAccounts={getSeededDevAccounts()} />
+        <LoginForm seededAccounts={getSeededDevAccounts()} />
       </div>
     </main>
   );

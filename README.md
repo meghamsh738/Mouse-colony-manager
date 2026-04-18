@@ -75,7 +75,7 @@ npm run db:prepare:ci
 
 ## Current Scope
 
-The runtime app path is fully Postgres-backed through Prisma. The remaining demo-shaped data structures are only kept for seeding the development dataset and can be reduced further if the seed flow is later rewritten around Prisma-native fixtures.
+The runtime app path is fully Postgres-backed through Prisma. The remaining seed fixtures now live under [`prisma/seed-data.ts`](./prisma/seed-data.ts), and runtime application code no longer imports the full colony seed dataset.
 
 ## Verification
 
@@ -83,10 +83,17 @@ Current repo checks:
 
 ```bash
 npm run verify
-LD_LIBRARY_PATH="$PWD/.runtime-libs/usr/lib/x86_64-linux-gnu" npm run test:e2e -- --reporter=line
+npm run verify:e2e
 ```
 
 GitHub Actions mirrors this verification flow in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml) with a fresh PostgreSQL service, a separate Playwright job, and artifact upload on e2e failures.
+
+On Ubuntu/Debian WSL without `sudo`, Playwright can fail to launch Chromium because shared libraries such as `libnspr4.so` are not present. Use the rootless wrapper scripts below to download and extract the required packages into `~/.cache/colony-maintenance/playwright-libs` and rerun Playwright with the correct `LD_LIBRARY_PATH`:
+
+```bash
+npm run test:e2e:wsl
+npm run verify:e2e:wsl
+```
 
 Clean-checkout verification was also run from a disposable clone with:
 

@@ -42,7 +42,7 @@ This tracker covers the work required to replace the persisted demo store with r
 
 ## Cleanup
 
-- [ ] Remove or archive demo-only data structures once Prisma is the runtime source of truth.
+- [x] Remove or archive demo-only data structures once Prisma is the runtime source of truth.
 - [x] Update README and environment docs for Postgres-backed setup.
 - [x] Commit, push branch, and verify the repo from a clean checkout.
 

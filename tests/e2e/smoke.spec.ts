@@ -58,7 +58,7 @@ async function submitAfterBlur(page: Page, testId: string) {
   await submitWithinAfterBlur(page, page, testId);
 }
 
-test("demo user can log in and reach the dashboard", async ({ page }) => {
+test("seeded user can log in and reach the dashboard", async ({ page }) => {
   await signInAs(page, "admin");
 });
 

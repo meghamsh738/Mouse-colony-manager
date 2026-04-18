@@ -16,7 +16,7 @@ export async function authenticateAction(_previousState: string | undefined, for
     });
   } catch (error) {
     if (error instanceof AuthError) {
-      return "The email or password did not match a demo account.";
+      return "The email or password did not match a seeded account.";
     }
 
     throw error;

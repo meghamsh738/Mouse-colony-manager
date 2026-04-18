@@ -72,7 +72,7 @@ export type RuleCategory =
   | "experiment"
   | "capacity";
 
-export interface DemoUser {
+export interface SeedUser {
   id: string;
   name: string;
   email: string;
@@ -344,9 +344,9 @@ export interface AuditLog {
   timestamp: string;
 }
 
-export interface DemoColonyData {
+export interface SeedColonyData {
   today: string;
-  users: DemoUser[];
+  users: SeedUser[];
   facilities: Facility[];
   rooms: Room[];
   racks: Rack[];
