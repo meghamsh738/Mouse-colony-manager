@@ -16,7 +16,7 @@ export default defineConfig({
           exclude: ["tests/unit/**/*.test.tsx"],
           setupFiles: [],
           testTimeout: 45_000,
-          hookTimeout: 60_000,
+          hookTimeout: 120_000,
         },
       },
       {

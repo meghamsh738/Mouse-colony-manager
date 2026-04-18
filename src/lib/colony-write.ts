@@ -2,7 +2,15 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { parseGenotypeImportCsv } from "@/lib/genotype-import";
 import { parseRuleInputValue } from "@/lib/rule-config";
-import type { AnimalStatus, GenotypeCallStatus, HealthNoteType, SampleStatus, Sex, UserRole } from "@/lib/types";
+import type {
+  AnimalStatus,
+  CryostorageStatus,
+  GenotypeCallStatus,
+  HealthNoteType,
+  SampleStatus,
+  Sex,
+  UserRole,
+} from "@/lib/types";
 
 type MutationResult =
   | {
@@ -106,6 +114,19 @@ type CreateSampleRecordInput = {
   notes?: string;
 };
 
+type CreateCryostorageRecordInput = {
+  strainId: string;
+  projectId?: string;
+  sampleLabel: string;
+  materialType: string;
+  status: CryostorageStatus;
+  storedAt: string;
+  storageLocation?: string;
+  quantityLabel?: string;
+  recoveryNotes?: string;
+  notes?: string;
+};
+
 type ImportGenotypeCsvInput = {
   csvText: string;
   fileName?: string;
@@ -161,6 +182,10 @@ function canRecordGenotype(role: UserRole) {
 }
 
 function canRecordSample(role: UserRole) {
+  return role !== "read_only";
+}
+
+function canRecordCryostorage(role: UserRole) {
   return role !== "read_only";
 }
 
@@ -1865,6 +1890,134 @@ export async function createSampleRecord(
   return {
     ok: true,
     message: `Sample ${normalizedSampleLabel} recorded for ${animal.animalId}.`,
+    entityId: recordId,
+  };
+}
+
+export async function createCryostorageRecord(
+  input: CreateCryostorageRecordInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canRecordCryostorage(actor.role)) {
+    return { ok: false, message: "Your role cannot record cryostorage inventory." };
+  }
+
+  const [strain, project] = await Promise.all([
+    prisma.strain.findUnique({
+      where: { id: input.strainId },
+      select: {
+        id: true,
+        name: true,
+      },
+    }),
+    input.projectId
+      ? prisma.project.findUnique({
+          where: { id: input.projectId },
+          select: {
+            id: true,
+            projectCode: true,
+          },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!strain) {
+    return { ok: false, message: "Choose a valid strain for the cryostorage record." };
+  }
+
+  if (input.projectId && !project) {
+    return { ok: false, message: "Choose a valid project for the cryostorage record." };
+  }
+
+  const normalizedStoredAt = new Date(input.storedAt);
+
+  if (Number.isNaN(normalizedStoredAt.getTime())) {
+    return { ok: false, message: "Choose a valid cryostorage date." };
+  }
+
+  const normalizedSampleLabel = input.sampleLabel.trim();
+  const normalizedMaterialType = input.materialType.trim();
+  const normalizedStorageLocation = input.storageLocation?.trim() || undefined;
+  const normalizedQuantityLabel = input.quantityLabel?.trim() || undefined;
+  const normalizedRecoveryNotes = input.recoveryNotes?.trim() || undefined;
+  const normalizedNotes = input.notes?.trim() || undefined;
+
+  if (normalizedSampleLabel.length < 3) {
+    return { ok: false, message: "Enter a unique cryostorage label with at least 3 characters." };
+  }
+
+  if (normalizedMaterialType.length < 2) {
+    return { ok: false, message: "Enter a material type before saving." };
+  }
+
+  const existingRecord = await prisma.cryostorageRecord.findUnique({
+    where: { sampleLabel: normalizedSampleLabel },
+    select: {
+      id: true,
+      strainId: true,
+    },
+  });
+
+  if (existingRecord) {
+    if (existingRecord.strainId === strain.id) {
+      return {
+        ok: true,
+        message: `Cryostorage record ${normalizedSampleLabel} is already recorded for ${strain.name}.`,
+        entityId: existingRecord.id,
+      };
+    }
+
+    return { ok: false, message: "Cryostorage label already exists. Use a unique label for this stored material." };
+  }
+
+  const recordId = createId("cryo");
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.cryostorageRecord.create({
+      data: {
+        id: recordId,
+        strainId: strain.id,
+        projectId: project?.id,
+        sampleLabel: normalizedSampleLabel,
+        materialType: normalizedMaterialType,
+        status: input.status,
+        storedAt: normalizedStoredAt,
+        storageLocation: normalizedStorageLocation,
+        quantityLabel: normalizedQuantityLabel,
+        recoveryNotes: normalizedRecoveryNotes,
+        notes: normalizedNotes,
+        createdById: actor.id,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "cryostorage_record",
+        entityId: recordId,
+        action: "create",
+        newValue: {
+          strainId: strain.id,
+          projectId: project?.id ?? null,
+          sampleLabel: normalizedSampleLabel,
+          materialType: normalizedMaterialType,
+          status: input.status,
+          storedAt: input.storedAt,
+          storageLocation: normalizedStorageLocation ?? null,
+          quantityLabel: normalizedQuantityLabel ?? null,
+          recoveryNotes: normalizedRecoveryNotes ?? null,
+          notes: normalizedNotes ?? null,
+        },
+        timestamp,
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `Cryostorage record ${normalizedSampleLabel} saved for ${strain.name}.`,
     entityId: recordId,
   };
 }

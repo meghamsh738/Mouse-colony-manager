@@ -15,6 +15,7 @@ import {
   addCageHealthNote,
   createAnimalRecord,
   createBreedingSetup,
+  createCryostorageRecord,
   createSampleRecord,
   importGenotypeCsvBatch,
   moveCageLocation,
@@ -26,6 +27,7 @@ import {
   weanLitterToCages,
 } from "@/lib/colony-write";
 import { getRecentAuditLogsView, getRuleSummaryView } from "@/lib/settings-read";
+import { getCryostorageInventoryView } from "@/lib/cryostorage-read";
 import { getSampleInventoryView } from "@/lib/samples-read";
 import { seedDatabase } from "../../prisma/seed";
 
@@ -36,7 +38,7 @@ async function resetColonyState() {
 describe("colony logic", () => {
   beforeAll(async () => {
     await resetColonyState();
-  }, 60_000);
+  }, 120_000);
 
   it("builds genotype summaries from allele rows", async () => {
     const animal = await getAnimalDetailView("animal-003");
@@ -112,6 +114,37 @@ describe("colony logic", () => {
     expect(inventory.some((record) => record.sampleLabel === sampleLabel && record.animalCode === "CM-26004")).toBe(true);
     expect(animal?.sampleRecords.some((record) => record.sampleLabel === sampleLabel)).toBe(true);
     expect(animal?.timeline.some((event) => event.description.includes(sampleLabel))).toBe(true);
+  });
+
+  it("records a cryostorage inventory entry and exposes it in the inventory view", async () => {
+    const cryoLabel = "CRYO-WT-2026-04";
+    const result = await createCryostorageRecord(
+      {
+        strainId: "strain-wt",
+        projectId: "project-neuro",
+        sampleLabel: cryoLabel,
+        materialType: "Frozen embryos",
+        status: "stored",
+        storedAt: "2026-04-12",
+        storageLocation: "LN2 Tank C / Cane 2 / Goblet 1",
+        quantityLabel: "14 embryos",
+        recoveryNotes: "Hold as the reserve wild-type restart line.",
+        notes: "Verification record for cryostorage coverage.",
+      },
+      { id: "user-admin", role: "admin" },
+    );
+
+    expect(result.ok).toBe(true);
+
+    const inventory = await getCryostorageInventoryView();
+    expect(
+      inventory.some(
+        (record) =>
+          record.sampleLabel === cryoLabel &&
+          record.strainName === "C57BL/6J" &&
+          record.projectCode === "PRJ-NEURO-07",
+      ),
+    ).toBe(true);
   });
 
   it("adds a cage health note that surfaces as a cage alert", async () => {

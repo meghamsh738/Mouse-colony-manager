@@ -23,6 +23,7 @@ export async function seedDatabase() {
     prisma.experiment.deleteMany(),
     prisma.animalProjectAllocation.deleteMany(),
     prisma.sampleRecord.deleteMany(),
+    prisma.cryostorageRecord.deleteMany(),
     prisma.project.deleteMany(),
     prisma.litterAnimal.deleteMany(),
     prisma.litter.deleteMany(),
@@ -112,6 +113,13 @@ export async function seedDatabase() {
     data: seedColonyData.sampleRecords.map((record) => ({
       ...record,
       collectedAt: new Date(record.collectedAt),
+      createdAt: asDate(record.createdAt),
+    })),
+  });
+  await prisma.cryostorageRecord.createMany({
+    data: seedColonyData.cryostorageRecords.map((record) => ({
+      ...record,
+      storedAt: new Date(record.storedAt),
       createdAt: asDate(record.createdAt),
     })),
   });

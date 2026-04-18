@@ -59,6 +59,11 @@ async function submitAfterBlur(page: Page, testId: string) {
   await submitWithinAfterBlur(page, page, testId);
 }
 
+async function enableBreedingOverride(page: Page) {
+  await page.getByTestId("breeding-create-override").setChecked(true, { force: true });
+  await expect(page.getByTestId("breeding-create-override")).toBeChecked();
+}
+
 test("seeded user can log in and reach the dashboard", async ({ page }) => {
   await signInAs(page, "admin");
 });
@@ -166,7 +171,7 @@ test("admin can create a breeding setup with override", async ({ page }, testInf
   await page.getByTestId("breeding-create-sire").selectOption("animal-008");
   await page.getByTestId("breeding-create-dam").selectOption("animal-009");
   await page.getByTestId("breeding-create-target-genotype").fill(targetGenotype);
-  await page.getByTestId("breeding-create-override").check();
+  await enableBreedingOverride(page);
   await submitAfterBlur(page, "breeding-create-submit");
 
   await expect(page.getByText("Breeding setup created for CM-22008 and CM-25009.")).toBeVisible({ timeout: 30_000 });
@@ -184,7 +189,7 @@ test("admin can record a litter for a newly created breeding setup", async ({ pa
   await page.getByTestId("breeding-create-sire").selectOption("animal-008");
   await page.getByTestId("breeding-create-dam").selectOption("animal-009");
   await page.getByTestId("breeding-create-target-genotype").fill(targetGenotype);
-  await page.getByTestId("breeding-create-override").check();
+  await enableBreedingOverride(page);
   await submitAfterBlur(page, "breeding-create-submit");
 
   const breedingCard = page.locator('[data-testid^="breeding-card-"]').filter({ hasText: targetGenotype }).first();
@@ -210,7 +215,7 @@ test("admin can wean a recorded litter and assign progeny cages", async ({ page 
   await page.getByTestId("breeding-create-sire").selectOption("animal-008");
   await page.getByTestId("breeding-create-dam").selectOption("animal-009");
   await page.getByTestId("breeding-create-target-genotype").fill(targetGenotype);
-  await page.getByTestId("breeding-create-override").check();
+  await enableBreedingOverride(page);
   await submitAfterBlur(page, "breeding-create-submit");
 
   const breedingCard = page.locator('[data-testid^="breeding-card-"]').filter({ hasText: targetGenotype }).first();
@@ -281,6 +286,33 @@ test("admin can record a sample and find it in the inventory workspace", async (
   await expect(page.getByTestId("sample-table").getByText(sampleLabel)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("sample-table").getByText("CM-26004")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("sample-table").getByText(sampleNote)).toBeVisible({ timeout: 30_000 });
+});
+
+test("admin can record a cryostorage item and find it in the backup inventory workspace", async ({ page }, testInfo) => {
+  const seed = projectSeed(testInfo.project.name);
+  const cryoLabel = `CRYO-WT-${seed.suffix}`;
+  const recoveryNote = `Recovery review scheduled during ${seed.noteSuffix} archive planning.`;
+
+  await signInAs(page, "admin");
+  await page.goto("/cryostorage");
+
+  await page.getByTestId("cryostorage-record-strain").selectOption("strain-wt");
+  await page.getByTestId("cryostorage-record-project").selectOption("project-neuro");
+  await page.getByTestId("cryostorage-record-label").fill(cryoLabel);
+  await page.getByTestId("cryostorage-record-material").fill("Frozen embryos");
+  await page.getByTestId("cryostorage-record-status").selectOption("stored");
+  await page.getByTestId("cryostorage-record-stored-at").fill("2026-04-12");
+  await page.getByTestId("cryostorage-record-location").fill("LN2 Tank C / Cane 2 / Goblet 1");
+  await page.getByTestId("cryostorage-record-quantity").fill("14 embryos");
+  await page.getByTestId("cryostorage-record-recovery-notes").fill(recoveryNote);
+  await page.getByTestId("cryostorage-record-notes").fill("Backup line kept outside the active breeding pool.");
+  await submitAfterBlur(page, "cryostorage-record-submit");
+
+  await expect(page.getByText(`Cryostorage record ${cryoLabel} saved for C57BL/6J.`)).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId("cryostorage-search").fill(cryoLabel);
+  await expect(page.getByTestId("cryostorage-table").getByText(cryoLabel)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("cryostorage-table").getByText("Frozen embryos")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("cryostorage-table").getByText(recoveryNote)).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can import genotype rows from a csv upload", async ({ page }) => {

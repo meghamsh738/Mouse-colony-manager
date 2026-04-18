@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, Boxes, FlaskConical, Home, LogOut, QrCode, Settings2, Table2, TestTubeDiagonal } from "lucide-react";
+import { Activity, Boxes, FlaskConical, Home, LogOut, QrCode, Settings2, Snowflake, Table2, TestTubeDiagonal } from "lucide-react";
 
 import { signOut } from "@/auth";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +15,7 @@ const navigation = [
   { href: "/breeding", label: "Breeding", icon: Activity },
   { href: "/experiments", label: "Experiments", icon: FlaskConical },
   { href: "/samples", label: "Samples", icon: TestTubeDiagonal },
+  { href: "/cryostorage", label: "Cryostorage", icon: Snowflake },
   { href: "/scan", label: "Scan", icon: QrCode },
   { href: "/settings", label: "Rules", icon: Settings2 },
 ];

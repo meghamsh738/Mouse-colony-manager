@@ -63,6 +63,7 @@ export type AlertSeverity = "info" | "warning" | "critical";
 export type AlertStatus = "open" | "acknowledged" | "resolved";
 export type GenotypeCallStatus = "pending" | "provisional" | "confirmed" | "conflict";
 export type SampleStatus = "collected" | "stored" | "allocated" | "consumed" | "discarded";
+export type CryostorageStatus = "stored" | "reserved" | "recovered" | "depleted" | "discarded";
 export type BreedingStatus = "planned" | "active" | "paused" | "retired" | "failed";
 export type BreedingAdultRole = "sire" | "dam" | "support";
 export type RuleCategory =
@@ -192,6 +193,22 @@ export interface SampleRecord {
   collectedAt: string;
   storageLocation?: string;
   quantityLabel?: string;
+  notes?: string;
+  createdById?: string;
+  createdAt?: string;
+}
+
+export interface CryostorageRecord {
+  id: string;
+  strainId: string;
+  projectId?: string;
+  sampleLabel: string;
+  materialType: string;
+  status: CryostorageStatus;
+  storedAt: string;
+  storageLocation?: string;
+  quantityLabel?: string;
+  recoveryNotes?: string;
   notes?: string;
   createdById?: string;
   createdAt?: string;
@@ -381,6 +398,7 @@ export interface SeedColonyData {
   experiments: Experiment[];
   experimentAssignments: ExperimentAssignment[];
   sampleRecords: SampleRecord[];
+  cryostorageRecords: CryostorageRecord[];
   healthNotes: HealthNote[];
   attachments: Attachment[];
   animalStatusEvents: AnimalStatusEvent[];
@@ -456,5 +474,20 @@ export interface SampleInventoryItem {
   projectCode?: string | null;
   storageLocation?: string | null;
   quantityLabel?: string | null;
+  notes?: string | null;
+}
+
+export interface CryostorageInventoryItem {
+  id: string;
+  sampleLabel: string;
+  materialType: string;
+  status: CryostorageStatus;
+  storedAt: string;
+  strainId: string;
+  strainName: string;
+  projectCode?: string | null;
+  storageLocation?: string | null;
+  quantityLabel?: string | null;
+  recoveryNotes?: string | null;
   notes?: string | null;
 }

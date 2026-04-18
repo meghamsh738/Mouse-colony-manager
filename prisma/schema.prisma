@@ -111,6 +111,14 @@ enum SampleStatus {
   discarded
 }
 
+enum CryostorageStatus {
+  stored
+  reserved
+  recovered
+  depleted
+  discarded
+}
+
 enum BreedingStatus {
   planned
   active
@@ -151,6 +159,7 @@ model User {
   genotypesPerformed GenotypingRecord[]  @relation("GenotypeOperator")
   genotypesVerified  GenotypingRecord[]  @relation("GenotypeVerifier")
   sampleRecordsCreated SampleRecord[]    @relation("SampleRecordCreator")
+  cryostorageRecordsCreated CryostorageRecord[] @relation("CryostorageRecordCreator")
 }
 
 model Facility {
@@ -213,6 +222,7 @@ model Strain {
   notes            String?
   maintenanceRules Json?
   animals          Animal[]
+  cryostorageRecords CryostorageRecord[]
 }
 
 model Allele {
@@ -361,6 +371,7 @@ model Project {
   animalAllocations AnimalProjectAllocation[]
   experiments       Experiment[]
   sampleRecords     SampleRecord[]
+  cryostorageRecords CryostorageRecord[]
 }
 
 model AnimalProjectAllocation {
@@ -430,6 +441,31 @@ model SampleRecord {
   @@index([projectId])
   @@index([status])
   @@index([collectedAt])
+}
+
+model CryostorageRecord {
+  id               String            @id
+  strainId         String
+  projectId        String?
+  sampleLabel      String            @unique
+  materialType     String
+  status           CryostorageStatus @default(stored)
+  storedAt         DateTime
+  storageLocation  String?
+  quantityLabel    String?
+  recoveryNotes    String?
+  notes            String?
+  createdById      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  strain           Strain            @relation(fields: [strainId], references: [id], onDelete: Cascade)
+  project          Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdBy        User?             @relation("CryostorageRecordCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([strainId])
+  @@index([projectId])
+  @@index([status])
+  @@index([storedAt])
 }
 
 model HealthNote {

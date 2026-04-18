@@ -98,9 +98,12 @@ export function BreedingSetupForm({ sireOptions, damOptions, allowOverride }: Br
         />
       </label>
       {allowOverride ? (
-        <label className="flex items-start gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm">
+        <label
+          className="relative isolate z-10 mt-2 flex scroll-mt-28 items-start gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm"
+          data-testid="breeding-create-override-row"
+        >
           <input
-            className="mt-1 h-4 w-4 rounded border-[var(--line)]"
+            className="relative z-10 mt-0.5 h-6 w-6 shrink-0 rounded border-[var(--line)]"
             name="allowOverride"
             type="checkbox"
             data-testid="breeding-create-override"
