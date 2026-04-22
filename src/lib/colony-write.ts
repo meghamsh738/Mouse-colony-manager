@@ -1,4 +1,6 @@
 import { Prisma } from "@prisma/client";
+
+import { removeStoredAttachment, storeUploadedAttachment, type PreparedAttachmentUpload } from "@/lib/attachment-storage";
 import { prisma } from "@/lib/prisma";
 import { parseGenotypeImportCsv } from "@/lib/genotype-import";
 import { parseRuleInputValue } from "@/lib/rule-config";
@@ -41,6 +43,7 @@ type AddCageHealthNoteInput = {
   note: string;
   followupRequired: boolean;
   actionTaken?: string;
+  attachment?: UploadedAttachmentInput;
 };
 
 type MoveCageInput = {
@@ -110,6 +113,7 @@ type RecordAnimalGenotypeInput = {
   confidence?: string;
   provider?: string;
   sampleId?: string;
+  attachment?: UploadedAttachmentInput;
 };
 
 type CreateSampleRecordInput = {
@@ -153,6 +157,11 @@ type UpdateRuleConfigInput = {
   ruleId: string;
   valueInput: string;
   criticalBlock: boolean;
+};
+
+type UploadedAttachmentInput = {
+  file: File;
+  label?: string;
 };
 
 function createId(prefix: string) {
@@ -209,6 +218,72 @@ function canUpdateRuleConfig(role: UserRole) {
 
 function getReferenceDate() {
   return process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString();
+}
+
+async function prepareAttachmentUpload(
+  attachment: UploadedAttachmentInput | undefined,
+  category: string,
+): Promise<PreparedAttachmentUpload | null> {
+  if (!attachment) {
+    return null;
+  }
+
+  return storeUploadedAttachment({
+    category,
+    file: attachment.file,
+    label: attachment.label,
+  });
+}
+
+async function createAttachmentRecord(
+  tx: Prisma.TransactionClient,
+  input: {
+    actorId: string;
+    timestamp: Date;
+    preparedAttachment: PreparedAttachmentUpload;
+    animalId?: string;
+    cageId?: string;
+    healthNoteId?: string;
+    genotypingRecordId?: string;
+  },
+) {
+  const attachmentId = createId("attachment");
+
+  await tx.attachment.create({
+    data: {
+      id: attachmentId,
+      animalId: input.animalId,
+      cageId: input.cageId,
+      healthNoteId: input.healthNoteId,
+      genotypingRecordId: input.genotypingRecordId,
+      label: input.preparedAttachment.label,
+      fileName: input.preparedAttachment.fileName,
+      fileType: input.preparedAttachment.fileType,
+      storageUrl: input.preparedAttachment.storageUrl,
+    },
+  });
+
+  await tx.auditLog.create({
+    data: {
+      id: createId("audit"),
+      actorId: input.actorId,
+      entityType: "attachment",
+      entityId: attachmentId,
+      action: "create",
+      newValue: {
+        animalId: input.animalId,
+        cageId: input.cageId,
+        healthNoteId: input.healthNoteId,
+        genotypingRecordId: input.genotypingRecordId,
+        label: input.preparedAttachment.label,
+        fileName: input.preparedAttachment.fileName,
+        fileType: input.preparedAttachment.fileType,
+      },
+      timestamp: input.timestamp,
+    },
+  });
+
+  return attachmentId;
 }
 
 function parseYearlyAnimalSequence(animalId: string, yearPrefix: string) {
@@ -484,6 +559,42 @@ export async function addCageHealthNote(
 
   const timestamp = new Date();
   if (existingNote && timestamp.getTime() - existingNote.createdAt.getTime() < 2 * 60 * 1000) {
+    const preparedAttachment = input.attachment
+      ? await prepareAttachmentUpload(input.attachment, "health-notes").catch((error) => {
+          if (error instanceof Error) {
+            return error;
+          }
+
+          return new Error("Unable to store the uploaded health-note attachment.");
+        })
+      : null;
+
+    if (preparedAttachment instanceof Error) {
+      return { ok: false, message: preparedAttachment.message };
+    }
+
+    if (preparedAttachment) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          await createAttachmentRecord(tx, {
+            actorId: actor.id,
+            timestamp,
+            preparedAttachment,
+            cageId: input.cageId,
+            healthNoteId: existingNote.id,
+          });
+
+          await tx.cage.update({
+            where: { id: input.cageId },
+            data: { lastUpdatedAt: timestamp },
+          });
+        }, { timeout: 15_000, maxWait: 10_000 });
+      } catch (error) {
+        await removeStoredAttachment(preparedAttachment.storageUrl);
+        throw error;
+      }
+    }
+
     return {
       ok: true,
       message: `Health note logged for ${cage.barcode}.`,
@@ -492,45 +603,77 @@ export async function addCageHealthNote(
   }
 
   const noteId = createId("health");
+  const preparedAttachment = input.attachment
+    ? await prepareAttachmentUpload(input.attachment, "health-notes").catch((error) => {
+        if (error instanceof Error) {
+          return error;
+        }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.healthNote.create({
-      data: {
-        id: noteId,
-        cageId: input.cageId,
-        noteType: input.noteType,
-        severity: input.severity,
-        note: input.note.trim(),
-        followupRequired: input.followupRequired,
-        actionTaken: input.actionTaken?.trim() || undefined,
-        resolved: false,
-        createdById: actor.id,
-        createdAt: timestamp,
-      },
-    });
+        return new Error("Unable to store the uploaded health-note attachment.");
+      })
+    : null;
 
-    await tx.cage.update({
-      where: { id: input.cageId },
-      data: { lastUpdatedAt: timestamp },
-    });
+  if (preparedAttachment instanceof Error) {
+    return { ok: false, message: preparedAttachment.message };
+  }
 
-    await tx.auditLog.create({
-      data: {
-        id: createId("audit"),
-        actorId: actor.id,
-        entityType: "health_note",
-        entityId: noteId,
-        action: "create",
-        newValue: {
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.healthNote.create({
+        data: {
+          id: noteId,
           cageId: input.cageId,
           noteType: input.noteType,
           severity: input.severity,
+          note: input.note.trim(),
           followupRequired: input.followupRequired,
+          actionTaken: input.actionTaken?.trim() || undefined,
+          resolved: false,
+          createdById: actor.id,
+          createdAt: timestamp,
         },
-        timestamp,
-      },
-    });
-  }, { timeout: 15_000, maxWait: 10_000 });
+      });
+
+      if (preparedAttachment) {
+        await createAttachmentRecord(tx, {
+          actorId: actor.id,
+          timestamp,
+          preparedAttachment,
+          cageId: input.cageId,
+          healthNoteId: noteId,
+        });
+      }
+
+      await tx.cage.update({
+        where: { id: input.cageId },
+        data: { lastUpdatedAt: timestamp },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "health_note",
+          entityId: noteId,
+          action: "create",
+          newValue: {
+            cageId: input.cageId,
+            noteType: input.noteType,
+            severity: input.severity,
+            followupRequired: input.followupRequired,
+            attachmentLabel: preparedAttachment?.label ?? null,
+          },
+          timestamp,
+        },
+      });
+    }, { timeout: 15_000, maxWait: 10_000 });
+  } catch (error) {
+    if (preparedAttachment) {
+      await removeStoredAttachment(preparedAttachment.storageUrl);
+    }
+
+    throw error;
+  }
 
   return {
     ok: true,
@@ -2118,6 +2261,37 @@ export async function recordAnimalGenotype(
   });
 
   if (existingRecord) {
+    const preparedAttachment = input.attachment
+      ? await prepareAttachmentUpload(input.attachment, "genotyping-records").catch((error) => {
+          if (error instanceof Error) {
+            return error;
+          }
+
+          return new Error("Unable to store the uploaded genotype attachment.");
+        })
+      : null;
+
+    if (preparedAttachment instanceof Error) {
+      return { ok: false, message: preparedAttachment.message };
+    }
+
+    if (preparedAttachment) {
+      try {
+        await prisma.$transaction(async (tx) => {
+          await createAttachmentRecord(tx, {
+            actorId: actor.id,
+            timestamp: new Date(),
+            preparedAttachment,
+            animalId: animal.id,
+            genotypingRecordId: existingRecord.id,
+          });
+        }, { timeout: 15_000, maxWait: 10_000 });
+      } catch (error) {
+        await removeStoredAttachment(preparedAttachment.storageUrl);
+        throw error;
+      }
+    }
+
     return {
       ok: true,
       message: `${allele.name} genotype recorded for ${animal.animalId}.`,
@@ -2135,78 +2309,112 @@ export async function recordAnimalGenotype(
     },
   ];
   const genotypeResolved = effectiveAlleles.length > 0 && effectiveAlleles.every((entry) => entry.callStatus === "confirmed");
+  const preparedAttachment = input.attachment
+    ? await prepareAttachmentUpload(input.attachment, "genotyping-records").catch((error) => {
+        if (error instanceof Error) {
+          return error;
+        }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.genotypingRecord.create({
-      data: {
-        id: recordId,
-        animalId: animal.id,
-        sourceType: input.sourceType.trim(),
-        assayType: input.assayType.trim(),
-        sampleId: normalizedSampleId,
-        markerTested: allele.name,
-        resultText: normalizedResultText,
-        sampleDate: normalizedSampleDate,
-        resultDate: normalizedResultDate,
-        operatorId: actor.id,
-        provider: normalizedProvider,
-        verifiedById: input.status === "confirmed" ? actor.id : undefined,
-        finalCall,
-        status: input.status,
-        confidence: normalizedConfidence,
-      },
-    });
+        return new Error("Unable to store the uploaded genotype attachment.");
+      })
+    : null;
 
-    await tx.animalAllele.upsert({
-      where: {
-        animalId_alleleId: {
-          animalId: animal.id,
-          alleleId: allele.id,
-        },
-      },
-      create: {
-        id: createId("animal-allele"),
-        animalId: animal.id,
-        alleleId: allele.id,
-        zygosity: normalizedZygosity,
-        callStatus: input.status,
-      },
-      update: {
-        zygosity: normalizedZygosity,
-        callStatus: input.status,
-      },
-    });
+  if (preparedAttachment instanceof Error) {
+    return { ok: false, message: preparedAttachment.message };
+  }
 
-    if (shouldClearPendingGenotypeStatus(animal.experimentalStatus) && genotypeResolved) {
-      await tx.animal.update({
-        where: { id: animal.id },
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.genotypingRecord.create({
         data: {
-          experimentalStatus: "Not assigned",
+          id: recordId,
+          animalId: animal.id,
+          sourceType: input.sourceType.trim(),
+          assayType: input.assayType.trim(),
+          sampleId: normalizedSampleId,
+          markerTested: allele.name,
+          resultText: normalizedResultText,
+          sampleDate: normalizedSampleDate,
+          resultDate: normalizedResultDate,
+          operatorId: actor.id,
+          provider: normalizedProvider,
+          verifiedById: input.status === "confirmed" ? actor.id : undefined,
+          finalCall,
+          status: input.status,
+          confidence: normalizedConfidence,
         },
       });
-    }
 
-    await tx.auditLog.create({
-      data: {
-        id: createId("audit"),
-        actorId: actor.id,
-        entityType: "genotyping_record",
-        entityId: recordId,
-        action: "create",
-        newValue: {
+      if (preparedAttachment) {
+        await createAttachmentRecord(tx, {
+          actorId: actor.id,
+          timestamp,
+          preparedAttachment,
+          animalId: animal.id,
+          genotypingRecordId: recordId,
+        });
+      }
+
+      await tx.animalAllele.upsert({
+        where: {
+          animalId_alleleId: {
+            animalId: animal.id,
+            alleleId: allele.id,
+          },
+        },
+        create: {
+          id: createId("animal-allele"),
           animalId: animal.id,
           alleleId: allele.id,
           zygosity: normalizedZygosity,
-          status: input.status,
-          sampleDate: input.sampleDate,
-          resultDate: input.resultDate,
-          sourceType: input.sourceType.trim(),
-          assayType: input.assayType.trim(),
+          callStatus: input.status,
         },
-        timestamp,
-      },
-    });
-  }, { timeout: 15_000, maxWait: 10_000 });
+        update: {
+          zygosity: normalizedZygosity,
+          callStatus: input.status,
+        },
+      });
+
+      if (shouldClearPendingGenotypeStatus(animal.experimentalStatus) && genotypeResolved) {
+        await tx.animal.update({
+          where: { id: animal.id },
+          data: {
+            experimentalStatus: "Not assigned",
+          },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "genotyping_record",
+          entityId: recordId,
+          action: "create",
+          newValue: {
+            animalId: animal.id,
+            alleleId: allele.id,
+            zygosity: normalizedZygosity,
+            status: input.status,
+            sampleDate: input.sampleDate,
+            resultDate: input.resultDate,
+            sampleId: normalizedSampleId,
+            sourceType: input.sourceType.trim(),
+            assayType: input.assayType.trim(),
+            provider: normalizedProvider,
+            attachmentLabel: preparedAttachment?.label ?? null,
+          },
+          timestamp,
+        },
+      });
+    }, { timeout: 15_000, maxWait: 10_000 });
+  } catch (error) {
+    if (preparedAttachment) {
+      await removeStoredAttachment(preparedAttachment.storageUrl);
+    }
+
+    throw error;
+  }
 
   return {
     ok: true,

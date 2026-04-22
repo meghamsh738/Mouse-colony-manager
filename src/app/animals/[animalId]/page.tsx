@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { AlertFeed } from "@/components/app/alert-feed";
 import { AnimalGenotypingForm } from "@/components/app/animal-genotyping-form";
 import { AnimalLifecycleForm } from "@/components/app/animal-lifecycle-form";
+import { AttachmentList } from "@/components/app/attachment-list";
 import { AppShell } from "@/components/app/app-shell";
 import { ExperimentReservationForm } from "@/components/app/experiment-reservation-form";
 import { PageHeader } from "@/components/app/page-header";
@@ -189,6 +190,9 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                         {record.sampleId ? <span>Sample {record.sampleId}</span> : null}
                         {record.provider ? <span>{record.provider}</span> : null}
                       </div>
+                      <div className="mt-3">
+                        <AttachmentList attachments={record.attachments} testId={`genotype-attachments-${record.id}`} />
+                      </div>
                     </article>
                   ))
                 ) : (
@@ -334,6 +338,9 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                       <p className="mt-2 text-sm text-[var(--muted)]">
                         {note.noteType.replaceAll("_", " ")} · {formatDate(note.createdAt)}
                       </p>
+                      <div className="mt-3">
+                        <AttachmentList attachments={note.attachments} testId={`health-note-attachments-${note.id}`} />
+                      </div>
                     </article>
                   ))
                 ) : (

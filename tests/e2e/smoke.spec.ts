@@ -93,6 +93,7 @@ test("admin can add a new animal record from the colony table", async ({ page },
 test("animal staff can scan a cage and log a welfare note", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
   const noteText = `Wet bedding observed during ${seed.noteSuffix} room round.`;
+  const attachmentLabel = `Welfare photo ${seed.noteSuffix}`;
 
   await signInAs(page, "staff");
   await page.goto("/scan");
@@ -101,10 +102,17 @@ test("animal staff can scan a cage and log a welfare note", async ({ page }, tes
 
   await expect(page).toHaveURL(/\/scan\/CM-A101-003$/);
   await page.getByTestId("health-note-text").fill(noteText);
+  await page.getByTestId("health-note-attachment-label").fill(attachmentLabel);
+  await page.getByTestId("health-note-attachment").setInputFiles({
+    name: `welfare-${seed.noteSuffix}.pdf`,
+    mimeType: "application/pdf",
+    buffer: Buffer.from(`Attachment for ${noteText}`),
+  });
   await submitAfterBlur(page, "health-note-submit");
 
   await expect(page.getByText("Health note logged for CM-A101-003.")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(noteText).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(attachmentLabel).first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("animal staff can browse cage list and open cage detail", async ({ page }) => {
@@ -295,6 +303,7 @@ test("admin can wean a recorded litter and assign progeny cages", async ({ page 
 test("admin can record a genotype result from the animal detail page", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
   const resultText = `Expected ${seed.noteSuffix} genotype band present.`;
+  const attachmentLabel = `Genotype PDF ${seed.noteSuffix}`;
 
   await signInAs(page, "admin");
   await page.goto("/animals/animal-009");
@@ -306,10 +315,17 @@ test("admin can record a genotype result from the animal detail page", async ({ 
   await page.getByTestId("genotype-record-sample-date").fill("2026-04-09");
   await page.getByTestId("genotype-record-result-date").fill("2026-04-09");
   await page.getByTestId("genotype-record-result-text").fill(resultText);
+  await page.getByTestId("genotype-record-attachment-label").fill(attachmentLabel);
+  await page.getByTestId("genotype-record-attachment").setInputFiles({
+    name: `genotype-${seed.noteSuffix}.pdf`,
+    mimeType: "application/pdf",
+    buffer: Buffer.from(`Attachment for ${resultText}`),
+  });
   await submitAfterBlur(page, "genotype-record-submit");
 
   await expect(page.getByText(seed.genotypeExpect).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("genotype-record-history").getByText(resultText)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("genotype-record-history").getByText(attachmentLabel)).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can record a sample and find it in the inventory workspace", async ({ page }, testInfo) => {

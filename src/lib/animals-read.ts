@@ -410,6 +410,15 @@ export async function getAnimalDetailView(animalId: string) {
             resolved: true,
             followupRequired: true,
             createdAt: true,
+            attachments: {
+              select: {
+                id: true,
+                label: true,
+                fileName: true,
+                fileType: true,
+                storageUrl: true,
+              },
+            },
           },
         },
         genotypingRecords: {
@@ -427,6 +436,15 @@ export async function getAnimalDetailView(animalId: string) {
             confidence: true,
             finalCall: true,
             sampleDate: true,
+            attachments: {
+              select: {
+                id: true,
+                label: true,
+                fileName: true,
+                fileType: true,
+                storageUrl: true,
+              },
+            },
           },
         },
         sampleRecords: {
@@ -573,6 +591,13 @@ export async function getAnimalDetailView(animalId: string) {
       provider: record.provider ?? null,
       confidence: record.confidence ?? null,
       finalCall: record.finalCall,
+      attachments: record.attachments.map((attachment) => ({
+        id: attachment.id,
+        label: attachment.label,
+        fileName: attachment.fileName,
+        fileType: attachment.fileType,
+        storageUrl: attachment.storageUrl,
+      })),
     })),
     sampleRecords: animal.sampleRecords.map((record) => ({
       id: record.id,
@@ -600,6 +625,13 @@ export async function getAnimalDetailView(animalId: string) {
       note: note.note,
       noteType: note.noteType,
       createdAt: note.createdAt.toISOString(),
+      attachments: note.attachments.map((attachment) => ({
+        id: attachment.id,
+        label: attachment.label,
+        fileName: attachment.fileName,
+        fileType: attachment.fileType,
+        storageUrl: attachment.storageUrl,
+      })),
     })),
     canReserve: animal.status === "colony_holding",
     canRecordGenotype: animal.outcomeStatus === "alive",

@@ -22,14 +22,15 @@ Current delivery level:
   - forecast workspace
   - rules/settings and audit visibility
   - CSV exports
+  - local attachment upload and viewing for genotype and welfare records
 
 - Working, but still rough:
   - e2e reliability now depends on per-test reseeding, which is correct but slow
   - Prisma local dev DB remains the main source of flaky local verification if `prisma dev` drops
   - README status text is behind the actual implemented write surface
+  - attachment persistence is local-disk backed under `public/uploads` for MVP, not object storage
 
 - Still missing relative to the original blueprint:
-  - attachment upload flows for gels, PDFs, and health/genotype documents
   - notifications and delivery channels
   - external integration API beyond auth and CSV export endpoints
   - quarantine / sentinel workflows
@@ -46,6 +47,7 @@ Current delivery level:
 - [x] Add CSV exports and export auth protection
 - [x] Stabilize Playwright smoke runs across `chromium` and `mobile` by reseeding before each test
 - [x] Extract reusable seeding into `prisma/seed-database.ts`
+- [x] Add local attachment upload and viewing for genotype records and cage health notes
 
 ## In Progress
 
@@ -54,8 +56,6 @@ Current delivery level:
 
 ## Next
 
-- [ ] Add attachment upload and viewing for genotype reports, gel images, PDFs, and health documents
-- [ ] Expose attachment history on animal, cage, and genotype views
 - [ ] Add a small integration API surface for core entities and operational exports
 - [ ] Add notification plumbing for overdue genotypes, weaning, breeder age, welfare flags, and reservation drift
 - [ ] Add quarantine / sentinel tracking if it is still in scope for MVP+
@@ -69,10 +69,15 @@ Current delivery level:
 Most recently verified in this branch:
 
 - `npm run typecheck`
+- `npm run lint`
+- `npm run build`
+- `npx vitest run tests/unit/colony.test.ts -t 'adds a cage health note that surfaces as a cage alert|records a genotype result and updates the animal detail genotype views' --reporter=verbose`
+- `npm run verify:e2e:wsl -- --grep '(animal staff can scan a cage and log a welfare note|admin can record a genotype result from the animal detail page)'`
 - `npm run verify:e2e:wsl -- --grep 'researcher can review experiment overview and tune the distribution helper'`
 - `npm run verify:e2e:wsl -- tests/e2e/smoke.spec.ts`
 
 Notes:
 
-- Full smoke coverage passed across both Playwright projects in the current branch.
+- Targeted unit coverage, build, and attachment-specific desktop/mobile smoke flows passed after the attachment slice landed.
+- Earlier full smoke coverage also passed across both Playwright projects in this branch.
 - I did not rerun the full `npm run verify` bundle in the latest tracker update turn.

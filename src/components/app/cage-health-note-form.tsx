@@ -27,7 +27,14 @@ export function CageHealthNoteForm({ barcode, cageId }: CageHealthNoteFormProps)
   }, [state.status]);
 
   return (
-    <form ref={formRef} action={formAction} className="space-y-4" data-testid="cage-health-note-form" onSubmit={handleSubmit}>
+    <form
+      ref={formRef}
+      action={formAction}
+      className="space-y-4"
+      data-testid="cage-health-note-form"
+      encType="multipart/form-data"
+      onSubmit={handleSubmit}
+    >
       <input name="cageId" type="hidden" value={cageId} />
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-2 text-sm">
@@ -75,6 +82,27 @@ export function CageHealthNoteForm({ barcode, cageId }: CageHealthNoteFormProps)
         <span className="text-[var(--muted)]">Action taken</span>
         <Input defaultValue="Flagged for cage change after scan review." name="actionTaken" />
       </label>
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="space-y-2 text-sm">
+          <span className="text-[var(--muted)]">Attachment label</span>
+          <Input
+            defaultValue=""
+            name="attachmentLabel"
+            placeholder="Photo, PDF, room-round note"
+            data-testid="health-note-attachment-label"
+          />
+        </label>
+        <label className="space-y-2 text-sm">
+          <span className="text-[var(--muted)]">Attachment file</span>
+          <Input
+            accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.csv,.tsv"
+            className="h-auto px-3 py-2 file:mr-3 file:rounded-full file:border-0 file:bg-[var(--surface-2)] file:px-3 file:py-2 file:text-sm file:font-medium"
+            name="attachment"
+            type="file"
+            data-testid="health-note-attachment"
+          />
+        </label>
+      </div>
       <label className="flex items-center gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
         <input defaultChecked name="followupRequired" type="checkbox" data-testid="health-note-followup" />
         Follow-up required

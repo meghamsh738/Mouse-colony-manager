@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AlertFeed } from "@/components/app/alert-feed";
+import { AttachmentList } from "@/components/app/attachment-list";
 import { AppShell } from "@/components/app/app-shell";
 import { CageHealthNoteForm } from "@/components/app/cage-health-note-form";
 import { CageMoveForm } from "@/components/app/cage-move-form";
@@ -67,6 +68,24 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ bar
                 </h2>
               </div>
               <CageHealthNoteForm barcode={snapshot.cage.barcode} cageId={snapshot.cage.id} />
+            </Surface>
+            <Surface className="space-y-4">
+              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Recent notes</p>
+              <div className="space-y-3">
+                {snapshot.notes.length ? (
+                  snapshot.notes.map((note) => (
+                    <article key={note.id} className="rounded-2xl border border-[var(--line)] p-4">
+                      <p className="font-medium">{note.note}</p>
+                      <p className="mt-2 text-sm text-[var(--muted)]">{formatDate(note.createdAt)}</p>
+                      <div className="mt-3">
+                        <AttachmentList attachments={note.attachments} testId={`scan-note-attachments-${note.id}`} />
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className="text-sm text-[var(--muted)]">No cage notes have been logged yet.</p>
+                )}
+              </div>
             </Surface>
             {canMoveCage ? (
               <Surface className="space-y-4">

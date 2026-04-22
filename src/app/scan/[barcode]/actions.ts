@@ -27,6 +27,7 @@ const healthNoteSchema = z.object({
   note: z.string().trim().min(6).max(500),
   followupRequired: z.string().optional(),
   actionTaken: z.string().trim().max(300).optional(),
+  attachmentLabel: z.string().trim().max(120).optional(),
 });
 
 export async function addCageHealthNoteAction(
@@ -43,6 +44,7 @@ export async function addCageHealthNoteAction(
     note: formData.get("note"),
     followupRequired: formData.get("followupRequired") || undefined,
     actionTaken: formData.get("actionTaken") || undefined,
+    attachmentLabel: formData.get("attachmentLabel") || undefined,
   });
 
   if (!parsed.success) {
@@ -52,10 +54,20 @@ export async function addCageHealthNoteAction(
     };
   }
 
+  const attachmentField = formData.get("attachment");
+  const attachment = attachmentField instanceof File && attachmentField.size > 0 ? attachmentField : undefined;
+  const { attachmentLabel, ...noteInput } = parsed.data;
+
   const result = await addCageHealthNote(
     {
-      ...parsed.data,
-      followupRequired: parsed.data.followupRequired === "on",
+      ...noteInput,
+      followupRequired: noteInput.followupRequired === "on",
+      attachment: attachment
+        ? {
+            file: attachment,
+            label: attachmentLabel,
+          }
+        : undefined,
     },
     { id: user.id, role: user.role },
   );

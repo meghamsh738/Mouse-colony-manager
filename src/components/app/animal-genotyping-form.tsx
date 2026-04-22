@@ -41,6 +41,7 @@ export function AnimalGenotypingForm({ animalId, alleleOptions, defaultDate }: A
       action={formAction}
       className="space-y-4"
       data-testid="genotype-record-form"
+      encType="multipart/form-data"
       onSubmit={handleSubmit}
     >
       <input name="animalId" type="hidden" value={animalId} />
@@ -156,6 +157,27 @@ export function AnimalGenotypingForm({ animalId, alleleOptions, defaultDate }: A
           data-testid="genotype-record-result-text"
         />
       </label>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <label className="space-y-2 text-sm">
+          <span className="text-[var(--muted)]">Attachment label</span>
+          <Input
+            defaultValue=""
+            name="attachmentLabel"
+            placeholder="Gel image, vendor PDF, assay report"
+            data-testid="genotype-record-attachment-label"
+          />
+        </label>
+        <label className="space-y-2 text-sm">
+          <span className="text-[var(--muted)]">Attachment file</span>
+          <Input
+            accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.csv,.tsv"
+            className="h-auto px-3 py-2 file:mr-3 file:rounded-full file:border-0 file:bg-[var(--surface-2)] file:px-3 file:py-2 file:text-sm file:font-medium"
+            name="attachment"
+            type="file"
+            data-testid="genotype-record-attachment"
+          />
+        </label>
+      </div>
       <FormFeedback state={state} />
       <div className="border-t border-[var(--line)] pt-4">
         <Button

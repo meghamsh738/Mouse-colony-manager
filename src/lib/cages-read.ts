@@ -297,6 +297,15 @@ export async function getCageDetailView(cageId: string) {
             severity: true,
             resolved: true,
             createdAt: true,
+            attachments: {
+              select: {
+                id: true,
+                label: true,
+                fileName: true,
+                fileType: true,
+                storageUrl: true,
+              },
+            },
           },
         },
         cageMovements: {
@@ -378,6 +387,13 @@ export async function getCageDetailView(cageId: string) {
       id: note.id,
       note: note.note,
       createdAt: note.createdAt.toISOString(),
+      attachments: note.attachments.map((attachment) => ({
+        id: attachment.id,
+        label: attachment.label,
+        fileName: attachment.fileName,
+        fileType: attachment.fileType,
+        storageUrl: attachment.storageUrl,
+      })),
     })),
     movementHistory: cage.cageMovements.map((movement) => ({
       id: movement.id,
@@ -427,6 +443,15 @@ export async function getScanCageViewByBarcode(barcode: string) {
             severity: true,
             resolved: true,
             createdAt: true,
+            attachments: {
+              select: {
+                id: true,
+                label: true,
+                fileName: true,
+                fileType: true,
+                storageUrl: true,
+              },
+            },
           },
         },
         cageMovements: {
@@ -488,6 +513,13 @@ export async function getScanCageViewByBarcode(barcode: string) {
       id: note.id,
       note: note.note,
       createdAt: note.createdAt.toISOString(),
+      attachments: note.attachments.map((attachment) => ({
+        id: attachment.id,
+        label: attachment.label,
+        fileName: attachment.fileName,
+        fileType: attachment.fileType,
+        storageUrl: attachment.storageUrl,
+      })),
     })),
     movementHistory: cage.cageMovements.map((movement) => ({
       id: movement.id,

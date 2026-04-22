@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { moveCageAction } from "@/app/cages/[cageId]/actions";
 import { AlertFeed } from "@/components/app/alert-feed";
+import { AttachmentList } from "@/components/app/attachment-list";
 import { AppShell } from "@/components/app/app-shell";
 import { CageMoveForm } from "@/components/app/cage-move-form";
 import { CageQrCard } from "@/components/app/cage-qr-card";
@@ -79,6 +80,9 @@ export default async function CageDetailPage({ params }: { params: Promise<{ cag
                 <article key={note.id} className="rounded-2xl border border-[var(--line)] p-4">
                   <p className="font-medium">{note.note}</p>
                   <p className="mt-2 text-sm text-[var(--muted)]">{formatDate(note.createdAt)}</p>
+                  <div className="mt-3">
+                    <AttachmentList attachments={note.attachments} testId={`cage-note-attachments-${note.id}`} />
+                  </div>
                 </article>
               ))}
             </div>

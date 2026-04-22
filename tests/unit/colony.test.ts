@@ -376,13 +376,22 @@ describe("colony logic", () => {
         note: "Wet bedding noted during welfare round.",
         followupRequired: true,
         actionTaken: "Flag for cage change.",
+        attachment: {
+          file: new File([Buffer.from("welfare attachment")], "welfare-note.pdf", { type: "application/pdf" }),
+          label: "Wet bedding photo",
+        },
       },
       { id: "user-staff", role: "animal_staff" },
     );
 
     expect(note.ok).toBe(true);
-    const cage = await getCageDetailView("cage-a101-003");
+    const [cage, scan] = await Promise.all([
+      getCageDetailView("cage-a101-003"),
+      getScanCageViewByBarcode("CM-A101-003"),
+    ]);
     expect(cage?.alerts.some((alert) => alert.message.includes("Wet bedding noted during welfare round."))).toBe(true);
+    expect(cage?.notes[0]?.attachments[0]?.fileName).toBe("welfare-note.pdf");
+    expect(scan?.notes[0]?.attachments[0]?.label).toBe("Wet bedding photo");
   });
 
   it("moves a cage, updates the live location, and records movement history", async () => {
@@ -604,6 +613,10 @@ describe("colony logic", () => {
         resultText: "Expected CreER band present at the correct size.",
         confidence: "high",
         sampleId: "PCR-25009",
+        attachment: {
+          file: new File([Buffer.from("genotype attachment")], "genotype-report.pdf", { type: "application/pdf" }),
+          label: "Vendor result PDF",
+        },
       },
       { id: "user-admin", role: "admin" },
     );
@@ -617,6 +630,8 @@ describe("colony logic", () => {
     );
     expect(detail?.genotypingRecords[0]?.markerTested).toBe("CreER");
     expect(detail?.genotypingRecords[0]?.resultText).toContain("Expected CreER band present");
+    expect(detail?.genotypingRecords[0]?.attachments[0]?.label).toBe("Vendor result PDF");
+    expect(detail?.genotypingRecords[0]?.attachments[0]?.fileName).toBe("genotype-report.pdf");
     expect(detail?.timeline.some((event) => event.description.includes("CreER +/-"))).toBe(true);
   });
 

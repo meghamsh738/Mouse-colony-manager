@@ -28,6 +28,7 @@ const recordGenotypeSchema = z.object({
   confidence: z.string().trim().max(40).optional(),
   provider: z.string().trim().max(80).optional(),
   sampleId: z.string().trim().max(80).optional(),
+  attachmentLabel: z.string().trim().max(120).optional(),
 });
 
 const updateLifecycleSchema = z.object({
@@ -97,6 +98,7 @@ export async function recordGenotypeAction(
     confidence: formData.get("confidence") || undefined,
     provider: formData.get("provider") || undefined,
     sampleId: formData.get("sampleId") || undefined,
+    attachmentLabel: formData.get("attachmentLabel") || undefined,
   });
 
   if (!parsed.success) {
@@ -106,7 +108,22 @@ export async function recordGenotypeAction(
     };
   }
 
-  const result = await recordAnimalGenotype(parsed.data, { id: user.id, role: user.role });
+  const attachmentField = formData.get("attachment");
+  const attachment = attachmentField instanceof File && attachmentField.size > 0 ? attachmentField : undefined;
+  const { attachmentLabel, ...genotypeInput } = parsed.data;
+
+  const result = await recordAnimalGenotype(
+    {
+      ...genotypeInput,
+      attachment: attachment
+        ? {
+            file: attachment,
+            label: attachmentLabel,
+          }
+        : undefined,
+    },
+    { id: user.id, role: user.role },
+  );
 
   if (!result.ok) {
     return {

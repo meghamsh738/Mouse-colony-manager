@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from "@prisma/client";
 
+import { clearStoredAttachments } from "../src/lib/attachment-storage";
 import { seedColonyData } from "./seed-data";
 import { hashPassword } from "../src/lib/password";
 
@@ -8,6 +9,8 @@ const prisma = new PrismaClient();
 const asDate = (value?: string) => (value ? new Date(value) : undefined);
 
 export async function seedDatabase() {
+  await clearStoredAttachments();
+
   await prisma.$transaction([
     prisma.auditLog.deleteMany(),
     prisma.alert.deleteMany(),
