@@ -1,21 +1,13 @@
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { SEEDED_DEV_EMAILS, SEEDED_DEV_PASSWORD } from "../../src/lib/seed-metadata";
+import { seedDatabase } from "../../prisma/seed-database";
 
 test.describe.configure({ timeout: 90_000 });
 
-function resetSeededDb() {
-  execFileSync("npm", ["run", "db:seed"], {
-    cwd: process.cwd(),
-    stdio: "pipe",
-    env: process.env,
-  });
-}
-
-test.beforeEach(() => {
-  resetSeededDb();
+test.beforeEach(async () => {
+  await seedDatabase();
 });
 
 const credentials = {
