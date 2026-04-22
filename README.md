@@ -76,16 +76,27 @@ npm run db:prepare:ci
 ## What Is Persisted
 
 - Auth users and roles are stored in PostgreSQL.
-- Colony reads come directly from Prisma-backed read modules for animals, cages, scan, breeding, experiments, dashboard, exports, and settings.
+- Colony reads come directly from Prisma-backed read modules for animals, cages, scan, breeding, experiments, dashboard, exports, samples, cryostorage, forecast, and settings.
 - Active write flows are Prisma-backed:
   - animal creation
   - cage health notes
+  - cage moves
   - experiment reservation
+  - planned experiment cohorts and assignment edits
+  - breeding setup creation
+  - litter recording and weaning
+  - genotype recording and CSV genotype import
+  - sample inventory
+  - cryostorage inventory
+  - lifecycle transitions
+  - rules updates
 - Audit logs, status events, project allocations, and experiment assignments are written transactionally.
 
 ## Current Scope
 
 The runtime app path is fully Postgres-backed through Prisma. The remaining seed fixtures now live under [`prisma/seed-data.ts`](./prisma/seed-data.ts), and runtime application code no longer imports the full colony seed dataset.
+
+Progress tracking now lives in [`TODO.md`](./TODO.md).
 
 ## Verification
 
