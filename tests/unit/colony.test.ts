@@ -25,6 +25,7 @@ import { getBreedingForecastView, getForecastSummaryView } from "@/lib/forecast-
     createSampleRecord,
     importGenotypeCsvBatch,
     moveCageLocation,
+    demoteReservedExperimentAssignments,
     planExperimentCohortAssignments,
     promotePlannedExperimentAssignments,
     updatePlannedExperimentAssignment,
@@ -226,6 +227,46 @@ describe("colony logic", () => {
     expect(refreshedUpdated?.treatmentGroup).toBe("Group C");
     expect(refreshedUpdated?.startDate.slice(0, 10)).toBe("2026-04-18");
     expect(refreshedDeleted).toBeUndefined();
+  });
+
+  it("rolls back promoted reserved cohort assignments to planned state", async () => {
+    const planned = await planExperimentCohortAssignments(
+      {
+        experimentId: "experiment-002",
+        startDate: "2026-04-15",
+        notes: "Rollback cohort coverage setup.",
+        selectedAnimals: [
+          { animalId: "CM-26005", treatmentGroup: "Group A" },
+          { animalId: "CM-26012", treatmentGroup: "Group B" },
+        ],
+      },
+      { id: "user-researcher", role: "researcher" },
+    );
+
+    expect(planned.ok).toBe(true);
+
+    const promoted = await promotePlannedExperimentAssignments(
+      {
+        experimentId: "experiment-002",
+      },
+      { id: "user-researcher", role: "researcher" },
+    );
+
+    expect(promoted.ok).toBe(true);
+
+    const rolledBack = await demoteReservedExperimentAssignments(
+      {
+        experimentId: "experiment-002",
+      },
+      { id: "user-researcher", role: "researcher" },
+    );
+
+    expect(rolledBack.ok).toBe(true);
+
+    const overview = await getExperimentOverviewView();
+    const experiment = overview.find((item) => item.experimentCode === "EXP-LPS-005");
+
+    expect(experiment?.assignments.some((assignment) => assignment.status === "planned")).toBe(true);
   });
 
   it("builds a live colony forecast from active breedings and backup inventory", async () => {

@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app/app-shell";
+import { ExperimentPlanDemoteForm } from "@/components/app/experiment-plan-demote-form";
 import { PlannedAssignmentEditor } from "@/components/app/planned-assignment-editor";
 import { ExperimentPlanPromoteForm } from "@/components/app/experiment-plan-promote-form";
 import { ExperimentPlanSaveForm } from "@/components/app/experiment-plan-save-form";
@@ -573,6 +574,14 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                       <ExperimentPlanPromoteForm
                         experimentId={experiment.id}
                         plannedCount={experiment.assignments.filter((assignment) => assignment.status === "planned").length}
+                      />
+                    </div>
+                  ) : null}
+                  {experiment.assignments.some((assignment) => assignment.status === "reserved") ? (
+                    <div className="mt-4 border-t border-[var(--line)] pt-4">
+                      <ExperimentPlanDemoteForm
+                        experimentId={experiment.id}
+                        reservedCount={experiment.assignments.filter((assignment) => assignment.status === "reserved").length}
                       />
                     </div>
                   ) : null}

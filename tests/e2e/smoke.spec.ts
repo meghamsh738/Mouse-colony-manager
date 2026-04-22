@@ -193,6 +193,10 @@ test("researcher can review experiment overview and tune the distribution helper
   await submitAfterBlur(page, "experiment-promote-submit-experiment-001");
   await expect(page.getByText("Promoted 1 planned assignment for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("reserved · starts 15 Apr 2026").first()).toBeVisible({ timeout: 30_000 });
+
+  await submitAfterBlur(page, "experiment-demote-submit-experiment-001");
+  await expect(page.getByText("Rolled back 1 reserved assignment for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("planned · Group Z · starts").first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can review breeding overview and generator suggestions", async ({ page }) => {

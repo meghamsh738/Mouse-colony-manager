@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import {
+  demoteReservedExperimentAssignments,
   deletePlannedExperimentAssignment,
   planExperimentCohortAssignments,
   promotePlannedExperimentAssignments,
@@ -143,6 +144,42 @@ export async function promotePlannedCohortAction(
   }
 
   const result = await promotePlannedExperimentAssignments(parsed.data, { id: user.id, role: user.role });
+
+  if (!result.ok) {
+    return {
+      status: "error",
+      message: result.message,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/animals");
+  revalidatePath("/experiments");
+
+  return {
+    status: "success",
+    message: result.message,
+  };
+}
+
+export async function demoteReservedCohortAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser();
+  const parsed = promotePlannedCohortSchema.safeParse({
+    experimentId: formData.get("experimentId"),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Choose an experiment before rolling back reserved assignments.",
+    };
+  }
+
+  const result = await demoteReservedExperimentAssignments(parsed.data, { id: user.id, role: user.role });
 
   if (!result.ok) {
     return {

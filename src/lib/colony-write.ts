@@ -1178,6 +1178,135 @@ export async function promotePlannedExperimentAssignments(
   };
 }
 
+export async function demoteReservedExperimentAssignments(
+  input: { experimentId: string },
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canReserveAnimal(actor.role)) {
+    return { ok: false, message: "Your role cannot roll back promoted cohorts." };
+  }
+
+  const experiment = await prisma.experiment.findUnique({
+    where: { id: input.experimentId },
+    select: {
+      id: true,
+      experimentCode: true,
+      assignments: {
+        where: {
+          status: "reserved",
+        },
+        orderBy: [{ startDate: "asc" }, { id: "asc" }],
+        select: {
+          id: true,
+          startDate: true,
+          treatmentGroup: true,
+          animal: {
+            select: {
+              id: true,
+              animalId: true,
+              status: true,
+              outcomeStatus: true,
+              experimentAssignments: {
+                where: {
+                  status: { in: ["reserved", "active"] },
+                },
+                select: {
+                  id: true,
+                  experimentId: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!experiment) {
+    return { ok: false, message: "Choose a valid experiment before rolling back reservations." };
+  }
+
+  if (!experiment.assignments.length) {
+    return { ok: false, message: `No reserved cohort assignments are waiting for ${experiment.experimentCode}.` };
+  }
+
+  const demotableAssignments = experiment.assignments.filter((assignment) => {
+    if (assignment.animal.outcomeStatus !== "alive") {
+      return false;
+    }
+
+    if (assignment.animal.status !== "reserved") {
+      return false;
+    }
+
+    return assignment.animal.experimentAssignments.every((linked) => linked.id === assignment.id);
+  });
+
+  if (!demotableAssignments.length) {
+    return { ok: false, message: `No reserved cohort assignments could be rolled back for ${experiment.experimentCode}.` };
+  }
+
+  const skippedCount = experiment.assignments.length - demotableAssignments.length;
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    for (const assignment of demotableAssignments) {
+      await tx.experimentAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          status: "planned",
+        },
+      });
+
+      await tx.animal.update({
+        where: { id: assignment.animal.id },
+        data: {
+          status: "colony_holding",
+          experimentalStatus: "Available for experiment planning",
+        },
+      });
+
+      await tx.animalStatusEvent.create({
+        data: {
+          id: createId("status"),
+          animalId: assignment.animal.id,
+          fromStatus: "reserved",
+          toStatus: "colony_holding",
+          happenedAt: timestamp,
+          actorId: actor.id,
+          reason: `Rolled back cohort reservation for ${experiment.experimentCode}.`,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "experiment_assignment",
+          entityId: assignment.id,
+          action: "demote_reservation",
+          previousValue: {
+            status: "reserved",
+            treatmentGroup: assignment.treatmentGroup,
+            startDate: assignment.startDate.toISOString().slice(0, 10),
+          },
+          newValue: {
+            status: "planned",
+            treatmentGroup: assignment.treatmentGroup,
+            startDate: assignment.startDate.toISOString().slice(0, 10),
+          },
+          timestamp,
+        },
+      });
+    }
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `Rolled back ${demotableAssignments.length} reserved assignment${demotableAssignments.length === 1 ? "" : "s"} for ${experiment.experimentCode}.${skippedCount ? ` Skipped ${skippedCount} animal${skippedCount === 1 ? "" : "s"} with conflicting reservation state.` : ""}`,
+  };
+}
+
 export async function updatePlannedExperimentAssignment(
   input: {
     assignmentId: string;
