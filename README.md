@@ -92,6 +92,7 @@ npm run db:prepare:ci
   - rules updates
 - Genotype records and cage health notes can include attachment uploads. Metadata is stored in PostgreSQL, and uploaded files are stored locally under `public/uploads/attachments` for the MVP runtime.
 - Audit logs, status events, project allocations, and experiment assignments are written transactionally.
+- A small authenticated read-only integration API is available under `/api/v1` for animals, cages, experiments, projects, and export discovery.
 
 ## Current Scope
 

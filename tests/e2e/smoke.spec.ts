@@ -46,6 +46,20 @@ async function signInAs(page: Page, account: keyof typeof credentials) {
   await expect(page.getByTestId("stat-active-mice")).toBeVisible({ timeout: 45_000 });
 }
 
+async function signInForApiRequests(page: Page, account: keyof typeof credentials) {
+  await page.context().clearCookies();
+  await page.goto("/login");
+  await page.getByTestId("login-email").fill(credentials[account].email);
+  await page.getByTestId("login-password").fill(credentials[account].password);
+
+  await Promise.all([
+    page.waitForURL(/\/$/, { waitUntil: "commit" }),
+    page.getByTestId("login-submit").click(),
+  ]);
+
+  await page.goto("data:text/plain,session-ready");
+}
+
 async function submitWithinAfterBlur(page: Page, scope: Page | Locator, testId: string) {
   await page.evaluate(() => {
     const active = document.activeElement;
@@ -212,6 +226,38 @@ test("researcher can review experiment overview and tune the distribution helper
 
   await submitAfterBlur(page, "experiment-demote-submit-experiment-001");
   await expect(page.getByText(/Rolled back to planned/i).first()).toBeVisible({ timeout: 30_000 });
+});
+
+test("researcher can query the authenticated integration API surface", async ({ page }) => {
+  await signInForApiRequests(page, "researcher");
+
+  const animalListResponse = await page.request.get("/api/v1/animals?sex=male&availableOnly=true&limit=2");
+  const animalList = {
+    status: animalListResponse.status(),
+    body: await animalListResponse.json(),
+  };
+
+  expect(animalList.status).toBe(200);
+  expect(animalList.body.meta.filters).toMatchObject({ sex: "male", availableOnly: true });
+  expect(animalList.body.data.length).toBeGreaterThan(0);
+  expect(
+    animalList.body.data.every(
+      (animal: { sex: string; availableForExperiment: boolean }) =>
+        animal.sex === "male" && animal.availableForExperiment,
+    ),
+  ).toBe(true);
+
+  const firstAnimalId = animalList.body.data[0]?.id as string;
+  expect(firstAnimalId).toBeTruthy();
+
+  const exportCatalogResponse = await page.request.get("/api/v1/exports");
+  const exportCatalog = {
+    status: exportCatalogResponse.status(),
+    body: await exportCatalogResponse.json(),
+  };
+
+  expect(exportCatalog.status).toBe(200);
+  expect(exportCatalog.body.data.some((entry: { entity: string }) => entry.entity === "animals")).toBe(true);
 });
 
 test("admin can review breeding overview and generator suggestions", async ({ page }) => {

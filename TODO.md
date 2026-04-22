@@ -23,6 +23,7 @@ Current delivery level:
   - rules/settings and audit visibility
   - CSV exports
   - local attachment upload and viewing for genotype and welfare records
+  - authenticated read-only `/api/v1` integration routes for animals, cages, experiments, projects, and export discovery
 
 - Working, but still rough:
   - e2e reliability now depends on per-test reseeding, which is correct but slow
@@ -32,7 +33,7 @@ Current delivery level:
 
 - Still missing relative to the original blueprint:
   - notifications and delivery channels
-  - external integration API beyond auth and CSV export endpoints
+  - external integration API beyond the current read-only `/api/v1` surface and CSV export endpoints
   - quarantine / sentinel workflows
   - advanced planner features such as randomization depth beyond current seeded balancing, richer experiment distribution controls, and more breeding rule depth
 
@@ -48,6 +49,7 @@ Current delivery level:
 - [x] Stabilize Playwright smoke runs across `chromium` and `mobile` by reseeding before each test
 - [x] Extract reusable seeding into `prisma/seed-database.ts`
 - [x] Add local attachment upload and viewing for genotype records and cage health notes
+- [x] Add authenticated `/api/v1` read-only integration routes for core colony entities and export discovery
 
 ## In Progress
 
@@ -56,7 +58,6 @@ Current delivery level:
 
 ## Next
 
-- [ ] Add a small integration API surface for core entities and operational exports
 - [ ] Add notification plumbing for overdue genotypes, weaning, breeder age, welfare flags, and reservation drift
 - [ ] Add quarantine / sentinel tracking if it is still in scope for MVP+
 - [ ] Deepen experiment planning with richer exclusion summaries, balancing controls, and multi-project allocation awareness
@@ -69,9 +70,10 @@ Current delivery level:
 Most recently verified in this branch:
 
 - `npm run typecheck`
-- `npm run lint`
 - `npm run build`
 - `npx vitest run tests/unit/colony.test.ts -t 'adds a cage health note that surfaces as a cage alert|records a genotype result and updates the animal detail genotype views' --reporter=verbose`
+- `npx vitest run tests/unit/integration-api-routes.test.ts --reporter=verbose`
+- `npm run verify:e2e:wsl -- --grep 'researcher can query the authenticated integration API surface'`
 - `npm run verify:e2e:wsl -- --grep '(animal staff can scan a cage and log a welfare note|admin can record a genotype result from the animal detail page)'`
 - `npm run verify:e2e:wsl -- --grep 'researcher can review experiment overview and tune the distribution helper'`
 - `npm run verify:e2e:wsl -- tests/e2e/smoke.spec.ts`
@@ -79,5 +81,7 @@ Most recently verified in this branch:
 Notes:
 
 - Targeted unit coverage, build, and attachment-specific desktop/mobile smoke flows passed after the attachment slice landed.
+- The authenticated `/api/v1` smoke check passed across both Playwright projects after trimming it to a stable list-and-export request path; the detail route is covered in the unit suite.
+- Full-repo `npm run lint` still hangs on the mounted `D:` workspace in this WSL setup, so it is not part of the latest verified snapshot.
 - Earlier full smoke coverage also passed across both Playwright projects in this branch.
 - I did not rerun the full `npm run verify` bundle in the latest tracker update turn.
