@@ -17,18 +17,19 @@ import {
   parseExperimentPlannerFilters,
 } from "@/lib/experiments-read";
 import { getBreedingForecastView, getForecastSummaryView } from "@/lib/forecast-read";
-import {
-  addCageHealthNote,
-  createAnimalRecord,
-  createBreedingSetup,
-  createCryostorageRecord,
-  createSampleRecord,
-  importGenotypeCsvBatch,
-  moveCageLocation,
-  planExperimentCohortAssignments,
-  recordAnimalGenotype,
-  recordBreedingLitter,
-  reserveAnimalForExperiment,
+  import {
+    addCageHealthNote,
+    createAnimalRecord,
+    createBreedingSetup,
+    createCryostorageRecord,
+    createSampleRecord,
+    importGenotypeCsvBatch,
+    moveCageLocation,
+    planExperimentCohortAssignments,
+    promotePlannedExperimentAssignments,
+    recordAnimalGenotype,
+    recordBreedingLitter,
+    reserveAnimalForExperiment,
   updateRuleConfig,
   updateAnimalLifecycleStatus,
   weanLitterToCages,
@@ -137,6 +138,37 @@ describe("colony logic", () => {
     const experiment = overview.find((item) => item.experimentCode === "EXP-TAM-041");
 
     expect(experiment?.assignments.some((assignment) => assignment.status === "planned")).toBe(true);
+  });
+
+  it("promotes planned cohort assignments into reserved experiment reservations", async () => {
+    const planned = await planExperimentCohortAssignments(
+      {
+        experimentId: "experiment-002",
+        startDate: "2026-04-15",
+        notes: "Promotion coverage setup.",
+        selectedAnimals: [
+          { animalId: "CM-26011", treatmentGroup: "Group A" },
+          { animalId: "CM-26013", treatmentGroup: "Group B" },
+        ],
+      },
+      { id: "user-researcher", role: "researcher" },
+    );
+
+    expect(planned.ok).toBe(true);
+
+    const promoted = await promotePlannedExperimentAssignments(
+      {
+        experimentId: "experiment-002",
+      },
+      { id: "user-researcher", role: "researcher" },
+    );
+
+    expect(promoted.ok).toBe(true);
+
+    const overview = await getExperimentOverviewView();
+    const experiment = overview.find((item) => item.experimentCode === "EXP-LPS-005");
+
+    expect(experiment?.assignments.some((assignment) => assignment.status === "reserved")).toBe(true);
   });
 
   it("builds a live colony forecast from active breedings and backup inventory", async () => {

@@ -172,6 +172,10 @@ test("researcher can review experiment overview and tune the distribution helper
 
   await expect(page.getByText("Planned 2 cohort assignments for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("planned · starts 15 Apr 2026").first()).toBeVisible({ timeout: 30_000 });
+
+  await submitAfterBlur(page, "experiment-promote-submit-experiment-001");
+  await expect(page.getByText("Promoted 2 planned assignments for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("reserved · starts 15 Apr 2026").first()).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can review breeding overview and generator suggestions", async ({ page }) => {

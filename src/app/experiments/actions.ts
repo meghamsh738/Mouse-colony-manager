@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { planExperimentCohortAssignments } from "@/lib/colony-write";
+import { planExperimentCohortAssignments, promotePlannedExperimentAssignments } from "@/lib/colony-write";
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
 import { getExperimentPlannerView, parseExperimentPlannerFilters } from "@/lib/experiments-read";
 import { requireUser } from "@/lib/session";
@@ -98,6 +98,46 @@ export async function planExperimentCohortAction(
     },
     { id: user.id, role: user.role },
   );
+
+  if (!result.ok) {
+    return {
+      status: "error",
+      message: result.message,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/animals");
+  revalidatePath("/experiments");
+
+  return {
+    status: "success",
+    message: result.message,
+  };
+}
+
+const promotePlannedCohortSchema = z.object({
+  experimentId: z.string().trim().min(1),
+});
+
+export async function promotePlannedCohortAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser();
+  const parsed = promotePlannedCohortSchema.safeParse({
+    experimentId: formData.get("experimentId"),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Choose an experiment before promoting the planned cohort.",
+    };
+  }
+
+  const result = await promotePlannedExperimentAssignments(parsed.data, { id: user.id, role: user.role });
 
   if (!result.ok) {
     return {

@@ -1019,6 +1019,165 @@ export async function planExperimentCohortAssignments(
   };
 }
 
+export async function promotePlannedExperimentAssignments(
+  input: { experimentId: string },
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canReserveAnimal(actor.role)) {
+    return { ok: false, message: "Your role cannot promote planned cohorts." };
+  }
+
+  const experiment = await prisma.experiment.findUnique({
+    where: { id: input.experimentId },
+    select: {
+      id: true,
+      experimentCode: true,
+      projectId: true,
+      project: {
+        select: {
+          projectCode: true,
+        },
+      },
+      status: true,
+      assignments: {
+        where: {
+          status: "planned",
+        },
+        orderBy: [{ startDate: "asc" }, { id: "asc" }],
+        select: {
+          id: true,
+          animalId: true,
+          startDate: true,
+          treatmentGroup: true,
+          notes: true,
+          animal: {
+            select: {
+              id: true,
+              animalId: true,
+              status: true,
+              outcomeStatus: true,
+              experimentAssignments: {
+                where: {
+                  status: { in: ["reserved", "active"] },
+                },
+                select: {
+                  id: true,
+                  experimentId: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!experiment || experiment.status === "completed" || experiment.status === "cancelled") {
+    return { ok: false, message: "Choose an active or planned experiment." };
+  }
+
+  if (!experiment.assignments.length) {
+    return { ok: false, message: `No planned cohort assignments are waiting for ${experiment.experimentCode}.` };
+  }
+
+  const promotableAssignments = experiment.assignments.filter((assignment) => {
+    if (assignment.animal.outcomeStatus !== "alive") {
+      return false;
+    }
+
+    if (assignment.animal.status !== "colony_holding") {
+      return false;
+    }
+
+    return assignment.animal.experimentAssignments.length === 0;
+  });
+
+  if (!promotableAssignments.length) {
+    return { ok: false, message: `No planned assignments could be promoted for ${experiment.experimentCode}.` };
+  }
+
+  const skippedCount = experiment.assignments.length - promotableAssignments.length;
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    for (const assignment of promotableAssignments) {
+      await tx.experimentAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          status: "reserved",
+        },
+      });
+
+      await tx.animal.update({
+        where: { id: assignment.animal.id },
+        data: {
+          status: "reserved",
+          experimentalStatus: `Reserved for ${experiment.experimentCode}`,
+          projectSummary: experiment.project.projectCode,
+        },
+      });
+
+      const hasProjectAllocation = await tx.animalProjectAllocation.findFirst({
+        where: {
+          animalId: assignment.animal.id,
+          projectId: experiment.projectId,
+          endedAt: null,
+        },
+        select: { id: true },
+      });
+
+      if (!hasProjectAllocation) {
+        await tx.animalProjectAllocation.create({
+          data: {
+            id: createId("alloc"),
+            animalId: assignment.animal.id,
+            projectId: experiment.projectId,
+            startedAt: timestamp,
+            chargeable: true,
+            notes: `Added automatically during cohort promotion for ${experiment.experimentCode}.`,
+          },
+        });
+      }
+
+      await tx.animalStatusEvent.create({
+        data: {
+          id: createId("status"),
+          animalId: assignment.animal.id,
+          fromStatus: "colony_holding",
+          toStatus: "reserved",
+          happenedAt: timestamp,
+          actorId: actor.id,
+          reason: `Promoted planned cohort assignment for ${experiment.experimentCode}.`,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "experiment_assignment",
+          entityId: assignment.id,
+          action: "promote_plan",
+          previousValue: {
+            status: "planned",
+          },
+          newValue: {
+            status: "reserved",
+            treatmentGroup: assignment.treatmentGroup,
+            startDate: assignment.startDate.toISOString().slice(0, 10),
+          },
+          timestamp,
+        },
+      });
+    }
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `Promoted ${promotableAssignments.length} planned assignment${promotableAssignments.length === 1 ? "" : "s"} for ${experiment.experimentCode}.${skippedCount ? ` Skipped ${skippedCount} animal${skippedCount === 1 ? "" : "s"} no longer eligible.` : ""}`,
+  };
+}
+
 export async function createBreedingSetup(
   input: CreateBreedingSetupInput,
   actor: { id: string; role: UserRole },

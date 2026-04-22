@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app/app-shell";
+import { ExperimentPlanPromoteForm } from "@/components/app/experiment-plan-promote-form";
 import { ExperimentPlanSaveForm } from "@/components/app/experiment-plan-save-form";
 import { PageHeader } from "@/components/app/page-header";
 import { StatStrip } from "@/components/app/stat-strip";
@@ -556,6 +557,14 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                       </div>
                     ))}
                   </div>
+                  {experiment.assignments.some((assignment) => assignment.status === "planned") ? (
+                    <div className="mt-4 border-t border-[var(--line)] pt-4">
+                      <ExperimentPlanPromoteForm
+                        experimentId={experiment.id}
+                        plannedCount={experiment.assignments.filter((assignment) => assignment.status === "planned").length}
+                      />
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
