@@ -73,6 +73,13 @@ export type RuleCategory =
   | "genotype"
   | "experiment"
   | "capacity";
+export type NotificationCategoryKey =
+  | "genotype_pending"
+  | "weaning_due"
+  | "breeder_age"
+  | "welfare"
+  | "reservation_drift";
+export type NotificationDeliveryChannel = "in_app";
 
 export interface SeedUser {
   id: string;
@@ -364,6 +371,45 @@ export interface Alert {
   generatedAt: string;
   resolvedAt?: string;
   source: "rule" | "manual";
+}
+
+export interface NotificationPreference {
+  ruleKey: string;
+  categoryKey: NotificationCategoryKey;
+  categoryLabel: string;
+  description: string;
+  enabled: boolean;
+  matchingAlertCount: number;
+}
+
+export interface NotificationItem {
+  id: string;
+  categoryKey: NotificationCategoryKey;
+  categoryLabel: string;
+  description: string;
+  deliveryChannel: NotificationDeliveryChannel;
+  severity: AlertSeverity;
+  message: string;
+  generatedAt: string;
+  source: "rule" | "manual";
+  alertType: string;
+  entityType: string;
+  entityId: string;
+  href: string;
+  actionLabel: string;
+}
+
+export interface NotificationInboxView {
+  notifications: NotificationItem[];
+  preferences: NotificationPreference[];
+  summary: {
+    total: number;
+    critical: number;
+    warning: number;
+    info: number;
+    enabledCategories: number;
+    mutedCategories: number;
+  };
 }
 
 export interface AuditLog {

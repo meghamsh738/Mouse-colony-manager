@@ -260,6 +260,25 @@ test("researcher can query the authenticated integration API surface", async ({ 
   expect(exportCatalog.body.data.some((entry: { entity: string }) => entry.entity === "animals")).toBe(true);
 });
 
+test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {
+  await signInAs(page, "staff");
+  await page.goto("/notifications");
+
+  await expect(page.getByRole("heading", { name: "In-app notification inbox for the active colony." })).toBeVisible();
+  await expect(page.getByTestId("notification-feed")).toBeVisible();
+  await expect(page.getByTestId("notification-preference-genotype_pending")).toContainText("enabled");
+  await expect(page.getByTestId("notification-preference-weaning_due")).toContainText("enabled");
+
+  const weaningLink = page.locator('[data-testid^="notification-link-weaning_due-"]').first();
+  await expect(weaningLink).toBeVisible({ timeout: 30_000 });
+  const href = await weaningLink.getAttribute("href");
+  expect(href).toBe("/breeding");
+  await page.goto(href!);
+
+  await expect(page).toHaveURL(/\/breeding$/);
+  await expect(page.getByRole("heading", { name: "Active breeding setups and suggested crosses." })).toBeVisible();
+});
+
 test("admin can review breeding overview and generator suggestions", async ({ page }) => {
   await signInAs(page, "admin");
   await page.goto("/breeding");

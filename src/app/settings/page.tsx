@@ -32,7 +32,7 @@ export default async function SettingsPage() {
                   Update limits, exceptions, and blocking behavior without touching code.
                 </h2>
                 <p className="max-w-2xl text-sm leading-7 text-[var(--muted)]">
-                  Use this for local policy changes such as breeder ages, cage occupancy, genotype grace windows, and compliance reminders.
+                  Use this for local policy changes such as breeder ages, cage occupancy, genotype grace windows, compliance reminders, and notification delivery toggles.
                 </p>
               </div>
               <RuleConfigEditor rules={rules} />

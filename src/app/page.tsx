@@ -144,6 +144,10 @@ export default async function DashboardPage() {
                 <p className="font-medium">Review reserved animals</p>
                 <p className="mt-1 text-sm text-[var(--muted)]">Check overlap conflicts and not-started reservations</p>
               </Link>
+              <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/notifications">
+                <p className="font-medium">Open notification inbox</p>
+                <p className="mt-1 text-sm text-[var(--muted)]">Triages overdue genotypes, welfare follow-up, and stale reservations</p>
+              </Link>
               <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/forecast">
                 <p className="font-medium">Open forecast</p>
                 <p className="mt-1 text-sm text-[var(--muted)]">Estimate breeder output, near-term runway, and frozen-backup coverage</p>
