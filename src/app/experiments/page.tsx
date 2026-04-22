@@ -30,6 +30,25 @@ function renderSelectionReason(reason: string) {
   return reason;
 }
 
+function renderAssignmentProvenance(action: string) {
+  switch (action) {
+    case "reserve":
+      return "Reserved directly";
+    case "plan":
+      return "Planned from helper";
+    case "promote_plan":
+      return "Promoted from planned";
+    case "demote_reservation":
+      return "Rolled back to planned";
+    case "update_plan":
+      return "Planned entry updated";
+    case "delete_plan":
+      return "Planned entry removed";
+    default:
+      return titleCase(action.replaceAll("_", " "));
+  }
+}
+
 export default async function ExperimentsPage({ searchParams }: ExperimentsPageProps) {
   const user = await requireUser();
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
@@ -551,11 +570,25 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                   <p className="mt-3 text-sm text-[var(--muted)]">{experiment.projectCode}</p>
                   <div className="mt-3 space-y-2">
                     {experiment.assignments.map((assignment) => (
-                      <div key={assignment.id} className="rounded-3xl bg-[var(--surface-2)] px-4 py-3 text-sm">
+                      <div
+                        key={assignment.id}
+                        className="rounded-3xl bg-[var(--surface-2)] px-4 py-3 text-sm"
+                        data-testid={`experiment-assignment-${assignment.id}`}
+                      >
                         <p>{assignment.animalId}</p>
                         <p className="text-[var(--muted)]">
                           {assignment.status} · {assignment.treatmentGroup ?? "No treatment group"} · starts {formatDate(assignment.startDate)}
                         </p>
+                        {assignment.provenance ? (
+                          <p
+                            className="mt-1 text-xs uppercase tracking-[0.14em] text-[var(--muted)]"
+                            data-testid={`assignment-provenance-${assignment.id}`}
+                          >
+                            {renderAssignmentProvenance(assignment.provenance.action)}
+                            {assignment.provenance.actorName ? ` by ${assignment.provenance.actorName}` : ""}
+                            {` · ${formatDate(assignment.provenance.timestamp)}`}
+                          </p>
+                        ) : null}
                         {assignment.notes ? <p className="mt-1 text-[var(--muted)]">{assignment.notes}</p> : null}
                         {assignment.status === "planned" ? (
                           <PlannedAssignmentEditor

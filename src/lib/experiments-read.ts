@@ -23,8 +23,17 @@ type ExperimentOverviewItem = {
     startDate: string;
     treatmentGroup: string | null;
     notes: string | null;
+    provenance: {
+      action: string;
+      timestamp: string;
+      actorName: string | null;
+    } | null;
   }>;
 };
+
+function isExperimentAssignmentAction(action: string) {
+  return ["reserve", "plan", "promote_plan", "demote_reservation", "update_plan", "delete_plan"].includes(action);
+}
 
 type PlannerSearchParams = Record<string, string | string[] | undefined>;
 
@@ -312,6 +321,49 @@ export async function getExperimentOverviewView(): Promise<ExperimentOverviewIte
     },
   });
 
+  const assignmentIds = experiments.flatMap((experiment) => experiment.assignments.map((assignment) => assignment.id));
+  const latestAuditEntries = assignmentIds.length
+    ? await prisma.auditLog.findMany({
+        where: {
+          entityType: "experiment_assignment",
+          entityId: { in: assignmentIds },
+          action: {
+            in: ["reserve", "plan", "promote_plan", "demote_reservation", "update_plan", "delete_plan"],
+          },
+        },
+        orderBy: [{ timestamp: "desc" }, { id: "desc" }],
+        include: {
+          actor: {
+            select: {
+              name: true,
+              email: true,
+            },
+          },
+        },
+      })
+    : [];
+
+  const latestAuditByAssignmentId = new Map<
+    string,
+    {
+      action: string;
+      timestamp: string;
+      actorName: string | null;
+    }
+  >();
+
+  for (const entry of latestAuditEntries) {
+    if (!isExperimentAssignmentAction(entry.action) || latestAuditByAssignmentId.has(entry.entityId)) {
+      continue;
+    }
+
+    latestAuditByAssignmentId.set(entry.entityId, {
+      action: entry.action,
+      timestamp: entry.timestamp.toISOString(),
+      actorName: entry.actor?.name ?? entry.actor?.email ?? null,
+    });
+  }
+
   return experiments.map((experiment) => ({
     id: experiment.id,
     experimentCode: experiment.experimentCode,
@@ -325,6 +377,7 @@ export async function getExperimentOverviewView(): Promise<ExperimentOverviewIte
       startDate: assignment.startDate.toISOString(),
       treatmentGroup: assignment.treatmentGroup ?? null,
       notes: assignment.notes ?? null,
+      provenance: latestAuditByAssignmentId.get(assignment.id) ?? null,
     })),
   }));
 }

@@ -136,11 +136,16 @@ describe("colony logic", () => {
     );
 
     expect(result.ok).toBe(true);
+    const selectedAnimalIds = planner.randomization.groups.flatMap((group) => group.members.map((member) => member.animalId));
 
     const overview = await getExperimentOverviewView();
     const experiment = overview.find((item) => item.experimentCode === "EXP-TAM-041");
+    const plannedAssignments =
+      experiment?.assignments.filter((assignment) => selectedAnimalIds.includes(assignment.animalId)) ?? [];
 
-    expect(experiment?.assignments.some((assignment) => assignment.status === "planned")).toBe(true);
+    expect(plannedAssignments).toHaveLength(selectedAnimalIds.length);
+    expect(plannedAssignments.every((assignment) => assignment.provenance?.action === "plan")).toBe(true);
+    expect(plannedAssignments.every((assignment) => Boolean(assignment.provenance?.actorName))).toBe(true);
   });
 
   it("promotes planned cohort assignments into reserved experiment reservations", async () => {
@@ -170,8 +175,11 @@ describe("colony logic", () => {
 
     const overview = await getExperimentOverviewView();
     const experiment = overview.find((item) => item.experimentCode === "EXP-LPS-005");
+    const reservedAssignments =
+      experiment?.assignments.filter((assignment) => ["CM-26011", "CM-26013"].includes(assignment.animalId)) ?? [];
 
-    expect(experiment?.assignments.some((assignment) => assignment.status === "reserved")).toBe(true);
+    expect(reservedAssignments).toHaveLength(2);
+    expect(reservedAssignments.every((assignment) => assignment.provenance?.action === "promote_plan")).toBe(true);
   });
 
   it("updates and removes planned experiment assignments before promotion", async () => {
@@ -226,6 +234,7 @@ describe("colony logic", () => {
 
     expect(refreshedUpdated?.treatmentGroup).toBe("Group C");
     expect(refreshedUpdated?.startDate.slice(0, 10)).toBe("2026-04-18");
+    expect(refreshedUpdated?.provenance?.action).toBe("update_plan");
     expect(refreshedDeleted).toBeUndefined();
   });
 
@@ -265,8 +274,11 @@ describe("colony logic", () => {
 
     const overview = await getExperimentOverviewView();
     const experiment = overview.find((item) => item.experimentCode === "EXP-LPS-005");
+    const plannedAssignments =
+      experiment?.assignments.filter((assignment) => ["CM-26005", "CM-26012"].includes(assignment.animalId)) ?? [];
 
-    expect(experiment?.assignments.some((assignment) => assignment.status === "planned")).toBe(true);
+    expect(plannedAssignments).toHaveLength(2);
+    expect(plannedAssignments.every((assignment) => assignment.provenance?.action === "demote_reservation")).toBe(true);
   });
 
   it("builds a live colony forecast from active breedings and backup inventory", async () => {
