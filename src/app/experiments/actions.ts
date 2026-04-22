@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { planExperimentCohortAssignments, promotePlannedExperimentAssignments } from "@/lib/colony-write";
+import {
+  deletePlannedExperimentAssignment,
+  planExperimentCohortAssignments,
+  promotePlannedExperimentAssignments,
+  updatePlannedExperimentAssignment,
+} from "@/lib/colony-write";
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
 import { getExperimentPlannerView, parseExperimentPlannerFilters } from "@/lib/experiments-read";
 import { requireUser } from "@/lib/session";
@@ -138,6 +143,92 @@ export async function promotePlannedCohortAction(
   }
 
   const result = await promotePlannedExperimentAssignments(parsed.data, { id: user.id, role: user.role });
+
+  if (!result.ok) {
+    return {
+      status: "error",
+      message: result.message,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/animals");
+  revalidatePath("/experiments");
+
+  return {
+    status: "success",
+    message: result.message,
+  };
+}
+
+const updatePlannedAssignmentSchema = z.object({
+  assignmentId: z.string().trim().min(1),
+  startDate: z.string().trim().min(1),
+  treatmentGroup: z.string().trim().max(200).optional(),
+  notes: z.string().trim().max(400).optional(),
+});
+
+export async function updatePlannedAssignmentAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser();
+  const parsed = updatePlannedAssignmentSchema.safeParse({
+    assignmentId: formData.get("assignmentId"),
+    startDate: formData.get("startDate"),
+    treatmentGroup: formData.get("treatmentGroup") || undefined,
+    notes: formData.get("notes") || undefined,
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Choose a valid start date before updating the planned assignment.",
+    };
+  }
+
+  const result = await updatePlannedExperimentAssignment(parsed.data, { id: user.id, role: user.role });
+
+  if (!result.ok) {
+    return {
+      status: "error",
+      message: result.message,
+    };
+  }
+
+  revalidatePath("/");
+  revalidatePath("/animals");
+  revalidatePath("/experiments");
+
+  return {
+    status: "success",
+    message: result.message,
+  };
+}
+
+const deletePlannedAssignmentSchema = z.object({
+  assignmentId: z.string().trim().min(1),
+});
+
+export async function deletePlannedAssignmentAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser();
+  const parsed = deletePlannedAssignmentSchema.safeParse({
+    assignmentId: formData.get("assignmentId"),
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Choose a planned assignment before removing it.",
+    };
+  }
+
+  const result = await deletePlannedExperimentAssignment(parsed.data, { id: user.id, role: user.role });
 
   if (!result.ok) {
     return {

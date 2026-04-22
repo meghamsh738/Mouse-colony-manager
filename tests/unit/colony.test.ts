@@ -27,6 +27,8 @@ import { getBreedingForecastView, getForecastSummaryView } from "@/lib/forecast-
     moveCageLocation,
     planExperimentCohortAssignments,
     promotePlannedExperimentAssignments,
+    updatePlannedExperimentAssignment,
+    deletePlannedExperimentAssignment,
     recordAnimalGenotype,
     recordBreedingLitter,
     reserveAnimalForExperiment,
@@ -169,6 +171,61 @@ describe("colony logic", () => {
     const experiment = overview.find((item) => item.experimentCode === "EXP-LPS-005");
 
     expect(experiment?.assignments.some((assignment) => assignment.status === "reserved")).toBe(true);
+  });
+
+  it("updates and removes planned experiment assignments before promotion", async () => {
+    const planned = await planExperimentCohortAssignments(
+      {
+        experimentId: "experiment-002",
+        startDate: "2026-04-15",
+        notes: "Editable cohort coverage setup.",
+        selectedAnimals: [
+          { animalId: "CM-26005", treatmentGroup: "Group A" },
+          { animalId: "CM-26012", treatmentGroup: "Group B" },
+        ],
+      },
+      { id: "user-researcher", role: "researcher" },
+    );
+
+    expect(planned.ok).toBe(true);
+
+    const overview = await getExperimentOverviewView();
+    const experiment = overview.find((item) => item.experimentCode === "EXP-LPS-005");
+    const assignmentToUpdate = experiment?.assignments.find((assignment) => assignment.animalId === "CM-26005");
+    const assignmentToDelete = experiment?.assignments.find((assignment) => assignment.animalId === "CM-26012");
+
+    expect(assignmentToUpdate?.status).toBe("planned");
+    expect(assignmentToDelete?.status).toBe("planned");
+
+    const updated = await updatePlannedExperimentAssignment(
+      {
+        assignmentId: assignmentToUpdate!.id,
+        startDate: "2026-04-18",
+        treatmentGroup: "Group C",
+        notes: "Updated before cohort promotion.",
+      },
+      { id: "user-researcher", role: "researcher" },
+    );
+
+    expect(updated.ok).toBe(true);
+
+    const removed = await deletePlannedExperimentAssignment(
+      {
+        assignmentId: assignmentToDelete!.id,
+      },
+      { id: "user-researcher", role: "researcher" },
+    );
+
+    expect(removed.ok).toBe(true);
+
+    const refreshedOverview = await getExperimentOverviewView();
+    const refreshedExperiment = refreshedOverview.find((item) => item.experimentCode === "EXP-LPS-005");
+    const refreshedUpdated = refreshedExperiment?.assignments.find((assignment) => assignment.id === assignmentToUpdate?.id);
+    const refreshedDeleted = refreshedExperiment?.assignments.find((assignment) => assignment.id === assignmentToDelete?.id);
+
+    expect(refreshedUpdated?.treatmentGroup).toBe("Group C");
+    expect(refreshedUpdated?.startDate.slice(0, 10)).toBe("2026-04-18");
+    expect(refreshedDeleted).toBeUndefined();
   });
 
   it("builds a live colony forecast from active breedings and backup inventory", async () => {

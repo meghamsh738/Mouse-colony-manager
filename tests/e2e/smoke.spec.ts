@@ -171,10 +171,27 @@ test("researcher can review experiment overview and tune the distribution helper
   await submitAfterBlur(page, "planner-save-submit");
 
   await expect(page.getByText("Planned 2 cohort assignments for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("planned · starts 15 Apr 2026").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("planned · Group A · starts 15 Apr 2026").first()).toBeVisible({ timeout: 30_000 });
+
+  const plannedEditor = page.locator('[data-testid^="planned-assignment-editor-"]').first();
+  const assignmentId = (await plannedEditor.getAttribute("data-testid"))?.replace("planned-assignment-editor-", "");
+  expect(assignmentId).toBeTruthy();
+
+  await plannedEditor.getByTestId(`planned-group-${assignmentId}`).fill("Group Z");
+  await plannedEditor.getByTestId(`planned-notes-${assignmentId}`).fill("Adjusted in the overview editor before promotion.");
+  await submitWithinAfterBlur(page, plannedEditor, `planned-update-submit-${assignmentId}`);
+  await expect(page.getByText("Updated planned assignment").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/planned · Group Z · starts/i).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Adjusted in the overview editor before promotion.").first()).toBeVisible({ timeout: 30_000 });
+
+  const secondEditor = page.locator('[data-testid^="planned-assignment-editor-"]').nth(1);
+  const secondAssignmentId = (await secondEditor.getAttribute("data-testid"))?.replace("planned-assignment-editor-", "");
+  expect(secondAssignmentId).toBeTruthy();
+  await submitWithinAfterBlur(page, secondEditor, `planned-delete-submit-${secondAssignmentId}`);
+  await expect(page.getByTestId(`planned-assignment-editor-${secondAssignmentId}`)).toHaveCount(0, { timeout: 30_000 });
 
   await submitAfterBlur(page, "experiment-promote-submit-experiment-001");
-  await expect(page.getByText("Promoted 2 planned assignments for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Promoted 1 planned assignment for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("reserved · starts 15 Apr 2026").first()).toBeVisible({ timeout: 30_000 });
 });
 

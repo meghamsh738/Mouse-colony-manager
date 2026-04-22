@@ -1178,6 +1178,171 @@ export async function promotePlannedExperimentAssignments(
   };
 }
 
+export async function updatePlannedExperimentAssignment(
+  input: {
+    assignmentId: string;
+    startDate: string;
+    treatmentGroup?: string;
+    notes?: string;
+  },
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canReserveAnimal(actor.role)) {
+    return { ok: false, message: "Your role cannot edit planned cohorts." };
+  }
+
+  const assignment = await prisma.experimentAssignment.findUnique({
+    where: { id: input.assignmentId },
+    select: {
+      id: true,
+      status: true,
+      startDate: true,
+      treatmentGroup: true,
+      notes: true,
+      experiment: {
+        select: {
+          id: true,
+          experimentCode: true,
+        },
+      },
+      animal: {
+        select: {
+          animalId: true,
+        },
+      },
+    },
+  });
+
+  if (!assignment || assignment.status !== "planned") {
+    return { ok: false, message: "Only planned assignments can be edited." };
+  }
+
+  const normalizedStartDate = new Date(input.startDate);
+
+  if (Number.isNaN(normalizedStartDate.getTime())) {
+    return { ok: false, message: "Choose a valid planned start date." };
+  }
+
+  const normalizedTreatmentGroup = input.treatmentGroup?.trim() || null;
+  const normalizedNotes = input.notes?.trim() || null;
+  const sameValues =
+    assignment.startDate.toISOString().slice(0, 10) === normalizedStartDate.toISOString().slice(0, 10) &&
+    (assignment.treatmentGroup ?? null) === normalizedTreatmentGroup &&
+    (assignment.notes ?? null) === normalizedNotes;
+
+  if (sameValues) {
+    return {
+      ok: true,
+      message: `${assignment.animal.animalId} is already up to date in ${assignment.experiment.experimentCode}.`,
+      entityId: assignment.id,
+    };
+  }
+
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.experimentAssignment.update({
+      where: { id: assignment.id },
+      data: {
+        startDate: normalizedStartDate,
+        treatmentGroup: normalizedTreatmentGroup ?? undefined,
+        notes: normalizedNotes ?? undefined,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "experiment_assignment",
+        entityId: assignment.id,
+        action: "update_plan",
+        previousValue: {
+          startDate: assignment.startDate.toISOString().slice(0, 10),
+          treatmentGroup: assignment.treatmentGroup,
+          notes: assignment.notes,
+        },
+        newValue: {
+          startDate: normalizedStartDate.toISOString().slice(0, 10),
+          treatmentGroup: normalizedTreatmentGroup,
+          notes: normalizedNotes,
+        },
+        timestamp,
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `Updated planned assignment for ${assignment.animal.animalId} in ${assignment.experiment.experimentCode}.`,
+    entityId: assignment.id,
+  };
+}
+
+export async function deletePlannedExperimentAssignment(
+  input: { assignmentId: string },
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canReserveAnimal(actor.role)) {
+    return { ok: false, message: "Your role cannot remove planned cohorts." };
+  }
+
+  const assignment = await prisma.experimentAssignment.findUnique({
+    where: { id: input.assignmentId },
+    select: {
+      id: true,
+      status: true,
+      startDate: true,
+      treatmentGroup: true,
+      notes: true,
+      experiment: {
+        select: {
+          experimentCode: true,
+        },
+      },
+      animal: {
+        select: {
+          animalId: true,
+        },
+      },
+    },
+  });
+
+  if (!assignment || assignment.status !== "planned") {
+    return { ok: false, message: "Only planned assignments can be removed." };
+  }
+
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.experimentAssignment.delete({
+      where: { id: assignment.id },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "experiment_assignment",
+        entityId: assignment.id,
+        action: "delete_plan",
+        previousValue: {
+          startDate: assignment.startDate.toISOString().slice(0, 10),
+          treatmentGroup: assignment.treatmentGroup,
+          notes: assignment.notes,
+        },
+        timestamp,
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `Removed planned assignment for ${assignment.animal.animalId} from ${assignment.experiment.experimentCode}.`,
+    entityId: assignment.id,
+  };
+}
+
 export async function createBreedingSetup(
   input: CreateBreedingSetupInput,
   actor: { id: string; role: UserRole },

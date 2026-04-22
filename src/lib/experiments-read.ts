@@ -21,6 +21,8 @@ type ExperimentOverviewItem = {
     animalId: string;
     status: string;
     startDate: string;
+    treatmentGroup: string | null;
+    notes: string | null;
   }>;
 };
 
@@ -321,6 +323,8 @@ export async function getExperimentOverviewView(): Promise<ExperimentOverviewIte
       animalId: assignment.animal.animalId,
       status: assignment.status,
       startDate: assignment.startDate.toISOString(),
+      treatmentGroup: assignment.treatmentGroup ?? null,
+      notes: assignment.notes ?? null,
     })),
   }));
 }

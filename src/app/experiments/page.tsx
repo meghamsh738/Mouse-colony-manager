@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app/app-shell";
+import { PlannedAssignmentEditor } from "@/components/app/planned-assignment-editor";
 import { ExperimentPlanPromoteForm } from "@/components/app/experiment-plan-promote-form";
 import { ExperimentPlanSaveForm } from "@/components/app/experiment-plan-save-form";
 import { PageHeader } from "@/components/app/page-header";
@@ -552,8 +553,18 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                       <div key={assignment.id} className="rounded-3xl bg-[var(--surface-2)] px-4 py-3 text-sm">
                         <p>{assignment.animalId}</p>
                         <p className="text-[var(--muted)]">
-                          {assignment.status} · starts {formatDate(assignment.startDate)}
+                          {assignment.status} · {assignment.treatmentGroup ?? "No treatment group"} · starts {formatDate(assignment.startDate)}
                         </p>
+                        {assignment.notes ? <p className="mt-1 text-[var(--muted)]">{assignment.notes}</p> : null}
+                        {assignment.status === "planned" ? (
+                          <PlannedAssignmentEditor
+                            assignmentId={assignment.id}
+                            animalId={assignment.animalId}
+                            startDate={assignment.startDate}
+                            treatmentGroup={assignment.treatmentGroup}
+                            notes={assignment.notes}
+                          />
+                        ) : null}
                       </div>
                     ))}
                   </div>
