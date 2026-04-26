@@ -7,6 +7,14 @@ import { formatAgeLabel, formatPercent } from "@/lib/utils";
 type BreedingRuleContext = {
   breederMaxAgeDays: number;
   breederMinAgeDays: number;
+  fertilityTargetLitterSize: number;
+  fertilityHighAveragePups: number;
+  fertilityLowAveragePups: number;
+  fertilityHistoryBoostScore: number;
+  fertilityHistoryPenaltyScore: number;
+  activeWorkloadPenaltyScore: number;
+  surplusPenaltyPerPup: number;
+  surplusWarningPups: number;
   today: string;
 };
 
@@ -200,7 +208,7 @@ function buildBreederHistory(
   };
 }
 
-function fertilityHistoryAdjustment(sireHistory: BreederHistory, damHistory: BreederHistory) {
+function fertilityHistoryAdjustment(sireHistory: BreederHistory, damHistory: BreederHistory, rules: BreedingRuleContext) {
   const knownAverages = [sireHistory.averageLitterSize, damHistory.averageLitterSize].filter(
     (value): value is number => value !== null,
   );
@@ -211,24 +219,24 @@ function fertilityHistoryAdjustment(sireHistory: BreederHistory, damHistory: Bre
 
   const combinedAverage = knownAverages.reduce((sum, value) => sum + value, 0) / knownAverages.length;
 
-  if (combinedAverage >= 7) {
-    return 8;
+  if (combinedAverage >= rules.fertilityHighAveragePups) {
+    return rules.fertilityHistoryBoostScore;
   }
 
-  if (combinedAverage >= 5) {
-    return 4;
+  if (combinedAverage >= rules.fertilityLowAveragePups) {
+    return Math.round(rules.fertilityHistoryBoostScore / 2);
   }
 
-  return -8;
+  return -rules.fertilityHistoryPenaltyScore;
 }
 
-function expectedLitterSizeFromHistory(sireHistory: BreederHistory, damHistory: BreederHistory) {
+function expectedLitterSizeFromHistory(sireHistory: BreederHistory, damHistory: BreederHistory, rules: BreedingRuleContext) {
   const knownAverages = [sireHistory.averageLitterSize, damHistory.averageLitterSize].filter(
     (value): value is number => value !== null,
   );
 
   if (!knownAverages.length) {
-    return 6;
+    return rules.fertilityTargetLitterSize;
   }
 
   return Number((knownAverages.reduce((sum, value) => sum + value, 0) / knownAverages.length).toFixed(1));
@@ -241,9 +249,21 @@ function buildWorkloadSummary(sireHistory: BreederHistory, damHistory: BreederHi
 }
 
 async function getBreedingRuleContext(): Promise<BreedingRuleContext> {
+  const ruleKeys = [
+    "breeder_max_age_days",
+    "breeder_min_age_days",
+    "breeding_fertility_target_litter_size",
+    "breeding_fertility_high_average_pups",
+    "breeding_fertility_low_average_pups",
+    "breeding_fertility_history_boost_score",
+    "breeding_fertility_history_penalty_score",
+    "breeding_active_workload_penalty_score",
+    "breeding_surplus_penalty_per_pup",
+    "breeding_surplus_warning_pups",
+  ];
   const rules = await prisma.ruleConfig.findMany({
     where: {
-      key: { in: ["breeder_max_age_days", "breeder_min_age_days"] },
+      key: { in: ruleKeys },
     },
     select: {
       key: true,
@@ -256,6 +276,14 @@ async function getBreedingRuleContext(): Promise<BreedingRuleContext> {
   return {
     breederMaxAgeDays: values.get("breeder_max_age_days") ?? 0,
     breederMinAgeDays: values.get("breeder_min_age_days") ?? 0,
+    fertilityTargetLitterSize: values.get("breeding_fertility_target_litter_size") ?? 6,
+    fertilityHighAveragePups: values.get("breeding_fertility_high_average_pups") ?? 7,
+    fertilityLowAveragePups: values.get("breeding_fertility_low_average_pups") ?? 5,
+    fertilityHistoryBoostScore: values.get("breeding_fertility_history_boost_score") ?? 8,
+    fertilityHistoryPenaltyScore: values.get("breeding_fertility_history_penalty_score") ?? 8,
+    activeWorkloadPenaltyScore: values.get("breeding_active_workload_penalty_score") ?? 8,
+    surplusPenaltyPerPup: values.get("breeding_surplus_penalty_per_pup") ?? 2,
+    surplusWarningPups: values.get("breeding_surplus_warning_pups") ?? 4,
     today: getReferenceDate(),
   };
 }
@@ -383,8 +411,8 @@ export async function getBreedingSuggestionsView(
           sireAge < rules.breederMinAgeDays || damAge < rules.breederMinAgeDays ? 40 : 0;
         const ruleRisks = evaluateBreedingRuleRisks(sire.alleles, dam.alleles);
         const rulePenalty = ruleRisks.criticalCount * 35 + ruleRisks.warningCount * 10;
-        const workloadPenalty = (sireHistory.activeBreedings + damHistory.activeBreedings) * 8;
-        const historyAdjustment = fertilityHistoryAdjustment(sireHistory, damHistory);
+        const workloadPenalty = (sireHistory.activeBreedings + damHistory.activeBreedings) * rules.activeWorkloadPenaltyScore;
+        const historyAdjustment = fertilityHistoryAdjustment(sireHistory, damHistory, rules);
         const warnings: string[] = [];
 
         if (sireAge > rules.breederMaxAgeDays) {
@@ -410,13 +438,13 @@ export async function getBreedingSuggestionsView(
         warnings.push(...ruleRisks.warnings);
 
         const expectedProbability = Math.max(0.1, genotypeScore - fertilityPenalty);
-        const expectedLitterSize = expectedLitterSizeFromHistory(sireHistory, damHistory);
+        const expectedLitterSize = expectedLitterSizeFromHistory(sireHistory, damHistory, rules);
         const expectedUsablePups = Number((expectedProbability * expectedLitterSize).toFixed(1));
         const estimatedSurplusPups = Number(Math.max(0, expectedLitterSize - expectedUsablePups).toFixed(1));
-        const surplusPenalty = Math.max(0, Math.round(estimatedSurplusPups * 2));
+        const surplusPenalty = Math.max(0, Math.round(estimatedSurplusPups * rules.surplusPenaltyPerPup));
         const estimatedPupsNeeded = Math.max(6, Math.ceil(minimumYield / Math.max(expectedProbability, 0.1)));
 
-        if (estimatedSurplusPups >= 4) {
+        if (estimatedSurplusPups >= rules.surplusWarningPups) {
           warnings.push(`High surplus risk: about ${estimatedSurplusPups} pups may miss the requested genotype`);
         }
 

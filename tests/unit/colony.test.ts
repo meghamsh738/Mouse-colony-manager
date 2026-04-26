@@ -16,7 +16,7 @@ import {
   getExperimentPlannerView,
   parseExperimentPlannerFilters,
 } from "@/lib/experiments-read";
-import { getBreedingForecastView, getForecastSummaryView } from "@/lib/forecast-read";
+import { getBreedingForecastView, getForecastSummaryView, getSurplusMinimizationView } from "@/lib/forecast-read";
   import {
     addCageHealthNote,
     createAnimalRecord,
@@ -324,13 +324,21 @@ describe("colony logic", () => {
   });
 
   it("builds a live colony forecast from active breedings and backup inventory", async () => {
-    const [summary, rows] = await Promise.all([getForecastSummaryView(), getBreedingForecastView()]);
+    const [summary, rows, surplus] = await Promise.all([
+      getForecastSummaryView(),
+      getBreedingForecastView(),
+      getSurplusMinimizationView(),
+    ]);
 
     expect(summary.activeBreedingForecasts).toBeGreaterThan(0);
     expect(summary.cryostorageBackups).toBeGreaterThan(0);
     expect(summary.projectedPups30Days).toBeGreaterThan(0);
+    expect(summary.pendingDemand45Days).toBeGreaterThanOrEqual(0);
+    expect(summary.projectedSurplus45Days).toBeGreaterThanOrEqual(0);
     expect(rows[0]?.pairLabel).toContain("CM-");
     expect(rows[0]?.expectedUsablePups).toBeGreaterThan(0);
+    expect(rows[0]?.expectedSurplusPups).toBeGreaterThanOrEqual(0);
+    expect(surplus.recommendations.length).toBeGreaterThan(0);
   });
 
   it("creates a new animal record and exposes it through alert and candidate helpers", async () => {

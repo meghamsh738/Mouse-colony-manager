@@ -477,7 +477,8 @@ test("researcher can review the forecast workspace", async ({ page }) => {
   await page.goto("/forecast");
 
   await expect(page.getByText("Projected breeding output and experiment-ready runway.")).toBeVisible();
-  await expect(page.getByTestId("stat-pups-in-30d")).toBeVisible();
+  await expect(page.getByTestId("stat-pending-demand")).toBeVisible();
+  await expect(page.getByTestId("surplus-minimization")).toContainText("Surplus minimization", { timeout: 30_000 });
   await expect(page.getByTestId("forecast-table").getByText("x").first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Inspect frozen backups" })).toBeVisible();
 });

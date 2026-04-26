@@ -32,6 +32,9 @@ Current delivery level:
   - concrete HTTP email-provider notification delivery
   - breeding helper fertility-history scoring and surplus-risk estimates
   - experiment treatment-arm constraints for age-band balancing and same-cage group limits
+  - provider deployment notes for HTTP email delivery
+  - surplus-minimization forecast comparing planned demand against available and projected supply
+  - facility-configurable fertility-history and surplus scoring rules
 
 - Working, but still rough:
   - e2e reliability now depends on per-test reseeding, which is correct but slow
@@ -41,7 +44,7 @@ Current delivery level:
 
 - Still missing relative to the original blueprint:
   - external integration API beyond the current read-only `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
-  - advanced planner features such as formal surplus-minimization forecasting and deeper facility-specific breeding productivity rules
+  - advanced planner features such as long-range study demand forecasting and line-specific fertility models
 
 ## Done
 
@@ -64,6 +67,9 @@ Current delivery level:
 - [x] Add concrete HTTP email-provider delivery for notification digests
 - [x] Add breeder fertility-history scoring, workload penalties, expected litter size, and surplus-risk estimates
 - [x] Add treatment-arm constraints for age-band balancing and same-cage group limits
+- [x] Add provider-specific deployment documentation for production email delivery
+- [x] Add surplus-minimization forecasting across planned studies and active breedings
+- [x] Add facility-specific fertility-history settings to tune breeding helper penalties
 
 ## In Progress
 
@@ -71,9 +77,8 @@ Current delivery level:
 
 ## Next
 
-- [ ] Add provider-specific deployment documentation for production email delivery
-- [ ] Add formal surplus-minimization forecasting across planned studies and breedings
-- [ ] Add facility-specific fertility-history settings to tune breeding helper penalties
+- [ ] Add line-specific fertility models for strains with known productivity differences
+- [ ] Add longer-range study demand forecasting beyond the current short-horizon planner
 - [ ] Improve local verification speed by reducing the cost of the Playwright web-server bootstrap
 - [ ] Make the local Prisma dev DB setup more resilient or documented so `verify` is less fragile on WSL
 
@@ -82,7 +87,9 @@ Current delivery level:
 Most recently verified in this branch:
 
 - `npm run prisma:validate`
-- `npm run typecheck` passed again on 2026-04-26 after notification delivery, quarantine, experiment planner, and breeding-rule read-model changes
+- `npm run typecheck`
+- `npx vitest run tests/unit/colony.test.ts -t 'ranks breeding suggestions|builds a live colony forecast' --reporter=verbose`
+- `npm run verify:e2e:wsl -- --grep 'researcher can review the forecast workspace'`
 - `git diff --check`
 - `npm run build` via the targeted Playwright web-server bootstrap
 - `npx vitest run tests/unit/notification-delivery.test.ts --reporter=verbose`
@@ -104,6 +111,7 @@ Notes:
 - On 2026-04-26, `localhost:51214` initially had no listener and `npx prisma dev -d -n colony-maintenance` stalled in this WSL/mounted-workspace session; the listener later recovered and the targeted DB-backed unit and e2e checks above passed.
 - The latest notification delivery unit suite covers webhook delivery and HTTP email-provider delivery with a mocked provider endpoint.
 - The latest experiment and breeding smoke checks passed on both Playwright `chromium` and `mobile` projects after adding age-band treatment-arm constraints and fertility/surplus helper output.
+- The latest forecast smoke passed on both Playwright `chromium` and `mobile` after adding surplus-minimization demand/supply panels.
 - Targeted unit coverage, build, and attachment-specific desktop/mobile smoke flows passed after the attachment slice landed.
 - The notification inbox read model passed unit coverage, and the `/notifications` inbox smoke passed across both Playwright projects after switching the follow-up assertion to href-based navigation for mobile stability.
 - The authenticated `/api/v1` smoke check passed across both Playwright projects after trimming it to a stable list-and-export request path; the detail route is covered in the unit suite.

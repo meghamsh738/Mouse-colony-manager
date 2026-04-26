@@ -641,13 +641,42 @@ export interface BreedingForecastItem {
   projectedExperimentReadyDate: string;
   expectedLitterSize: number;
   expectedUsablePups: number;
+  expectedSurplusPups: number;
   expectedProbability: number;
   warnings: string[];
+}
+
+export interface ForecastDemandItem {
+  experimentId: string;
+  experimentCode: string;
+  projectCode: string;
+  title: string;
+  startDate: string;
+  requestedAnimals: number;
+  plannedAnimals: number;
+  reservedAnimals: number;
+  activeAnimals: number;
+  supplyGap: number;
+}
+
+export interface SurplusMinimizationView {
+  horizonDays: number;
+  demandAnimals: number;
+  availableSupply: number;
+  projectedUsableSupply: number;
+  projectedSurplusPups: number;
+  supplyGap: number;
+  surplusAfterDemand: number;
+  demandItems: ForecastDemandItem[];
+  recommendations: string[];
 }
 
 export interface ForecastSummary {
   projectedPups30Days: number;
   projectedExperimentReady45Days: number;
+  pendingDemand45Days: number;
+  projectedSurplus45Days: number;
+  supplyGap45Days: number;
   activeBreedingForecasts: number;
   cryostorageBackups: number;
   availableNow: number;

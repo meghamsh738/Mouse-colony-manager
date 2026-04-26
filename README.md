@@ -39,6 +39,28 @@ The app runs on `http://localhost:3000`.
 
 Notification email delivery uses the configured rule values for provider URL, sender, and recipients. If the provider requires bearer auth, set `NOTIFICATION_EMAIL_API_TOKEN` in the runtime environment; no token is stored in the database.
 
+## Production Notification Email
+
+The notification delivery endpoint is intentionally provider-neutral. Configure these admin rules in `/settings`:
+
+- `notify_email_enabled`: set to `true` when production email should be sent.
+- `notify_email_provider_url`: set to an internal mail relay or provider adapter endpoint.
+- `notify_email_from`: set to the sender address approved by the provider.
+- `notify_email_digest_recipients`: set to comma, semicolon, or newline separated recipients.
+
+Set `NOTIFICATION_EMAIL_API_TOKEN` in the runtime environment if the provider endpoint expects bearer auth. The app sends this JSON payload:
+
+```json
+{
+  "from": "mouse-colony@colony.local",
+  "to": ["manager@colony.local"],
+  "subject": "Mouse Colony Manager: 4 active notifications",
+  "text": "Digest body"
+}
+```
+
+For Resend, Mailgun, SES, or an institutional SMTP bridge, put a small HTTPS adapter in front of the provider if its native API shape differs from the payload above. That keeps provider-specific credentials and transforms outside the app database.
+
 ## Seeded Accounts
 
 All seeded dev users use the password `colony123`.
@@ -99,7 +121,8 @@ npm run db:prepare:ci
 - Outbound notification delivery is available at `/api/v1/notifications/delivery` for dry-run payload preview, configured webhook delivery, and configured HTTP email-provider delivery.
 - Quarantine and sentinel tracking is available under `/quarantine`, using quarantine cage status, welfare notes, cage flags, and rule-configured review thresholds.
 - Experiment planning includes exclusion examples, seeded randomization, cage/sibling/age-band balancing, same-cage treatment-arm limits, overlap checks, and project-allocation risk for unallocated or multi-project animals.
-- Breeding suggestions evaluate allele metadata, active breeding workload, litter history, expected usable yield, and surplus risk.
+- Breeding suggestions evaluate allele metadata, active breeding workload, admin-configured fertility scoring, litter history, expected usable yield, and surplus risk.
+- Forecasting compares planned experiment demand against available and projected usable supply, then surfaces projected supply gaps and avoidable surplus.
 
 ## Current Scope
 
