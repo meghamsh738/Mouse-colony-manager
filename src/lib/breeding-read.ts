@@ -72,6 +72,89 @@ function pairScore(genotypeSummary: string, desiredGenotype: string) {
     .reduce((score, token) => (genotypeSummary.toLowerCase().includes(token) ? score + 0.2 : score), 0);
 }
 
+function isVariantCall(zygosity: string) {
+  const normalized = zygosity.toLowerCase();
+
+  return normalized !== "wt/wt" && normalized !== "wildtype" && normalized !== "pending";
+}
+
+function isHomozygousVariant(zygosity: string) {
+  const normalized = zygosity.toLowerCase();
+
+  return normalized.includes("+/+") || normalized.includes("flox/flox") || normalized.includes("hom");
+}
+
+export function evaluateBreedingRuleRisks(
+  sireAlleles: Array<{
+    zygosity: string;
+    allele: {
+      name: string;
+      harmfulHomozygous: boolean;
+      maintainAsHet: boolean;
+      prohibitedPairings: unknown;
+    };
+  }>,
+  damAlleles: Array<{
+    zygosity: string;
+    allele: {
+      name: string;
+      harmfulHomozygous: boolean;
+      maintainAsHet: boolean;
+      prohibitedPairings: unknown;
+    };
+  }>,
+) {
+  const warnings: string[] = [];
+  let criticalCount = 0;
+  let warningCount = 0;
+  const damByAlleleName = new Map(damAlleles.map((allele) => [allele.allele.name, allele]));
+
+  for (const sireAllele of sireAlleles) {
+    const damAllele = damByAlleleName.get(sireAllele.allele.name);
+
+    if (!damAllele) {
+      continue;
+    }
+
+    const sireCarrier = isVariantCall(sireAllele.zygosity);
+    const damCarrier = isVariantCall(damAllele.zygosity);
+    const bothCarriers = sireCarrier && damCarrier;
+    const homozygousParent = isHomozygousVariant(sireAllele.zygosity) || isHomozygousVariant(damAllele.zygosity);
+
+    if (sireAllele.zygosity.toLowerCase() === "pending" || damAllele.zygosity.toLowerCase() === "pending") {
+      warningCount += 1;
+      warnings.push(`${sireAllele.allele.name} has a pending parent genotype call`);
+    }
+
+    if (sireAllele.allele.harmfulHomozygous && bothCarriers) {
+      criticalCount += 1;
+      warnings.push(`Harmful homozygous risk for ${sireAllele.allele.name}`);
+    }
+
+    if (sireAllele.allele.maintainAsHet && bothCarriers) {
+      warningCount += 1;
+      warnings.push(`${sireAllele.allele.name} line is configured to maintain as heterozygous`);
+    }
+
+    if (sireAllele.allele.maintainAsHet && homozygousParent) {
+      criticalCount += 1;
+      warnings.push(`${sireAllele.allele.name} homozygous breeder conflicts with het-only maintenance`);
+    }
+
+    if (Array.isArray(sireAllele.allele.prohibitedPairings) && sireAllele.allele.prohibitedPairings.length > 0 && bothCarriers) {
+      warningCount += 1;
+      warnings.push(`${sireAllele.allele.name} has configured prohibited-pairing notes to review`);
+    }
+  }
+
+  return {
+    warnings,
+    criticalCount,
+    warningCount,
+    severity: criticalCount > 0 ? "critical" : warningCount > 0 ? "warning" : "ok",
+  } as const;
+}
+
 async function getBreedingRuleContext(): Promise<BreedingRuleContext> {
   const rules = await prisma.ruleConfig.findMany({
     where: {
@@ -169,7 +252,7 @@ export async function getBreedingSuggestionsView(
     include: {
       alleles: {
         include: {
-          allele: { select: { name: true } },
+          allele: { select: { name: true, harmfulHomozygous: true, maintainAsHet: true, prohibitedPairings: true } },
         },
       },
     },
@@ -178,7 +261,7 @@ export async function getBreedingSuggestionsView(
   const males = animals.filter((animal) => animal.sex === "male");
   const females = animals.filter((animal) => animal.sex === "female");
 
-  return males
+  const suggestions = males
     .flatMap((sire) => {
       const sireAge = getAgeDays(sire.dob, rules.today);
       const sireGenotypeSummary = buildGenotypeSummary(sire.alleles);
@@ -195,6 +278,8 @@ export async function getBreedingSuggestionsView(
           sireAge > rules.breederMaxAgeDays || damAge > rules.breederMaxAgeDays ? 18 : 0;
         const criticalPenalty =
           sireAge < rules.breederMinAgeDays || damAge < rules.breederMinAgeDays ? 40 : 0;
+        const ruleRisks = evaluateBreedingRuleRisks(sire.alleles, dam.alleles);
+        const rulePenalty = ruleRisks.criticalCount * 35 + ruleRisks.warningCount * 10;
         const warnings: string[] = [];
 
         if (sireAge > rules.breederMaxAgeDays) {
@@ -209,12 +294,20 @@ export async function getBreedingSuggestionsView(
           warnings.push("Cross can yield desired dual-transgenic pups");
         }
 
+        warnings.push(...ruleRisks.warnings);
+
         const expectedProbability = Math.max(0.1, genotypeScore - fertilityPenalty);
         const expectedUsablePups = Number((expectedProbability * 6).toFixed(1));
         const estimatedPupsNeeded = Math.max(6, Math.ceil(minimumYield / Math.max(expectedProbability, 0.1)));
         const priorityScore = Math.max(
           0,
-          Math.round(expectedProbability * 100 + (desiredSex === "female" ? 5 : 0) - agePenalty - criticalPenalty),
+          Math.round(
+            expectedProbability * 100 +
+              (desiredSex === "female" ? 5 : 0) -
+              agePenalty -
+              criticalPenalty -
+              rulePenalty,
+          ),
         );
 
         return {
@@ -228,12 +321,23 @@ export async function getBreedingSuggestionsView(
           estimatedPupsNeeded,
           expectedUsablePups,
           warnings,
+          ruleSeverity: ruleRisks.severity,
+          ruleSummary:
+            ruleRisks.severity === "ok"
+              ? "No configured genotype rule conflicts"
+              : `${ruleRisks.criticalCount} critical and ${ruleRisks.warningCount} warning rule checks`,
           priorityScore,
         };
       });
     })
-    .sort((left, right) => right.priorityScore - left.priorityScore)
-    .slice(0, 5);
+    .sort((left, right) => right.priorityScore - left.priorityScore);
+
+  const topSuggestions = suggestions.slice(0, 5);
+  const riskPreview = suggestions.find(
+    (suggestion) => suggestion.ruleSeverity !== "ok" && !topSuggestions.some((top) => top.id === suggestion.id),
+  );
+
+  return riskPreview ? [...topSuggestions, riskPreview] : topSuggestions;
 }
 
 export async function getBreedingSuggestionSummaryView(): Promise<BreedingSuggestionSummary[]> {

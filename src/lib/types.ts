@@ -497,6 +497,8 @@ export interface BreedingSuggestion {
   estimatedPupsNeeded: number;
   expectedUsablePups: number;
   warnings: string[];
+  ruleSeverity: "ok" | "warning" | "critical";
+  ruleSummary: string;
   priorityScore: number;
 }
 
@@ -512,6 +514,10 @@ export interface ExperimentCandidate {
   strain: string;
   genotypeSummary: string;
   projectCodes: string[];
+  chargeableProjectCodes: string[];
+  activeProjectCount: number;
+  allocationRisk: "none" | "unallocated" | "multi_project";
+  allocationSummary: string;
   siblingGroup: string;
 }
 
@@ -543,6 +549,8 @@ export interface ExperimentGroupSuggestion {
 export interface ExperimentExclusionSummary {
   reason: string;
   count: number;
+  exampleAnimalIds: string[];
+  severity: "info" | "warning";
 }
 
 export interface ExperimentPlannerView {
@@ -577,6 +585,9 @@ export interface ExperimentPlannerView {
     selected: number;
     alternates: number;
     excluded: number;
+    allocationWarnings: number;
+    multiProjectCandidates: number;
+    unallocatedCandidates: number;
   };
 }
 

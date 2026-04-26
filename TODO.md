@@ -1,6 +1,6 @@
 # Colony Maintenance Tracker
 
-Last updated: 2026-04-22
+Last updated: 2026-04-26
 
 ## Overall Status
 
@@ -25,18 +25,21 @@ Current delivery level:
   - local attachment upload and viewing for genotype and welfare records
   - authenticated read-only `/api/v1` integration routes for animals, cages, experiments, projects, and export discovery
   - in-app notification inbox with admin-editable delivery toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift
+  - outbound notification digest preview and webhook delivery endpoint
+  - quarantine and sentinel tracking workspace
+  - richer experiment planner exclusion examples, randomization, and project-allocation risk
+  - breeding generator warnings from allele-level harmful homozygous, het-only, pending genotype, and prohibited-pairing metadata
 
 - Working, but still rough:
   - e2e reliability now depends on per-test reseeding, which is correct but slow
-  - Prisma local dev DB remains the main source of flaky local verification if `prisma dev` drops
-  - README status text is behind the actual implemented write surface
+  - Prisma local dev DB remains the main source of flaky local verification if `prisma dev` drops; on 2026-04-26 the local `localhost:51214` endpoint was temporarily unavailable before recovering for targeted reruns
   - attachment persistence is local-disk backed under `public/uploads` for MVP, not object storage
+  - outbound email is digest-payload ready, but still needs a concrete mail provider integration if email delivery is required
 
 - Still missing relative to the original blueprint:
-  - outbound delivery channels beyond the in-app notification inbox
-  - external integration API beyond the current read-only `/api/v1` surface and CSV export endpoints
-  - quarantine / sentinel workflows
-  - advanced planner features such as randomization depth beyond current seeded balancing, richer experiment distribution controls, and more breeding rule depth
+  - external integration API beyond the current read-only `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
+  - advanced planner features such as richer treatment-arm constraints, deeper fertility history, and more formal surplus-minimization forecasting
+  - concrete outbound email delivery provider wiring
 
 ## Done
 
@@ -52,18 +55,20 @@ Current delivery level:
 - [x] Add local attachment upload and viewing for genotype records and cage health notes
 - [x] Add authenticated `/api/v1` read-only integration routes for core colony entities and export discovery
 - [x] Add an in-app notification inbox with rule-config toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift
+- [x] Add outbound notification digest preview and webhook delivery plumbing
+- [x] Add quarantine and sentinel tracking from quarantine cages, unresolved health notes, welfare flags, movement history, and configurable thresholds
+- [x] Deepen experiment planning with exclusion examples and multi-project or missing-project allocation awareness
+- [x] Deepen breeding generator warnings with allele-level harmful homozygous, het-only maintenance, pending genotype, and prohibited-pairing metadata
 
 ## In Progress
 
 - [ ] Keep the tracker current as new slices land
-- [ ] Bring README implementation notes back in sync with the current runtime
 
 ## Next
 
-- [ ] Add outbound notification channels for email or webhook delivery if they are still in scope
-- [ ] Add quarantine / sentinel tracking if it is still in scope for MVP+
-- [ ] Deepen experiment planning with richer exclusion summaries, balancing controls, and multi-project allocation awareness
-- [ ] Deepen breeding rule configuration and harmful/prohibited genotype enforcement in the planner UI
+- [ ] Add concrete outbound email provider delivery if email alerts are still in scope
+- [ ] Add deeper fertility-history scoring and surplus-minimization controls to the breeding helper
+- [ ] Add richer treatment-arm constraints to the experiment planner
 - [ ] Improve local verification speed by reducing the cost of the Playwright web-server bootstrap
 - [ ] Make the local Prisma dev DB setup more resilient or documented so `verify` is less fragile on WSL
 
@@ -71,8 +76,14 @@ Current delivery level:
 
 Most recently verified in this branch:
 
-- `npm run typecheck`
-- `npm run build`
+- `npm run prisma:validate`
+- `npm run typecheck` passed again on 2026-04-26 after notification delivery, quarantine, experiment planner, and breeding-rule read-model changes
+- `git diff --check`
+- `npm run build` via the targeted Playwright web-server bootstrap
+- `npx vitest run tests/unit/notification-delivery.test.ts --reporter=verbose`
+- `npx vitest run tests/unit/quarantine-read.test.ts --reporter=verbose`
+- `npx vitest run tests/unit/colony.test.ts -t 'ranks breeding suggestions|evaluates harmful|builds a filtered experiment planner' --reporter=verbose`
+- `npm run verify:e2e:wsl -- --grep 'researcher can review experiment overview and tune the distribution helper|admin can review breeding overview and generator suggestions|staff can review quarantine and sentinel tracking'`
 - `npx vitest run tests/unit/colony.test.ts -t 'adds a cage health note that surfaces as a cage alert|records a genotype result and updates the animal detail genotype views' --reporter=verbose`
 - `npx vitest run tests/unit/integration-api-routes.test.ts --reporter=verbose`
 - `npx vitest run tests/unit/notifications-read.test.ts --reporter=verbose`
@@ -84,6 +95,7 @@ Most recently verified in this branch:
 
 Notes:
 
+- On 2026-04-26, `localhost:51214` initially had no listener and `npx prisma dev -d -n colony-maintenance` stalled in this WSL/mounted-workspace session; the listener later recovered and the targeted DB-backed unit and e2e checks above passed.
 - Targeted unit coverage, build, and attachment-specific desktop/mobile smoke flows passed after the attachment slice landed.
 - The notification inbox read model passed unit coverage, and the `/notifications` inbox smoke passed across both Playwright projects after switching the follow-up assertion to href-based navigation for mobile stability.
 - The authenticated `/api/v1` smoke check passed across both Playwright projects after trimming it to a stable list-and-export request path; the detail route is covered in the unit suite.

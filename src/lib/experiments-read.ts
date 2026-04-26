@@ -120,17 +120,39 @@ function normalizeSiblingGroup(input: { sireId: string | null; damId: string | n
   return `${input.sireId ?? "unknown"}:${input.damId ?? "unknown"}`;
 }
 
-function summarizeExclusions(reasonCounts: Map<string, number>): ExperimentExclusionSummary[] {
-  return [...reasonCounts.entries()]
-    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-    .map(([reason, count]) => ({ reason, count }));
-}
-
 function scoreAgeWindow(ageDays: number, minAgeDays: number, maxAgeDays: number) {
   const midpoint = minAgeDays + (maxAgeDays - minAgeDays) / 2;
   const distance = Math.abs(ageDays - midpoint);
 
   return Math.max(0, 16 - Math.round(distance / 7));
+}
+
+type ExclusionBucket = {
+  count: number;
+  exampleAnimalIds: string[];
+  severity: ExperimentExclusionSummary["severity"];
+};
+
+function recordExclusion(buckets: Map<string, ExclusionBucket>, reason: string, animalId: string) {
+  const existing = buckets.get(reason) ?? {
+    count: 0,
+    exampleAnimalIds: [],
+    severity: reason.includes("blocked") || reason.includes("mismatch") ? "warning" : "info",
+  };
+
+  existing.count += 1;
+
+  if (existing.exampleAnimalIds.length < 3) {
+    existing.exampleAnimalIds.push(animalId);
+  }
+
+  buckets.set(reason, existing);
+}
+
+function summarizeExclusionBuckets(buckets: Map<string, ExclusionBucket>): ExperimentExclusionSummary[] {
+  return [...buckets.entries()]
+    .sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0]))
+    .map(([reason, bucket]) => ({ reason, ...bucket }));
 }
 
 function buildAdjustedSuggestion(
@@ -157,6 +179,14 @@ function buildAdjustedSuggestion(
     reasons.push("Sibling cluster penalty applied");
   } else if (filters.avoidSiblingClustering) {
     reasons.push(`siblings:${candidate.siblingGroup}`);
+  }
+
+  if (candidate.allocationRisk === "multi_project") {
+    adjustedScore -= 6;
+    reasons.push("Multi-project allocation review");
+  } else if (candidate.allocationRisk === "unallocated") {
+    adjustedScore -= 4;
+    reasons.push("Project allocation missing");
   }
 
   return {
@@ -475,14 +505,27 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
     },
   });
 
-  const reasonCounts = new Map<string, number>();
+  const exclusionBuckets = new Map<string, ExclusionBucket>();
   const candidates: ExperimentCandidate[] = [];
 
   for (const animal of animals) {
     const ageDays = differenceInDays(new Date(referenceDate), animal.dob);
     const genotypeSummary = buildGenotypeSummary(animal.alleles);
     const genotypeConfirmed = animal.alleles.length > 0 && animal.alleles.every((allele) => allele.callStatus === "confirmed");
-    const activeProjectCodes = animal.projectAllocations.map((allocation) => allocation.project.projectCode);
+    const activeProjectCodes = [...new Set(animal.projectAllocations.map((allocation) => allocation.project.projectCode))];
+    const chargeableProjectCodes = [
+      ...new Set(
+        animal.projectAllocations
+          .filter((allocation) => allocation.chargeable)
+          .map((allocation) => allocation.project.projectCode),
+      ),
+    ];
+    const allocationRisk =
+      activeProjectCodes.length > 1 ? "multi_project" : activeProjectCodes.length === 0 ? "unallocated" : "none";
+    const allocationSummary =
+      activeProjectCodes.length > 0
+        ? `${activeProjectCodes.join(", ")}${chargeableProjectCodes.length ? ` · chargeable ${chargeableProjectCodes.join(", ")}` : ""}`
+        : "No active project allocation";
     const hasOverlapConflict = animal.experimentAssignments.length > 0;
     const siblingGroup = normalizeSiblingGroup(animal);
 
@@ -508,7 +551,7 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
                       : null;
 
     if (exclusionReason) {
-      reasonCounts.set(exclusionReason, (reasonCounts.get(exclusionReason) ?? 0) + 1);
+      recordExclusion(exclusionBuckets, exclusionReason, animal.animalId);
       continue;
     }
 
@@ -517,6 +560,8 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
       ...(genotypeConfirmed ? [] : ["Genotype is not fully confirmed"]),
       ...(animal.status === "reserved" ? ["Already reserved for another workflow"] : []),
       ...(hasOverlapConflict ? [`Overlap with ${animal.experimentAssignments[0]?.experiment.experimentCode}`] : []),
+      ...(allocationRisk === "multi_project" ? [`Multi-project allocation: ${activeProjectCodes.join(", ")}`] : []),
+      ...(allocationRisk === "unallocated" ? ["No active project allocation"] : []),
     ];
 
     const genotypeMatch = !filters.genotypeKeyword
@@ -534,6 +579,7 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
       (genotypeMatch ? 16 : 0) +
       (projectMatch ? 10 : 0) +
       (genotypeConfirmed ? 8 : -14) +
+      (allocationRisk === "none" ? 6 : allocationRisk === "multi_project" ? -6 : -4) +
       (hasOverlapConflict ? -18 : 10) -
       warnings.length * 4;
 
@@ -551,6 +597,10 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
       strain: animal.strain.name,
       genotypeSummary,
       projectCodes: activeProjectCodes,
+      chargeableProjectCodes,
+      activeProjectCount: activeProjectCodes.length,
+      allocationRisk,
+      allocationSummary,
       siblingGroup,
     });
   }
@@ -565,13 +615,16 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
     selected,
     alternates,
     randomization,
-    exclusions: summarizeExclusions(reasonCounts),
+    exclusions: summarizeExclusionBuckets(exclusionBuckets),
     summary: {
       totalReviewed: animals.length,
       included: ranked.length,
       selected: selected.length,
       alternates: alternates.length,
       excluded: animals.length - ranked.length,
+      allocationWarnings: ranked.filter((candidate) => candidate.allocationRisk !== "none").length,
+      multiProjectCandidates: ranked.filter((candidate) => candidate.allocationRisk === "multi_project").length,
+      unallocatedCandidates: ranked.filter((candidate) => candidate.allocationRisk === "unallocated").length,
     },
   };
 }

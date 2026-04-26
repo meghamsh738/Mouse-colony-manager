@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Activity, BellRing, Boxes, FlaskConical, Home, LineChart, LogOut, QrCode, Settings2, Snowflake, Table2, TestTubeDiagonal } from "lucide-react";
+import { Activity, BellRing, Boxes, FlaskConical, Home, LineChart, LogOut, QrCode, Settings2, ShieldAlert, Snowflake, Table2, TestTubeDiagonal } from "lucide-react";
 
 import { signOut } from "@/auth";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ const navigation = [
   { href: "/cryostorage", label: "Cryostorage", icon: Snowflake },
   { href: "/forecast", label: "Forecast", icon: LineChart },
   { href: "/notifications", label: "Notifications", icon: BellRing },
+  { href: "/quarantine", label: "Quarantine", icon: ShieldAlert },
   { href: "/scan", label: "Scan", icon: QrCode },
   { href: "/settings", label: "Rules", icon: Settings2 },
 ];

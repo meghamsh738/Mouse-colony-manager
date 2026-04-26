@@ -4,6 +4,7 @@ import { BreedingSetupForm } from "@/components/app/breeding-setup-form";
 import { BreedingWeanForm } from "@/components/app/breeding-wean-form";
 import { PageHeader } from "@/components/app/page-header";
 import { Surface } from "@/components/app/surface";
+import { Badge } from "@/components/ui/badge";
 import {
   getBreedingOverviewView,
   getBreedingSetupOptionsView,
@@ -11,7 +12,16 @@ import {
   getBreedingWeaningOptionsView,
 } from "@/lib/breeding-read";
 import { requireUser } from "@/lib/session";
+import type { BreedingSuggestion } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
+
+function getRuleBadgeVariant(severity: BreedingSuggestion["ruleSeverity"]) {
+  if (severity === "critical") {
+    return "danger";
+  }
+
+  return severity === "warning" ? "warning" : "success";
+}
 
 export default async function BreedingPage() {
   const user = await requireUser();
@@ -122,25 +132,33 @@ export default async function BreedingPage() {
             </div>
           </Surface>
         </div>
-        <Surface className="space-y-4">
-            <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Generator suggestions</p>
-            <div className="space-y-3">
-              {suggestions.map((suggestion) => (
-                <article key={suggestion.id} className="rounded-2xl border border-[var(--line)] p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{suggestion.sireLabel}</p>
-                      <p className="text-sm text-[var(--muted)]">{suggestion.damLabel}</p>
-                    </div>
-                    <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{suggestion.probabilityLabel}</p>
+        <Surface className="space-y-4" data-testid="breeding-suggestions">
+          <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Generator suggestions</p>
+          <div className="space-y-3">
+            {suggestions.map((suggestion) => (
+              <article key={suggestion.id} className="rounded-2xl border border-[var(--line)] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{suggestion.sireLabel}</p>
+                    <p className="text-sm text-[var(--muted)]">{suggestion.damLabel}</p>
                   </div>
-                  <p className="mt-3 text-sm text-[var(--muted)]">
-                    Estimated usable pups {suggestion.expectedUsablePups} · estimated pups needed {suggestion.estimatedPupsNeeded}
-                  </p>
+                  <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{suggestion.probabilityLabel}</p>
+                </div>
+                <p className="mt-3 text-sm text-[var(--muted)]">
+                  Estimated usable pups {suggestion.expectedUsablePups} · estimated pups needed {suggestion.estimatedPupsNeeded}
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+                  <Badge variant={getRuleBadgeVariant(suggestion.ruleSeverity)}>
+                    {suggestion.ruleSeverity === "ok" ? "Rule clear" : "Rule risk"}
+                  </Badge>
+                  <span>{suggestion.ruleSummary}</span>
+                </div>
+                {suggestion.warnings.length ? (
                   <p className="mt-2 text-sm text-amber-900">{suggestion.warnings.join(" · ")}</p>
-                </article>
-              ))}
-            </div>
+                ) : null}
+              </article>
+            ))}
+          </div>
         </Surface>
       </div>
     </AppShell>

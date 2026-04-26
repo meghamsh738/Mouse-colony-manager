@@ -187,7 +187,9 @@ test("researcher can review experiment overview and tune the distribution helper
   await expect(page).toHaveURL(/desiredNumber=2/);
   await expect(page).toHaveURL(/randomSeed=seed-77/);
   await expect(page.getByTestId("experiment-ranked-candidates")).toContainText("Male", { timeout: 30_000 });
+  await expect(page.getByTestId("experiment-ranked-candidates")).toContainText("Multi-project allocation", { timeout: 30_000 });
   await expect(page.getByTestId("experiment-exclusions")).toContainText("Sex filter mismatch", { timeout: 30_000 });
+  await expect(page.getByTestId("experiment-exclusions")).toContainText("Examples", { timeout: 30_000 });
   await expect(page.getByTestId("experiment-randomization")).toContainText("Seed seed-77", { timeout: 30_000 });
   await expect(page.getByTestId("planner-group-card")).toHaveCount(2, { timeout: 30_000 });
   await expect(page.getByTestId("planner-group-card").first()).toContainText("Group A", { timeout: 30_000 });
@@ -279,6 +281,20 @@ test("staff can review the notification inbox and jump into breeding follow-up",
   await expect(page.getByRole("heading", { name: "Active breeding setups and suggested crosses." })).toBeVisible();
 });
 
+test("staff can review quarantine and sentinel tracking", async ({ page }) => {
+  await signInAs(page, "staff");
+  await page.goto("/quarantine");
+
+  await expect(page.getByRole("heading", { name: "Quarantine and sentinel tracking." })).toBeVisible();
+  await expect(page.getByTestId("quarantine-cage-list")).toBeVisible();
+  await expect(page.getByTestId("quarantine-cage-cage-a102-005")).toContainText("CM-A102-005");
+  await expect(page.getByTestId("quarantine-cage-cage-a102-005")).toContainText("Fighting observed in quarantine cage");
+
+  const cageLink = page.getByRole("link", { name: "Open cage workspace" }).first();
+  const href = await cageLink.getAttribute("href");
+  expect(href).toBe("/cages/cage-a102-005");
+});
+
 test("admin can review breeding overview and generator suggestions", async ({ page }) => {
   await signInAs(page, "admin");
   await page.goto("/breeding");
@@ -286,6 +302,7 @@ test("admin can review breeding overview and generator suggestions", async ({ pa
   await expect(page.getByText("breeding-001")).toBeVisible();
   await expect(page.getByText("litter-001 born").first()).toBeVisible();
   await expect(page.getByText("Cross can yield desired dual-transgenic pups").first()).toBeVisible();
+  await expect(page.getByTestId("breeding-suggestions")).toContainText("Rule risk", { timeout: 30_000 });
 });
 
 test("admin can create a breeding setup with override", async ({ page }, testInfo) => {

@@ -94,6 +94,10 @@ npm run db:prepare:ci
 - Audit logs, status events, project allocations, and experiment assignments are written transactionally.
 - A small authenticated read-only integration API is available under `/api/v1` for animals, cages, experiments, projects, and export discovery.
 - An in-app notification inbox is available under `/notifications`, with admin-editable rule toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift.
+- Outbound notification digest plumbing is available at `/api/v1/notifications/delivery` for dry-run payload preview and configured webhook delivery.
+- Quarantine and sentinel tracking is available under `/quarantine`, using quarantine cage status, welfare notes, cage flags, and rule-configured review thresholds.
+- Experiment planning includes exclusion examples, seeded randomization, cage/sibling balancing, overlap checks, and project-allocation risk for unallocated or multi-project animals.
+- Breeding suggestions evaluate allele metadata for harmful homozygous, het-only maintenance, pending genotype, and prohibited-pairing review warnings.
 
 ## Current Scope
 

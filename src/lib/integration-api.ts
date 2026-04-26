@@ -344,6 +344,11 @@ const resourceCatalog = [
     path: "/api/v1/exports",
     description: "Discover the available operational CSV exports.",
   },
+  {
+    name: "notification-delivery",
+    path: "/api/v1/notifications/delivery",
+    description: "Preview or deliver outbound notification digest payloads.",
+  },
 ] as const;
 
 export function getIntegrationResourceCatalog(origin: string) {

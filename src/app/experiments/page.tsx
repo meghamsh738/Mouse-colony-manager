@@ -8,6 +8,7 @@ import { ExperimentPlanSaveForm } from "@/components/app/experiment-plan-save-fo
 import { PageHeader } from "@/components/app/page-header";
 import { StatStrip } from "@/components/app/stat-strip";
 import { Surface } from "@/components/app/surface";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   getExperimentOverviewView,
@@ -16,6 +17,7 @@ import {
   parseExperimentPlannerFilters,
 } from "@/lib/experiments-read";
 import { requireUser } from "@/lib/session";
+import type { ExperimentCandidate } from "@/lib/types";
 import { formatDate, titleCase } from "@/lib/utils";
 
 type ExperimentsPageProps = {
@@ -47,6 +49,21 @@ function renderAssignmentProvenance(action: string) {
     default:
       return titleCase(action.replaceAll("_", " "));
   }
+}
+
+function renderAllocationRisk(risk: ExperimentCandidate["allocationRisk"]) {
+  switch (risk) {
+    case "multi_project":
+      return "Multi-project";
+    case "unallocated":
+      return "Unallocated";
+    default:
+      return "Allocated";
+  }
+}
+
+function getAllocationBadgeVariant(risk: ExperimentCandidate["allocationRisk"]) {
+  return risk === "none" ? "success" : "warning";
 }
 
 export default async function ExperimentsPage({ searchParams }: ExperimentsPageProps) {
@@ -83,19 +100,20 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
             {
               label: "Selected",
               value: planner.summary.selected,
-              hint: `Primary cohort target is ${planner.filters.desiredNumber}`,
+              hint: `Primary cohort target is ${planner.filters.desiredNumber}; ${planner.summary.alternates} alternates held back`,
               emphasis: "info",
-            },
-            {
-              label: "Alternates",
-              value: planner.summary.alternates,
-              hint: "Held back in case a selected animal is blocked later",
             },
             {
               label: "Excluded",
               value: planner.summary.excluded,
               hint: "Filtered out by status, age, project, overlap, or genotype",
               emphasis: planner.summary.excluded > 0 ? "warning" : "neutral",
+            },
+            {
+              label: "Allocation Review",
+              value: planner.summary.allocationWarnings,
+              hint: `${planner.summary.multiProjectCandidates} multi-project and ${planner.summary.unallocatedCandidates} unallocated candidates`,
+              emphasis: planner.summary.allocationWarnings > 0 ? "warning" : "success",
             },
             {
               label: "Overlap Mode",
@@ -375,6 +393,12 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                           </p>
                           <p className="text-sm text-[var(--muted)]">{candidate.genotypeSummary}</p>
                           <p className="text-sm text-[var(--muted)]">{candidate.cageLabel}</p>
+                          <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+                            <Badge variant={getAllocationBadgeVariant(candidate.allocationRisk)}>
+                              {renderAllocationRisk(candidate.allocationRisk)}
+                            </Badge>
+                            <span>{candidate.allocationSummary}</span>
+                          </div>
                           <p className="text-sm text-[var(--muted)]">
                             {entry.reasons.map(renderSelectionReason).join(" · ")}
                           </p>
@@ -485,6 +509,12 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                       {candidate.projectCodes.length ? (
                         <p className="mt-2 text-sm text-[var(--muted)]">Projects: {candidate.projectCodes.join(", ")}</p>
                       ) : null}
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+                        <Badge variant={getAllocationBadgeVariant(candidate.allocationRisk)}>
+                          {renderAllocationRisk(candidate.allocationRisk)}
+                        </Badge>
+                        <span>{candidate.allocationSummary}</span>
+                      </div>
                       <p className="mt-2 text-sm text-[var(--muted)]">{candidate.inclusionReason}</p>
                       {candidate.warnings.length ? (
                         <p className="mt-2 text-sm text-amber-900">{candidate.warnings.join(" · ")}</p>
@@ -519,6 +549,7 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                           <p className="mt-2 text-sm text-[var(--muted)]">
                             {candidate.cageLabel} · {candidate.ageLabel} · {candidate.strain}
                           </p>
+                          <p className="mt-2 text-sm text-[var(--muted)]">{candidate.allocationSummary}</p>
                           <p className="mt-2 text-sm text-[var(--muted)]">
                             {entry.reasons.map(renderSelectionReason).join(" · ")}
                           </p>
@@ -538,9 +569,21 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                   <div className="space-y-3">
                     {planner.exclusions.length ? (
                       planner.exclusions.map((item) => (
-                        <div key={item.reason} className="flex items-center justify-between gap-4 rounded-3xl border border-[var(--line)] px-4 py-3">
-                          <p className="text-sm text-[var(--ink)]">{item.reason}</p>
-                          <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{item.count}</p>
+                        <div key={item.reason} className="rounded-3xl border border-[var(--line)] px-4 py-3">
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm text-[var(--ink)]">{item.reason}</p>
+                                <Badge variant={item.severity === "warning" ? "warning" : "neutral"}>{item.severity}</Badge>
+                              </div>
+                              {item.exampleAnimalIds.length ? (
+                                <p className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+                                  Examples {item.exampleAnimalIds.join(", ")}
+                                </p>
+                              ) : null}
+                            </div>
+                            <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{item.count}</p>
+                          </div>
                         </div>
                       ))
                     ) : (

@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { getBreedingOverviewView, getBreedingSuggestionsView } from "@/lib/breeding-read";
+import { evaluateBreedingRuleRisks, getBreedingOverviewView, getBreedingSuggestionsView } from "@/lib/breeding-read";
 import { getAnimalDetailView, getAnimalListView } from "@/lib/animals-read";
 import { getCageDetailView, getCageListView, getScanCageViewByBarcode } from "@/lib/cages-read";
 import {
@@ -73,6 +73,38 @@ describe("colony logic", () => {
 
     expect(suggestions[0]?.priorityScore).toBeGreaterThan(suggestions[1]?.priorityScore ?? 0);
     expect(suggestions[0]?.expectedGenotypeProbability).toBeGreaterThan(0.2);
+    expect(suggestions.some((suggestion) => suggestion.ruleSeverity !== "ok")).toBe(true);
+  });
+
+  it("evaluates harmful and het-only breeding rule risks from allele metadata", () => {
+    const risks = evaluateBreedingRuleRisks(
+      [
+        {
+          zygosity: "+/-",
+          allele: {
+            name: "CreER",
+            harmfulHomozygous: true,
+            maintainAsHet: true,
+            prohibitedPairings: ["CreER+/+ x CreER+/+"],
+          },
+        },
+      ],
+      [
+        {
+          zygosity: "+/-",
+          allele: {
+            name: "CreER",
+            harmfulHomozygous: true,
+            maintainAsHet: true,
+            prohibitedPairings: ["CreER+/+ x CreER+/+"],
+          },
+        },
+      ],
+    );
+
+    expect(risks.severity).toBe("critical");
+    expect(risks.warnings).toContain("Harmful homozygous risk for CreER");
+    expect(risks.warnings).toContain("CreER line is configured to maintain as heterozygous");
   });
 
   it("returns experiment candidates with eligibility scores", async () => {
@@ -105,6 +137,9 @@ describe("colony logic", () => {
     expect(planner.randomization.seed).toBe("seed-42");
     expect(planner.randomization.groups.reduce((sum, group) => sum + group.members.length, 0)).toBe(planner.selected.length);
     expect(planner.exclusions.some((item) => item.reason.length > 0 && item.count > 0)).toBe(true);
+    expect(planner.exclusions.some((item) => item.exampleAnimalIds.length > 0)).toBe(true);
+    expect(planner.summary.allocationWarnings).toBeGreaterThan(0);
+    expect(planner.candidates.some((candidate) => candidate.allocationRisk === "multi_project")).toBe(true);
   });
 
   it("persists the current experiment planner cohort as planned assignments", async () => {
