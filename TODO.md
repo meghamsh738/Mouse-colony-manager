@@ -35,6 +35,8 @@ Current delivery level:
   - provider deployment notes for HTTP email delivery
   - surplus-minimization forecast comparing planned demand against available and projected supply
   - facility-configurable fertility-history and surplus scoring rules
+  - line-specific fertility models for strain productivity differences
+  - configurable longer-range study demand forecasting
 
 - Working, but still rough:
   - e2e reliability now depends on per-test reseeding, which is correct but slow
@@ -44,7 +46,6 @@ Current delivery level:
 
 - Still missing relative to the original blueprint:
   - external integration API beyond the current read-only `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
-  - advanced planner features such as long-range study demand forecasting and line-specific fertility models
 
 ## Done
 
@@ -70,6 +71,8 @@ Current delivery level:
 - [x] Add provider-specific deployment documentation for production email delivery
 - [x] Add surplus-minimization forecasting across planned studies and active breedings
 - [x] Add facility-specific fertility-history settings to tune breeding helper penalties
+- [x] Add line-specific fertility models for strains with known productivity differences
+- [x] Add longer-range study demand forecasting beyond the current short-horizon planner
 
 ## In Progress
 
@@ -77,8 +80,6 @@ Current delivery level:
 
 ## Next
 
-- [ ] Add line-specific fertility models for strains with known productivity differences
-- [ ] Add longer-range study demand forecasting beyond the current short-horizon planner
 - [ ] Improve local verification speed by reducing the cost of the Playwright web-server bootstrap
 - [ ] Make the local Prisma dev DB setup more resilient or documented so `verify` is less fragile on WSL
 
@@ -89,6 +90,7 @@ Most recently verified in this branch:
 - `npm run prisma:validate`
 - `npm run typecheck`
 - `npx vitest run tests/unit/colony.test.ts -t 'ranks breeding suggestions|builds a live colony forecast' --reporter=verbose`
+- `npm run verify:e2e:wsl -- --grep 'admin can review breeding overview and generator suggestions|researcher can review the forecast workspace'`
 - `npm run verify:e2e:wsl -- --grep 'researcher can review the forecast workspace'`
 - `git diff --check`
 - `npm run build` via the targeted Playwright web-server bootstrap
@@ -110,6 +112,8 @@ Notes:
 
 - On 2026-04-26, `localhost:51214` initially had no listener and `npx prisma dev -d -n colony-maintenance` stalled in this WSL/mounted-workspace session; the listener later recovered and the targeted DB-backed unit and e2e checks above passed.
 - The latest notification delivery unit suite covers webhook delivery and HTTP email-provider delivery with a mocked provider endpoint.
+- The latest breeding and forecast smoke checks passed on both Playwright `chromium` and `mobile` projects after adding line-specific fertility models and configurable long-range runway forecasting.
+- The latest targeted colony unit coverage checks breeding line-fertility output and long-range forecast summary fields.
 - The latest experiment and breeding smoke checks passed on both Playwright `chromium` and `mobile` projects after adding age-band treatment-arm constraints and fertility/surplus helper output.
 - The latest forecast smoke passed on both Playwright `chromium` and `mobile` after adding surplus-minimization demand/supply panels.
 - Targeted unit coverage, build, and attachment-specific desktop/mobile smoke flows passed after the attachment slice landed.

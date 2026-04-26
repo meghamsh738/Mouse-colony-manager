@@ -150,6 +150,7 @@ export default async function BreedingPage() {
                 </p>
                 <p className="mt-2 text-sm text-[var(--muted)]">Estimated pups needed {suggestion.estimatedPupsNeeded}</p>
                 <p className="mt-2 text-sm text-[var(--muted)]">{suggestion.fertilitySummary}</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">{suggestion.lineFertilitySummary}</p>
                 <p className="mt-2 text-sm text-[var(--muted)]">{suggestion.workloadSummary}</p>
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
                   <Badge variant={suggestion.estimatedSurplusPups >= 4 ? "warning" : "success"}>

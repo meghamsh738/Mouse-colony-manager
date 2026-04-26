@@ -121,8 +121,8 @@ npm run db:prepare:ci
 - Outbound notification delivery is available at `/api/v1/notifications/delivery` for dry-run payload preview, configured webhook delivery, and configured HTTP email-provider delivery.
 - Quarantine and sentinel tracking is available under `/quarantine`, using quarantine cage status, welfare notes, cage flags, and rule-configured review thresholds.
 - Experiment planning includes exclusion examples, seeded randomization, cage/sibling/age-band balancing, same-cage treatment-arm limits, overlap checks, and project-allocation risk for unallocated or multi-project animals.
-- Breeding suggestions evaluate allele metadata, active breeding workload, admin-configured fertility scoring, litter history, expected usable yield, and surplus risk.
-- Forecasting compares planned experiment demand against available and projected usable supply, then surfaces projected supply gaps and avoidable surplus.
+- Breeding suggestions evaluate allele metadata, active breeding workload, admin-configured fertility scoring, line-specific fertility profiles, litter history, expected usable yield, and surplus risk.
+- Forecasting compares planned experiment demand against available and projected usable supply, then surfaces 45-day supply gaps, configurable long-range runway, and avoidable surplus.
 
 ## Current Scope
 

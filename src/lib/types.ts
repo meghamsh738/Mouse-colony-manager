@@ -73,6 +73,14 @@ export type RuleCategory =
   | "genotype"
   | "experiment"
   | "capacity";
+export type RuleConfigValue =
+  | string
+  | number
+  | boolean
+  | RuleConfigValue[]
+  | {
+      [key: string]: RuleConfigValue;
+    };
 export type NotificationCategoryKey =
   | "genotype_pending"
   | "weaning_due"
@@ -355,7 +363,7 @@ export interface RuleConfig {
   label: string;
   category: RuleCategory;
   valueType: "number" | "boolean" | "text" | "json";
-  value: number | boolean | string | string[];
+  value: RuleConfigValue;
   description: string;
   criticalBlock: boolean;
 }
@@ -499,6 +507,7 @@ export interface BreedingSuggestion {
   estimatedSurplusPups: number;
   expectedLitterSize: number;
   fertilitySummary: string;
+  lineFertilitySummary: string;
   workloadSummary: string;
   warnings: string[];
   ruleSeverity: "ok" | "warning" | "critical";
@@ -643,6 +652,7 @@ export interface BreedingForecastItem {
   expectedUsablePups: number;
   expectedSurplusPups: number;
   expectedProbability: number;
+  lineFertilitySummary: string;
   warnings: string[];
 }
 
@@ -677,6 +687,11 @@ export interface ForecastSummary {
   pendingDemand45Days: number;
   projectedSurplus45Days: number;
   supplyGap45Days: number;
+  longRangeHorizonDays: number;
+  projectedExperimentReadyLongRangeDays: number;
+  pendingDemandLongRangeDays: number;
+  projectedSurplusLongRangeDays: number;
+  supplyGapLongRangeDays: number;
   activeBreedingForecasts: number;
   cryostorageBackups: number;
   availableNow: number;

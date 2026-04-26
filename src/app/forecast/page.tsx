@@ -4,15 +4,21 @@ import { AppShell } from "@/components/app/app-shell";
 import { PageHeader } from "@/components/app/page-header";
 import { StatStrip } from "@/components/app/stat-strip";
 import { Surface } from "@/components/app/surface";
-import { getForecastCalloutsView, getForecastSummaryView, getSurplusMinimizationCalloutsView } from "@/lib/forecast-read";
+import {
+  getForecastCalloutsView,
+  getForecastSummaryView,
+  getLongRangeDemandCalloutsView,
+  getSurplusMinimizationCalloutsView,
+} from "@/lib/forecast-read";
 import { requireUser } from "@/lib/session";
 
 export default async function ForecastPage() {
   const user = await requireUser();
-  const [summary, rows, surplus] = await Promise.all([
+  const [summary, rows, surplus, longRange] = await Promise.all([
     getForecastSummaryView(),
     getForecastCalloutsView(),
     getSurplusMinimizationCalloutsView(),
+    getLongRangeDemandCalloutsView(),
   ]);
 
   return (
@@ -34,6 +40,12 @@ export default async function ForecastPage() {
             },
             { label: "Pending demand", value: summary.pendingDemand45Days, hint: "Planned or reserved demand inside 45 days", emphasis: "warning" },
             { label: "Supply gap", value: summary.supplyGap45Days, hint: "Demand not covered by current forecast", emphasis: summary.supplyGap45Days ? "danger" : "success" },
+            {
+              label: `${summary.longRangeHorizonDays}d gap`,
+              value: summary.supplyGapLongRangeDays,
+              hint: "Long-range demand not covered by current runway",
+              emphasis: summary.supplyGapLongRangeDays ? "danger" : "success",
+            },
             { label: "Surplus pups", value: summary.projectedSurplus45Days, hint: "Projected non-target pups inside 45 days", emphasis: summary.projectedSurplus45Days ? "warning" : "success" },
             { label: "Cryo backups", value: summary.cryostorageBackups, hint: "Stored or reserved frozen line backups", emphasis: "info" },
           ]}
@@ -78,6 +90,7 @@ export default async function ForecastPage() {
                   <p className="mt-3 text-sm text-[var(--muted)]">
                     Projected surplus {row.expectedSurplusPups} pups if all pups from this litter are produced.
                   </p>
+                  <p className="mt-3 text-sm text-[var(--muted)]">{row.lineFertilitySummary}</p>
                   <p className="mt-3 text-sm text-[var(--muted)]">
                     Estimated from recent litter size, target genotype token match, and current breeder age state.
                   </p>
@@ -120,6 +133,41 @@ export default async function ForecastPage() {
                     </div>
                     <p className="mt-3 text-[var(--muted)]">
                       {item.plannedAnimals} planned · {item.reservedAnimals} reserved · {item.activeAnimals} active · gap {item.supplyGap}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </Surface>
+            <Surface className="space-y-4" data-testid="long-range-forecast">
+              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Long-range study demand</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
+                  <p className="text-sm text-[var(--muted)]">Demand in {longRange.horizonDays} days</p>
+                  <p className="mt-1 font-display text-3xl font-semibold tracking-[-0.05em]">{longRange.demandAnimals}</p>
+                </div>
+                <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
+                  <p className="text-sm text-[var(--muted)]">Projected usable supply</p>
+                  <p className="mt-1 font-display text-3xl font-semibold tracking-[-0.05em]">{longRange.projectedUsableSupply}</p>
+                </div>
+                <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
+                  <p className="text-sm text-[var(--muted)]">Runway gap</p>
+                  <p className="mt-1 font-display text-3xl font-semibold tracking-[-0.05em]">{longRange.supplyGap}</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {longRange.demandItems.slice(0, 3).map((item) => (
+                  <article key={item.experimentId} className="rounded-2xl border border-[var(--line)] bg-white/70 p-4 text-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-[var(--ink)]">{item.experimentCode}</p>
+                        <p className="mt-1 text-[var(--muted)]">
+                          {item.projectCode} · starts {item.startLabel}
+                        </p>
+                      </div>
+                      <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{item.supplyGap}</p>
+                    </div>
+                    <p className="mt-3 text-[var(--muted)]">
+                      {item.requestedAnimals} requested · {item.activeAnimals} already active · long-range gap {item.supplyGap}
                     </p>
                   </article>
                 ))}

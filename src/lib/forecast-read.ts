@@ -1,5 +1,6 @@
 import { addDays, differenceInDays, format } from "date-fns";
 
+import { buildLineFertilityAdjustment, parseStrainFertilityProfiles } from "@/lib/fertility-rules";
 import { prisma } from "@/lib/prisma";
 import type { BreedingForecastItem, ForecastDemandItem, ForecastSummary, SurplusMinimizationView } from "@/lib/types";
 import { formatPercent } from "@/lib/utils";
@@ -73,7 +74,14 @@ function buildWarnings(input: {
 async function getForecastRuleContext() {
   const rules = await prisma.ruleConfig.findMany({
     where: {
-      key: { in: ["breeder_max_age_days", "weaning_due_days"] },
+      key: {
+        in: [
+          "breeder_max_age_days",
+          "weaning_due_days",
+          "forecast_long_range_horizon_days",
+          "breeding_strain_fertility_profiles",
+        ],
+      },
     },
     select: {
       key: true,
@@ -81,11 +89,18 @@ async function getForecastRuleContext() {
     },
   });
 
-  const values = new Map(rules.map((rule) => [rule.key, Number(rule.value)]));
+  const values = new Map(rules.map((rule) => [rule.key, rule.value]));
+  const getNumber = (key: string, fallback: number) => {
+    const parsed = Number(values.get(key));
+
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
 
   return {
-    breederMaxAgeDays: values.get("breeder_max_age_days") ?? 270,
-    weaningDueDays: values.get("weaning_due_days") ?? 21,
+    breederMaxAgeDays: getNumber("breeder_max_age_days", 270),
+    weaningDueDays: getNumber("weaning_due_days", 21),
+    longRangeDemandHorizonDays: getNumber("forecast_long_range_horizon_days", 90),
+    strainFertilityProfiles: parseStrainFertilityProfiles(values.get("breeding_strain_fertility_profiles")),
     today: getReferenceDate(),
   };
 }
@@ -104,6 +119,8 @@ export async function getBreedingForecastView(): Promise<BreedingForecastItem[]>
               id: true,
               animalId: true,
               dob: true,
+              strainId: true,
+              strain: { select: { name: true } },
               alleles: {
                 include: {
                   allele: {
@@ -135,8 +152,20 @@ export async function getBreedingForecastView(): Promise<BreedingForecastItem[]>
     const latestLitter = breeding.litters[0] ?? null;
     const sireSummary = sire ? buildGenotypeSummary(sire.alleles) : "Genotype not recorded";
     const damSummary = dam ? buildGenotypeSummary(dam.alleles) : "Genotype not recorded";
-    const expectedProbability = estimateProbability(breeding.targetGenotype, sireSummary, damSummary);
-    const expectedLitterSize = latestLitter?.litterSizeBirth ?? 6;
+    const lineFertility =
+      sire && dam
+        ? buildLineFertilityAdjustment(sire, dam, rules.strainFertilityProfiles)
+        : {
+            litterSizeMultiplier: 1,
+            probabilityMultiplier: 1,
+            surplusPenaltyMultiplier: 1,
+            summary: "No line-specific fertility adjustment",
+            notes: [],
+          };
+    const expectedProbability = Number(
+      Math.max(0.1, Math.min(0.95, estimateProbability(breeding.targetGenotype, sireSummary, damSummary) * lineFertility.probabilityMultiplier)).toFixed(2),
+    );
+    const expectedLitterSize = Number(Math.max(1, (latestLitter?.litterSizeBirth ?? 6) * lineFertility.litterSizeMultiplier).toFixed(1));
     const expectedUsablePups = Math.max(1, Number((expectedLitterSize * expectedProbability).toFixed(1)));
     const expectedSurplusPups = Number(Math.max(0, expectedLitterSize - expectedUsablePups).toFixed(1));
     const projectedNextLitterDate = latestLitter ? addDays(latestLitter.birthDate, 28) : addDays(breeding.startDate, 28);
@@ -163,8 +192,10 @@ export async function getBreedingForecastView(): Promise<BreedingForecastItem[]>
           nextLitterDate: projectedNextLitterDate,
           referenceDate,
         }),
+        ...lineFertility.notes.map((note) => `Line fertility note: ${note}`),
         ...(expectedSurplusPups >= 4 ? [`Projected surplus risk of ${expectedSurplusPups} pups from this litter`] : []),
       ],
+      lineFertilitySummary: lineFertility.summary,
     };
   });
 }
@@ -302,9 +333,10 @@ export async function getSurplusMinimizationView(horizonDays = 45): Promise<Surp
 export async function getForecastSummaryView(): Promise<ForecastSummary> {
   const rules = await getForecastRuleContext();
   const referenceDate = new Date(rules.today);
-  const [forecastRows, surplusView, cryostorageCount, animalCounts] = await Promise.all([
+  const [forecastRows, surplusView, longRangeView, cryostorageCount, animalCounts] = await Promise.all([
     getBreedingForecastView(),
     getSurplusMinimizationView(),
+    getSurplusMinimizationView(rules.longRangeDemandHorizonDays),
     prisma.cryostorageRecord.count({
       where: {
         status: { in: ["stored", "reserved"] },
@@ -335,6 +367,15 @@ export async function getForecastSummaryView(): Promise<ForecastSummary> {
     pendingDemand45Days: surplusView.demandAnimals,
     projectedSurplus45Days: Math.round(surplusView.projectedSurplusPups),
     supplyGap45Days: surplusView.supplyGap,
+    longRangeHorizonDays: rules.longRangeDemandHorizonDays,
+    projectedExperimentReadyLongRangeDays: Math.round(
+      forecastRows
+        .filter((row) => differenceInDays(new Date(row.projectedExperimentReadyDate), referenceDate) <= rules.longRangeDemandHorizonDays)
+        .reduce((sum, row) => sum + row.expectedUsablePups, 0),
+    ),
+    pendingDemandLongRangeDays: longRangeView.demandAnimals,
+    projectedSurplusLongRangeDays: Math.round(longRangeView.projectedSurplusPups),
+    supplyGapLongRangeDays: longRangeView.supplyGap,
     activeBreedingForecasts: forecastRows.length,
     cryostorageBackups: cryostorageCount,
     availableNow: animalCounts.find((item) => item.status === "colony_holding")?._count._all ?? 0,
@@ -353,8 +394,8 @@ export async function getForecastCalloutsView() {
   }));
 }
 
-export async function getSurplusMinimizationCalloutsView() {
-  const view = await getSurplusMinimizationView();
+export async function getSurplusMinimizationCalloutsView(horizonDays = 45) {
+  const view = await getSurplusMinimizationView(horizonDays);
 
   return {
     ...view,
@@ -363,4 +404,10 @@ export async function getSurplusMinimizationCalloutsView() {
       startLabel: format(new Date(item.startDate), "dd MMM yyyy"),
     })),
   };
+}
+
+export async function getLongRangeDemandCalloutsView() {
+  const rules = await getForecastRuleContext();
+
+  return getSurplusMinimizationCalloutsView(rules.longRangeDemandHorizonDays);
 }

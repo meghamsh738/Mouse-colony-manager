@@ -11,32 +11,32 @@ import {
 } from "@/lib/dashboard-read";
 import { buildCsvExport } from "@/lib/export-csv";
 import {
+  addCageHealthNote,
+  createAnimalRecord,
+  createBreedingSetup,
+  createCryostorageRecord,
+  createSampleRecord,
+  deletePlannedExperimentAssignment,
+  demoteReservedExperimentAssignments,
+  importGenotypeCsvBatch,
+  moveCageLocation,
+  planExperimentCohortAssignments,
+  promotePlannedExperimentAssignments,
+  recordAnimalGenotype,
+  recordBreedingLitter,
+  reserveAnimalForExperiment,
+  updatePlannedExperimentAssignment,
+  updateRuleConfig,
+  updateAnimalLifecycleStatus,
+  weanLitterToCages,
+} from "@/lib/colony-write";
+import {
   getExperimentCandidateView,
   getExperimentOverviewView,
   getExperimentPlannerView,
   parseExperimentPlannerFilters,
 } from "@/lib/experiments-read";
 import { getBreedingForecastView, getForecastSummaryView, getSurplusMinimizationView } from "@/lib/forecast-read";
-  import {
-    addCageHealthNote,
-    createAnimalRecord,
-    createBreedingSetup,
-    createCryostorageRecord,
-    createSampleRecord,
-    importGenotypeCsvBatch,
-    moveCageLocation,
-    demoteReservedExperimentAssignments,
-    planExperimentCohortAssignments,
-    promotePlannedExperimentAssignments,
-    updatePlannedExperimentAssignment,
-    deletePlannedExperimentAssignment,
-    recordAnimalGenotype,
-    recordBreedingLitter,
-    reserveAnimalForExperiment,
-  updateRuleConfig,
-  updateAnimalLifecycleStatus,
-  weanLitterToCages,
-} from "@/lib/colony-write";
 import { getRecentAuditLogsView, getRuleSummaryView } from "@/lib/settings-read";
 import { getCryostorageInventoryView } from "@/lib/cryostorage-read";
 import { getSampleInventoryView } from "@/lib/samples-read";
@@ -76,6 +76,7 @@ describe("colony logic", () => {
     expect(suggestions[0]?.expectedLitterSize).toBeGreaterThan(0);
     expect(suggestions[0]?.estimatedSurplusPups).toBeGreaterThanOrEqual(0);
     expect(suggestions[0]?.fertilitySummary).toContain("Sire:");
+    expect(suggestions[0]?.lineFertilitySummary).toContain("Line fertility model");
     expect(suggestions.some((suggestion) => suggestion.ruleSeverity !== "ok")).toBe(true);
   });
 
@@ -324,10 +325,11 @@ describe("colony logic", () => {
   });
 
   it("builds a live colony forecast from active breedings and backup inventory", async () => {
-    const [summary, rows, surplus] = await Promise.all([
+    const [summary, rows, surplus, longRange] = await Promise.all([
       getForecastSummaryView(),
       getBreedingForecastView(),
       getSurplusMinimizationView(),
+      getSurplusMinimizationView(90),
     ]);
 
     expect(summary.activeBreedingForecasts).toBeGreaterThan(0);
@@ -335,10 +337,16 @@ describe("colony logic", () => {
     expect(summary.projectedPups30Days).toBeGreaterThan(0);
     expect(summary.pendingDemand45Days).toBeGreaterThanOrEqual(0);
     expect(summary.projectedSurplus45Days).toBeGreaterThanOrEqual(0);
+    expect(summary.longRangeHorizonDays).toBe(90);
+    expect(summary.pendingDemandLongRangeDays).toBeGreaterThanOrEqual(summary.pendingDemand45Days);
+    expect(summary.projectedExperimentReadyLongRangeDays).toBeGreaterThanOrEqual(summary.projectedExperimentReady45Days);
     expect(rows[0]?.pairLabel).toContain("CM-");
     expect(rows[0]?.expectedUsablePups).toBeGreaterThan(0);
     expect(rows[0]?.expectedSurplusPups).toBeGreaterThanOrEqual(0);
+    expect(rows[0]?.lineFertilitySummary).toContain("Line fertility model");
     expect(surplus.recommendations.length).toBeGreaterThan(0);
+    expect(longRange.horizonDays).toBe(90);
+    expect(longRange.demandAnimals).toBeGreaterThanOrEqual(surplus.demandAnimals);
   });
 
   it("creates a new animal record and exposes it through alert and candidate helpers", async () => {

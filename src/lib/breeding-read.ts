@@ -1,5 +1,10 @@
 import { differenceInDays } from "date-fns";
 
+import {
+  buildLineFertilityAdjustment,
+  parseStrainFertilityProfiles,
+  type StrainFertilityProfile,
+} from "@/lib/fertility-rules";
 import { prisma } from "@/lib/prisma";
 import type { BreedingSuggestion } from "@/lib/types";
 import { formatAgeLabel, formatPercent } from "@/lib/utils";
@@ -15,6 +20,7 @@ type BreedingRuleContext = {
   activeWorkloadPenaltyScore: number;
   surplusPenaltyPerPup: number;
   surplusWarningPups: number;
+  strainFertilityProfiles: Map<string, StrainFertilityProfile>;
   today: string;
 };
 
@@ -260,6 +266,7 @@ async function getBreedingRuleContext(): Promise<BreedingRuleContext> {
     "breeding_active_workload_penalty_score",
     "breeding_surplus_penalty_per_pup",
     "breeding_surplus_warning_pups",
+    "breeding_strain_fertility_profiles",
   ];
   const rules = await prisma.ruleConfig.findMany({
     where: {
@@ -271,19 +278,25 @@ async function getBreedingRuleContext(): Promise<BreedingRuleContext> {
     },
   });
 
-  const values = new Map(rules.map((rule) => [rule.key, Number(rule.value)]));
+  const values = new Map(rules.map((rule) => [rule.key, rule.value]));
+  const getNumber = (key: string, fallback: number) => {
+    const parsed = Number(values.get(key));
+
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
 
   return {
-    breederMaxAgeDays: values.get("breeder_max_age_days") ?? 0,
-    breederMinAgeDays: values.get("breeder_min_age_days") ?? 0,
-    fertilityTargetLitterSize: values.get("breeding_fertility_target_litter_size") ?? 6,
-    fertilityHighAveragePups: values.get("breeding_fertility_high_average_pups") ?? 7,
-    fertilityLowAveragePups: values.get("breeding_fertility_low_average_pups") ?? 5,
-    fertilityHistoryBoostScore: values.get("breeding_fertility_history_boost_score") ?? 8,
-    fertilityHistoryPenaltyScore: values.get("breeding_fertility_history_penalty_score") ?? 8,
-    activeWorkloadPenaltyScore: values.get("breeding_active_workload_penalty_score") ?? 8,
-    surplusPenaltyPerPup: values.get("breeding_surplus_penalty_per_pup") ?? 2,
-    surplusWarningPups: values.get("breeding_surplus_warning_pups") ?? 4,
+    breederMaxAgeDays: getNumber("breeder_max_age_days", 0),
+    breederMinAgeDays: getNumber("breeder_min_age_days", 0),
+    fertilityTargetLitterSize: getNumber("breeding_fertility_target_litter_size", 6),
+    fertilityHighAveragePups: getNumber("breeding_fertility_high_average_pups", 7),
+    fertilityLowAveragePups: getNumber("breeding_fertility_low_average_pups", 5),
+    fertilityHistoryBoostScore: getNumber("breeding_fertility_history_boost_score", 8),
+    fertilityHistoryPenaltyScore: getNumber("breeding_fertility_history_penalty_score", 8),
+    activeWorkloadPenaltyScore: getNumber("breeding_active_workload_penalty_score", 8),
+    surplusPenaltyPerPup: getNumber("breeding_surplus_penalty_per_pup", 2),
+    surplusWarningPups: getNumber("breeding_surplus_warning_pups", 4),
+    strainFertilityProfiles: parseStrainFertilityProfiles(values.get("breeding_strain_fertility_profiles")),
     today: getReferenceDate(),
   };
 }
@@ -384,6 +397,7 @@ export async function getBreedingSuggestionsView(
           },
         },
       },
+      strain: { select: { name: true } },
     },
   });
 
@@ -400,6 +414,7 @@ export async function getBreedingSuggestionsView(
         const damAge = getAgeDays(dam.dob, rules.today);
         const damGenotypeSummary = buildGenotypeSummary(dam.alleles);
         const damHistory = buildBreederHistory(dam.breedingAdults);
+        const lineFertility = buildLineFertilityAdjustment(sire, dam, rules.strainFertilityProfiles);
         const genotypeScore = Math.min(
           0.95,
           pairScore(sireGenotypeSummary, desiredGenotype) + pairScore(damGenotypeSummary, desiredGenotype),
@@ -436,12 +451,18 @@ export async function getBreedingSuggestionsView(
         }
 
         warnings.push(...ruleRisks.warnings);
+        warnings.push(...lineFertility.notes.map((note) => `Line fertility note: ${note}`));
 
-        const expectedProbability = Math.max(0.1, genotypeScore - fertilityPenalty);
-        const expectedLitterSize = expectedLitterSizeFromHistory(sireHistory, damHistory, rules);
+        const expectedProbability = Math.max(0.1, Number(((genotypeScore - fertilityPenalty) * lineFertility.probabilityMultiplier).toFixed(2)));
+        const expectedLitterSize = Number(
+          Math.max(1, expectedLitterSizeFromHistory(sireHistory, damHistory, rules) * lineFertility.litterSizeMultiplier).toFixed(1),
+        );
         const expectedUsablePups = Number((expectedProbability * expectedLitterSize).toFixed(1));
         const estimatedSurplusPups = Number(Math.max(0, expectedLitterSize - expectedUsablePups).toFixed(1));
-        const surplusPenalty = Math.max(0, Math.round(estimatedSurplusPups * rules.surplusPenaltyPerPup));
+        const surplusPenalty = Math.max(
+          0,
+          Math.round(estimatedSurplusPups * rules.surplusPenaltyPerPup * lineFertility.surplusPenaltyMultiplier),
+        );
         const estimatedPupsNeeded = Math.max(6, Math.ceil(minimumYield / Math.max(expectedProbability, 0.1)));
 
         if (estimatedSurplusPups >= rules.surplusWarningPups) {
@@ -475,6 +496,7 @@ export async function getBreedingSuggestionsView(
           estimatedSurplusPups,
           expectedLitterSize,
           fertilitySummary: `Sire: ${sireHistory.summary}; dam: ${damHistory.summary}`,
+          lineFertilitySummary: lineFertility.summary,
           workloadSummary: buildWorkloadSummary(sireHistory, damHistory),
           warnings,
           ruleSeverity: ruleRisks.severity,

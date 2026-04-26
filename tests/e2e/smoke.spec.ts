@@ -307,6 +307,7 @@ test("admin can review breeding overview and generator suggestions", async ({ pa
   await expect(page.getByText("Cross can yield desired dual-transgenic pups").first()).toBeVisible();
   await expect(page.getByTestId("breeding-suggestions")).toContainText("Rule risk", { timeout: 30_000 });
   await expect(page.getByTestId("breeding-suggestions")).toContainText("surplus risk", { timeout: 30_000 });
+  await expect(page.getByTestId("breeding-suggestions")).toContainText("Line fertility model", { timeout: 30_000 });
   await expect(page.getByTestId("breeding-suggestions")).toContainText("Uses actual litter history", { timeout: 30_000 });
 });
 
@@ -478,7 +479,9 @@ test("researcher can review the forecast workspace", async ({ page }) => {
 
   await expect(page.getByText("Projected breeding output and experiment-ready runway.")).toBeVisible();
   await expect(page.getByTestId("stat-pending-demand")).toBeVisible();
+  await expect(page.getByTestId("stat-90d-gap")).toBeVisible();
   await expect(page.getByTestId("surplus-minimization")).toContainText("Surplus minimization", { timeout: 30_000 });
+  await expect(page.getByTestId("long-range-forecast")).toContainText("Long-range study demand", { timeout: 30_000 });
   await expect(page.getByTestId("forecast-table").getByText("x").first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Inspect frozen backups" })).toBeVisible();
 });
