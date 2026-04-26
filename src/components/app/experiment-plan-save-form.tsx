@@ -41,6 +41,8 @@ export function ExperimentPlanSaveForm({ experimentOptions, filters }: Experimen
       <input type="hidden" name="randomSeed" value={filters.randomSeed} />
       <input type="hidden" name="blockBySex" value={String(filters.blockBySex)} />
       <input type="hidden" name="blockBySiblingGroup" value={String(filters.blockBySiblingGroup)} />
+      <input type="hidden" name="balanceByAge" value={String(filters.balanceByAge)} />
+      <input type="hidden" name="maxSameCagePerGroup" value={String(filters.maxSameCagePerGroup)} />
 
       <label className="space-y-2 text-sm">
         <span className="text-[var(--muted)]">Target experiment</span>

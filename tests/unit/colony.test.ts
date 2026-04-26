@@ -73,6 +73,9 @@ describe("colony logic", () => {
 
     expect(suggestions[0]?.priorityScore).toBeGreaterThan(suggestions[1]?.priorityScore ?? 0);
     expect(suggestions[0]?.expectedGenotypeProbability).toBeGreaterThan(0.2);
+    expect(suggestions[0]?.expectedLitterSize).toBeGreaterThan(0);
+    expect(suggestions[0]?.estimatedSurplusPups).toBeGreaterThanOrEqual(0);
+    expect(suggestions[0]?.fertilitySummary).toContain("Sire:");
     expect(suggestions.some((suggestion) => suggestion.ruleSeverity !== "ok")).toBe(true);
   });
 
@@ -124,6 +127,7 @@ describe("colony logic", () => {
         genotypeKeyword: "Cre",
         groupCount: "2",
         randomSeed: "seed-42",
+        maxSameCagePerGroup: "1",
         includeReserved: "false",
         allowOverlap: "false",
       }),
@@ -135,7 +139,10 @@ describe("colony logic", () => {
     expect(planner.candidates.every((candidate) => candidate.ageDays >= 35 && candidate.ageDays <= 140)).toBe(true);
     expect(planner.randomization.groups).toHaveLength(2);
     expect(planner.randomization.seed).toBe("seed-42");
+    expect(planner.randomization.strategy).toContain("Balance by age band before assignment");
+    expect(planner.randomization.strategy).toContain("Limit same-cage animals per treatment arm to 1");
     expect(planner.randomization.groups.reduce((sum, group) => sum + group.members.length, 0)).toBe(planner.selected.length);
+    expect(planner.randomization.groups.every((group) => group.summary.averageAgeDays >= 0)).toBe(true);
     expect(planner.exclusions.some((item) => item.reason.length > 0 && item.count > 0)).toBe(true);
     expect(planner.exclusions.some((item) => item.exampleAnimalIds.length > 0)).toBe(true);
     expect(planner.summary.allocationWarnings).toBeGreaterThan(0);

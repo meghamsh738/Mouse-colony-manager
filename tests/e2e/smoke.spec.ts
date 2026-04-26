@@ -181,6 +181,7 @@ test("researcher can review experiment overview and tune the distribution helper
   await page.getByTestId("planner-genotype").fill("Cre");
   await page.getByTestId("planner-group-count").fill("2");
   await page.getByTestId("planner-random-seed").fill("seed-77");
+  await page.getByTestId("planner-max-same-cage").fill("1");
   await submitAfterBlur(page, "planner-apply");
 
   await expect(page).toHaveURL(/sex=male/);
@@ -191,6 +192,8 @@ test("researcher can review experiment overview and tune the distribution helper
   await expect(page.getByTestId("experiment-exclusions")).toContainText("Sex filter mismatch", { timeout: 30_000 });
   await expect(page.getByTestId("experiment-exclusions")).toContainText("Examples", { timeout: 30_000 });
   await expect(page.getByTestId("experiment-randomization")).toContainText("Seed seed-77", { timeout: 30_000 });
+  await expect(page.getByTestId("experiment-randomization")).toContainText("Balance by age band", { timeout: 30_000 });
+  await expect(page.getByTestId("experiment-randomization")).toContainText("same-cage animals per treatment arm", { timeout: 30_000 });
   await expect(page.getByTestId("planner-group-card")).toHaveCount(2, { timeout: 30_000 });
   await expect(page.getByTestId("planner-group-card").first()).toContainText("Group A", { timeout: 30_000 });
 
@@ -303,6 +306,8 @@ test("admin can review breeding overview and generator suggestions", async ({ pa
   await expect(page.getByText("litter-001 born").first()).toBeVisible();
   await expect(page.getByText("Cross can yield desired dual-transgenic pups").first()).toBeVisible();
   await expect(page.getByTestId("breeding-suggestions")).toContainText("Rule risk", { timeout: 30_000 });
+  await expect(page.getByTestId("breeding-suggestions")).toContainText("surplus risk", { timeout: 30_000 });
+  await expect(page.getByTestId("breeding-suggestions")).toContainText("Uses actual litter history", { timeout: 30_000 });
 });
 
 test("admin can create a breeding setup with override", async ({ page }, testInfo) => {

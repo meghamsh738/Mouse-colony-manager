@@ -255,6 +255,18 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                     data-testid="planner-random-seed"
                   />
                 </label>
+                <label className="space-y-2 text-sm">
+                  <span className="text-[var(--muted)]">Max same cage per group</span>
+                  <input
+                    className="h-11 w-full rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-base text-[var(--ink)] outline-none transition focus:border-[var(--line-strong)] focus:ring-2 focus:ring-[var(--focus)] md:text-sm"
+                    defaultValue={String(planner.filters.maxSameCagePerGroup)}
+                    max={6}
+                    min={1}
+                    name="maxSameCagePerGroup"
+                    type="number"
+                    data-testid="planner-max-same-cage"
+                  />
+                </label>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="flex items-start gap-3 rounded-3xl border border-[var(--line)] px-4 py-4 text-sm">
@@ -339,6 +351,20 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                   <span>
                     <span className="block font-medium text-[var(--ink)]">Block by sibling group in randomization</span>
                     <span className="mt-1 block text-[var(--muted)]">Avoid loading one treatment arm from the same sire and dam pair first.</span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-3 rounded-3xl border border-[var(--line)] px-4 py-4 text-sm">
+                  <input
+                    className="mt-1 h-5 w-5 rounded border-[var(--line)] text-[var(--accent)] focus:ring-[var(--accent)]"
+                    defaultChecked={planner.filters.balanceByAge}
+                    name="balanceByAge"
+                    type="checkbox"
+                    value="true"
+                    data-testid="planner-balance-age"
+                  />
+                  <span>
+                    <span className="block font-medium text-[var(--ink)]">Balance by age band in randomization</span>
+                    <span className="mt-1 block text-[var(--muted)]">Spread juvenile, young adult, adult, and older animals across treatment arms.</span>
                   </span>
                 </label>
               </div>
@@ -446,17 +472,28 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
                       <div>
                         <p className="font-medium">{group.name}</p>
                         <p className="text-sm text-[var(--muted)]">
-                          {group.summary.total} animals · {group.summary.males} male · {group.summary.females} female
+                          {group.summary.total} animals · {group.summary.males} male · {group.summary.females} female · average age{" "}
+                          {group.summary.averageAgeDays} days
                         </p>
+                        <p className="mt-1 text-sm text-[var(--muted)]">{group.summary.cageCount} cages represented</p>
                       </div>
                     </div>
+                    {group.constraintWarnings.length ? (
+                      <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                        {group.constraintWarnings.join(" · ")}
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                        Treatment-arm constraints are satisfied for this group.
+                      </div>
+                    )}
                     <div className="mt-4 space-y-3">
                       {group.members.length ? (
                         group.members.map((member) => (
                           <div key={member.animalId} className="rounded-2xl bg-[var(--surface-2)] px-4 py-3 text-sm">
                             <p className="font-medium">{member.animalId}</p>
                             <p className="mt-1 text-[var(--muted)]">
-                              {titleCase(member.sex)} · {member.ageLabel} · {member.cageLabel}
+                              {titleCase(member.sex)} · {member.ageLabel} · {member.ageBand} · {member.cageLabel}
                             </p>
                             <p className="mt-1 text-[var(--muted)]">{member.genotypeSummary}</p>
                           </div>

@@ -33,6 +33,8 @@ const planExperimentCohortSchema = z.object({
   randomSeed: z.string().trim().optional(),
   blockBySex: z.string().trim().optional(),
   blockBySiblingGroup: z.string().trim().optional(),
+  balanceByAge: z.string().trim().optional(),
+  maxSameCagePerGroup: z.string().trim().optional(),
 });
 
 export async function planExperimentCohortAction(
@@ -60,6 +62,8 @@ export async function planExperimentCohortAction(
     randomSeed: formData.get("randomSeed") || undefined,
     blockBySex: formData.get("blockBySex") || undefined,
     blockBySiblingGroup: formData.get("blockBySiblingGroup") || undefined,
+    balanceByAge: formData.get("balanceByAge") || undefined,
+    maxSameCagePerGroup: formData.get("maxSameCagePerGroup") || undefined,
   });
 
   if (!parsed.success) {
@@ -85,6 +89,8 @@ export async function planExperimentCohortAction(
     randomSeed: parsed.data.randomSeed,
     blockBySex: parsed.data.blockBySex,
     blockBySiblingGroup: parsed.data.blockBySiblingGroup,
+    balanceByAge: parsed.data.balanceByAge,
+    maxSameCagePerGroup: parsed.data.maxSameCagePerGroup,
   });
 
   const planner = await getExperimentPlannerView(filters);

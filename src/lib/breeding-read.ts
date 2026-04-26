@@ -40,6 +40,16 @@ type BreedingSuggestionSummary = BreedingSuggestion & {
   probabilityLabel: string;
 };
 
+type BreederHistory = {
+  activeBreedings: number;
+  totalBreedings: number;
+  litterCount: number;
+  failedBreedings: number;
+  averageLitterSize: number | null;
+  latestLitterDate: string | null;
+  summary: string;
+};
+
 function getReferenceDate() {
   return process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString();
 }
@@ -155,6 +165,81 @@ export function evaluateBreedingRuleRisks(
   } as const;
 }
 
+function buildBreederHistory(
+  breedingAdults: Array<{
+    breedingSetup: {
+      status: string;
+      startDate: Date;
+      litters: Array<{
+        birthDate: Date;
+        litterSizeBirth: number;
+      }>;
+    };
+  }>,
+): BreederHistory {
+  const litters = breedingAdults.flatMap((adult) => adult.breedingSetup.litters);
+  const averageLitterSize = litters.length
+    ? Number((litters.reduce((sum, litter) => sum + litter.litterSizeBirth, 0) / litters.length).toFixed(1))
+    : null;
+  const latestLitter = [...litters].sort((left, right) => right.birthDate.getTime() - left.birthDate.getTime())[0] ?? null;
+  const activeBreedings = breedingAdults.filter((adult) => adult.breedingSetup.status === "active").length;
+  const failedBreedings = breedingAdults.filter((adult) => adult.breedingSetup.status === "failed").length;
+
+  return {
+    activeBreedings,
+    totalBreedings: breedingAdults.length,
+    litterCount: litters.length,
+    failedBreedings,
+    averageLitterSize,
+    latestLitterDate: latestLitter?.birthDate.toISOString() ?? null,
+    summary: litters.length
+      ? `${litters.length} litters, average ${averageLitterSize} pups`
+      : breedingAdults.length
+        ? `${breedingAdults.length} breeding setups, no litter history yet`
+        : "No breeding history",
+  };
+}
+
+function fertilityHistoryAdjustment(sireHistory: BreederHistory, damHistory: BreederHistory) {
+  const knownAverages = [sireHistory.averageLitterSize, damHistory.averageLitterSize].filter(
+    (value): value is number => value !== null,
+  );
+
+  if (!knownAverages.length) {
+    return -2;
+  }
+
+  const combinedAverage = knownAverages.reduce((sum, value) => sum + value, 0) / knownAverages.length;
+
+  if (combinedAverage >= 7) {
+    return 8;
+  }
+
+  if (combinedAverage >= 5) {
+    return 4;
+  }
+
+  return -8;
+}
+
+function expectedLitterSizeFromHistory(sireHistory: BreederHistory, damHistory: BreederHistory) {
+  const knownAverages = [sireHistory.averageLitterSize, damHistory.averageLitterSize].filter(
+    (value): value is number => value !== null,
+  );
+
+  if (!knownAverages.length) {
+    return 6;
+  }
+
+  return Number((knownAverages.reduce((sum, value) => sum + value, 0) / knownAverages.length).toFixed(1));
+}
+
+function buildWorkloadSummary(sireHistory: BreederHistory, damHistory: BreederHistory) {
+  const active = sireHistory.activeBreedings + damHistory.activeBreedings;
+
+  return active ? `${active} active breeding workload flags` : "No active breeding workload";
+}
+
 async function getBreedingRuleContext(): Promise<BreedingRuleContext> {
   const rules = await prisma.ruleConfig.findMany({
     where: {
@@ -255,6 +340,22 @@ export async function getBreedingSuggestionsView(
           allele: { select: { name: true, harmfulHomozygous: true, maintainAsHet: true, prohibitedPairings: true } },
         },
       },
+      breedingAdults: {
+        include: {
+          breedingSetup: {
+            select: {
+              status: true,
+              startDate: true,
+              litters: {
+                select: {
+                  birthDate: true,
+                  litterSizeBirth: true,
+                },
+              },
+            },
+          },
+        },
+      },
     },
   });
 
@@ -265,10 +366,12 @@ export async function getBreedingSuggestionsView(
     .flatMap((sire) => {
       const sireAge = getAgeDays(sire.dob, rules.today);
       const sireGenotypeSummary = buildGenotypeSummary(sire.alleles);
+      const sireHistory = buildBreederHistory(sire.breedingAdults);
 
       return females.map((dam) => {
         const damAge = getAgeDays(dam.dob, rules.today);
         const damGenotypeSummary = buildGenotypeSummary(dam.alleles);
+        const damHistory = buildBreederHistory(dam.breedingAdults);
         const genotypeScore = Math.min(
           0.95,
           pairScore(sireGenotypeSummary, desiredGenotype) + pairScore(damGenotypeSummary, desiredGenotype),
@@ -280,6 +383,8 @@ export async function getBreedingSuggestionsView(
           sireAge < rules.breederMinAgeDays || damAge < rules.breederMinAgeDays ? 40 : 0;
         const ruleRisks = evaluateBreedingRuleRisks(sire.alleles, dam.alleles);
         const rulePenalty = ruleRisks.criticalCount * 35 + ruleRisks.warningCount * 10;
+        const workloadPenalty = (sireHistory.activeBreedings + damHistory.activeBreedings) * 8;
+        const historyAdjustment = fertilityHistoryAdjustment(sireHistory, damHistory);
         const warnings: string[] = [];
 
         if (sireAge > rules.breederMaxAgeDays) {
@@ -294,11 +399,27 @@ export async function getBreedingSuggestionsView(
           warnings.push("Cross can yield desired dual-transgenic pups");
         }
 
+        if (sireHistory.activeBreedings || damHistory.activeBreedings) {
+          warnings.push("One or both breeders are already carrying active breeding workload");
+        }
+
+        if (sireHistory.failedBreedings || damHistory.failedBreedings) {
+          warnings.push("Breeding history includes failed setups");
+        }
+
         warnings.push(...ruleRisks.warnings);
 
         const expectedProbability = Math.max(0.1, genotypeScore - fertilityPenalty);
-        const expectedUsablePups = Number((expectedProbability * 6).toFixed(1));
+        const expectedLitterSize = expectedLitterSizeFromHistory(sireHistory, damHistory);
+        const expectedUsablePups = Number((expectedProbability * expectedLitterSize).toFixed(1));
+        const estimatedSurplusPups = Number(Math.max(0, expectedLitterSize - expectedUsablePups).toFixed(1));
+        const surplusPenalty = Math.max(0, Math.round(estimatedSurplusPups * 2));
         const estimatedPupsNeeded = Math.max(6, Math.ceil(minimumYield / Math.max(expectedProbability, 0.1)));
+
+        if (estimatedSurplusPups >= 4) {
+          warnings.push(`High surplus risk: about ${estimatedSurplusPups} pups may miss the requested genotype`);
+        }
+
         const priorityScore = Math.max(
           0,
           Math.round(
@@ -306,7 +427,10 @@ export async function getBreedingSuggestionsView(
               (desiredSex === "female" ? 5 : 0) -
               agePenalty -
               criticalPenalty -
-              rulePenalty,
+              rulePenalty -
+              workloadPenalty -
+              surplusPenalty +
+              historyAdjustment,
           ),
         );
 
@@ -320,6 +444,10 @@ export async function getBreedingSuggestionsView(
           expectedSexSplit: "50% female / 50% male",
           estimatedPupsNeeded,
           expectedUsablePups,
+          estimatedSurplusPups,
+          expectedLitterSize,
+          fertilitySummary: `Sire: ${sireHistory.summary}; dam: ${damHistory.summary}`,
+          workloadSummary: buildWorkloadSummary(sireHistory, damHistory),
           warnings,
           ruleSeverity: ruleRisks.severity,
           ruleSummary:

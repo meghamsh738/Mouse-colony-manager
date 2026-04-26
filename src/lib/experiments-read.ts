@@ -127,6 +127,22 @@ function scoreAgeWindow(ageDays: number, minAgeDays: number, maxAgeDays: number)
   return Math.max(0, 16 - Math.round(distance / 7));
 }
 
+function getAgeBand(ageDays: number) {
+  if (ageDays < 56) {
+    return "juvenile";
+  }
+
+  if (ageDays < 112) {
+    return "young adult";
+  }
+
+  if (ageDays < 240) {
+    return "adult";
+  }
+
+  return "older";
+}
+
 type ExclusionBucket = {
   count: number;
   exampleAnimalIds: string[];
@@ -246,6 +262,8 @@ export function parseExperimentPlannerFilters(searchParams?: PlannerSearchParams
     randomSeed: normalizeSeed(asString(searchParams?.randomSeed)),
     blockBySex: parseBoolean(asString(searchParams?.blockBySex), true),
     blockBySiblingGroup: parseBoolean(asString(searchParams?.blockBySiblingGroup), true),
+    balanceByAge: parseBoolean(asString(searchParams?.balanceByAge), true),
+    maxSameCagePerGroup: parseNumber(asString(searchParams?.maxSameCagePerGroup), 1, { min: 1, max: 6 }),
   };
 }
 
@@ -263,7 +281,9 @@ function buildRandomizationPlan(
     members: [] as Array<{
       animalId: string;
       sex: ExperimentCandidate["sex"];
+      ageDays: number;
       ageLabel: string;
+      ageBand: string;
       cageLabel: string;
       genotypeSummary: string;
       siblingGroup: string;
@@ -272,23 +292,30 @@ function buildRandomizationPlan(
       total: 0,
       males: 0,
       females: 0,
+      averageAgeDays: 0,
+      cageCount: 0,
     },
+    constraintWarnings: [] as string[],
   }));
 
   const strategy = [
     "Seeded ordering from the selected cohort",
     ...(filters.blockBySex ? ["Block by sex before assignment"] : []),
     ...(filters.blockBySiblingGroup ? ["Keep sibling groups from front-loading the same treatment arm"] : []),
-    "Serpentine distribution across groups",
+    ...(filters.balanceByAge ? ["Balance by age band before assignment"] : []),
+    `Limit same-cage animals per treatment arm to ${filters.maxSameCagePerGroup}`,
+    "Constraint-aware serpentine distribution across groups",
   ];
 
   const ordered = [...selectedCandidates].sort((left, right) => {
     const leftBlock = [
       filters.blockBySex ? left.sex : "",
+      filters.balanceByAge ? left.ageBand : "",
       filters.blockBySiblingGroup ? left.siblingGroup : "",
     ].join("|");
     const rightBlock = [
       filters.blockBySex ? right.sex : "",
+      filters.balanceByAge ? right.ageBand : "",
       filters.blockBySiblingGroup ? right.siblingGroup : "",
     ].join("|");
 
@@ -303,16 +330,44 @@ function buildRandomizationPlan(
     );
   });
 
+  const getConstraintPenalty = (group: (typeof groups)[number], candidate: ExperimentCandidate) => {
+    const sameCageCount = group.members.filter((member) => member.cageLabel === candidate.cageLabel).length;
+    const siblingCount = group.members.filter((member) => member.siblingGroup === candidate.siblingGroup).length;
+    const ageBandCount = group.members.filter((member) => member.ageBand === candidate.ageBand).length;
+    const sexCount = group.members.filter((member) => member.sex === candidate.sex).length;
+
+    return (
+      group.members.length * 2 +
+      (sameCageCount >= filters.maxSameCagePerGroup ? 50 : sameCageCount * 6) +
+      (filters.blockBySiblingGroup ? siblingCount * 22 : 0) +
+      (filters.balanceByAge ? ageBandCount * 4 : 0) +
+      (filters.blockBySex ? sexCount * 3 : 0)
+    );
+  };
+
   for (const [index, candidate] of ordered.entries()) {
     const cycle = Math.floor(index / groups.length);
     const position = index % groups.length;
-    const groupIndex = cycle % 2 === 0 ? position : groups.length - 1 - position;
+    const preferredIndex = cycle % 2 === 0 ? position : groups.length - 1 - position;
+    const preferenceOrder = groups.map((_, groupIndex) => ({
+      groupIndex,
+      distanceFromPreferred: Math.abs(groupIndex - preferredIndex),
+    }));
+    const groupIndex = preferenceOrder
+      .sort((left, right) => {
+        const leftPenalty = getConstraintPenalty(groups[left.groupIndex], candidate);
+        const rightPenalty = getConstraintPenalty(groups[right.groupIndex], candidate);
+
+        return leftPenalty - rightPenalty || left.distanceFromPreferred - right.distanceFromPreferred;
+      })[0].groupIndex;
     const targetGroup = groups[groupIndex];
 
     targetGroup.members.push({
       animalId: candidate.animalId,
       sex: candidate.sex,
+      ageDays: candidate.ageDays,
       ageLabel: candidate.ageLabel,
+      ageBand: candidate.ageBand,
       cageLabel: candidate.cageLabel,
       genotypeSummary: candidate.genotypeSummary,
       siblingGroup: candidate.siblingGroup,
@@ -320,6 +375,35 @@ function buildRandomizationPlan(
     targetGroup.summary.total += 1;
     targetGroup.summary.males += candidate.sex === "male" ? 1 : 0;
     targetGroup.summary.females += candidate.sex === "female" ? 1 : 0;
+    targetGroup.summary.averageAgeDays = Math.round(
+      targetGroup.members.reduce((sum, member) => sum + member.ageDays, 0) / targetGroup.members.length,
+    );
+    targetGroup.summary.cageCount = new Set(targetGroup.members.map((member) => member.cageLabel)).size;
+  }
+
+  for (const group of groups) {
+    const cageCounts = new Map<string, number>();
+    const siblingCounts = new Map<string, number>();
+
+    for (const member of group.members) {
+      cageCounts.set(member.cageLabel, (cageCounts.get(member.cageLabel) ?? 0) + 1);
+      siblingCounts.set(member.siblingGroup, (siblingCounts.get(member.siblingGroup) ?? 0) + 1);
+    }
+
+    for (const [cageLabel, count] of cageCounts.entries()) {
+      if (count > filters.maxSameCagePerGroup) {
+        group.constraintWarnings.push(`${count} animals from ${cageLabel}`);
+      }
+    }
+
+    if (filters.blockBySiblingGroup) {
+      for (const count of siblingCounts.values()) {
+        if (count > 1) {
+          group.constraintWarnings.push("Sibling group repeated in this treatment arm");
+          break;
+        }
+      }
+    }
   }
 
   return {
@@ -510,6 +594,7 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
 
   for (const animal of animals) {
     const ageDays = differenceInDays(new Date(referenceDate), animal.dob);
+    const ageBand = getAgeBand(ageDays);
     const genotypeSummary = buildGenotypeSummary(animal.alleles);
     const genotypeConfirmed = animal.alleles.length > 0 && animal.alleles.every((allele) => allele.callStatus === "confirmed");
     const activeProjectCodes = [...new Set(animal.projectAllocations.map((allocation) => allocation.project.projectCode))];
@@ -594,6 +679,7 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
       sex: animal.sex,
       ageDays,
       ageLabel: formatAgeLabel(ageDays),
+      ageBand,
       strain: animal.strain.name,
       genotypeSummary,
       projectCodes: activeProjectCodes,
@@ -650,6 +736,8 @@ export async function getExperimentCandidateView(
     randomSeed: "colony-balance",
     blockBySex: true,
     blockBySiblingGroup: true,
+    balanceByAge: true,
+    maxSameCagePerGroup: 1,
   });
 
   return view.candidates;

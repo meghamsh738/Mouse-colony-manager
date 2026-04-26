@@ -145,8 +145,18 @@ export default async function BreedingPage() {
                   <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{suggestion.probabilityLabel}</p>
                 </div>
                 <p className="mt-3 text-sm text-[var(--muted)]">
-                  Estimated usable pups {suggestion.expectedUsablePups} · estimated pups needed {suggestion.estimatedPupsNeeded}
+                  Expected litter {suggestion.expectedLitterSize} pups · usable {suggestion.expectedUsablePups} · surplus risk{" "}
+                  {suggestion.estimatedSurplusPups}
                 </p>
+                <p className="mt-2 text-sm text-[var(--muted)]">Estimated pups needed {suggestion.estimatedPupsNeeded}</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">{suggestion.fertilitySummary}</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">{suggestion.workloadSummary}</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
+                  <Badge variant={suggestion.estimatedSurplusPups >= 4 ? "warning" : "success"}>
+                    {suggestion.estimatedSurplusPups >= 4 ? "Surplus review" : "Surplus controlled"}
+                  </Badge>
+                  <span>Uses actual litter history where available before default assumptions.</span>
+                </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
                   <Badge variant={getRuleBadgeVariant(suggestion.ruleSeverity)}>
                     {suggestion.ruleSeverity === "ok" ? "Rule clear" : "Rule risk"}

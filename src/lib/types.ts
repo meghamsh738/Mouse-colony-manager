@@ -496,6 +496,10 @@ export interface BreedingSuggestion {
   expectedSexSplit: string;
   estimatedPupsNeeded: number;
   expectedUsablePups: number;
+  estimatedSurplusPups: number;
+  expectedLitterSize: number;
+  fertilitySummary: string;
+  workloadSummary: string;
   warnings: string[];
   ruleSeverity: "ok" | "warning" | "critical";
   ruleSummary: string;
@@ -511,6 +515,7 @@ export interface ExperimentCandidate {
   sex: Sex;
   ageDays: number;
   ageLabel: string;
+  ageBand: string;
   strain: string;
   genotypeSummary: string;
   projectCodes: string[];
@@ -537,6 +542,8 @@ export interface ExperimentPlannerFilters {
   randomSeed: string;
   blockBySex: boolean;
   blockBySiblingGroup: boolean;
+  balanceByAge: boolean;
+  maxSameCagePerGroup: number;
 }
 
 export interface ExperimentGroupSuggestion {
@@ -564,7 +571,9 @@ export interface ExperimentPlannerView {
       members: Array<{
         animalId: string;
         sex: Sex;
+        ageDays: number;
         ageLabel: string;
+        ageBand: string;
         cageLabel: string;
         genotypeSummary: string;
         siblingGroup: string;
@@ -573,7 +582,10 @@ export interface ExperimentPlannerView {
         total: number;
         males: number;
         females: number;
+        averageAgeDays: number;
+        cageCount: number;
       };
+      constraintWarnings: string[];
     }>;
     seed: string;
     strategy: string[];

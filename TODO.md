@@ -29,17 +29,19 @@ Current delivery level:
   - quarantine and sentinel tracking workspace
   - richer experiment planner exclusion examples, randomization, and project-allocation risk
   - breeding generator warnings from allele-level harmful homozygous, het-only, pending genotype, and prohibited-pairing metadata
+  - concrete HTTP email-provider notification delivery
+  - breeding helper fertility-history scoring and surplus-risk estimates
+  - experiment treatment-arm constraints for age-band balancing and same-cage group limits
 
 - Working, but still rough:
   - e2e reliability now depends on per-test reseeding, which is correct but slow
   - Prisma local dev DB remains the main source of flaky local verification if `prisma dev` drops; on 2026-04-26 the local `localhost:51214` endpoint was temporarily unavailable before recovering for targeted reruns
   - attachment persistence is local-disk backed under `public/uploads` for MVP, not object storage
-  - outbound email is digest-payload ready, but still needs a concrete mail provider integration if email delivery is required
+  - outbound email uses a generic HTTP provider contract; production deployment still needs real provider URL and token configuration
 
 - Still missing relative to the original blueprint:
   - external integration API beyond the current read-only `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
-  - advanced planner features such as richer treatment-arm constraints, deeper fertility history, and more formal surplus-minimization forecasting
-  - concrete outbound email delivery provider wiring
+  - advanced planner features such as formal surplus-minimization forecasting and deeper facility-specific breeding productivity rules
 
 ## Done
 
@@ -59,6 +61,9 @@ Current delivery level:
 - [x] Add quarantine and sentinel tracking from quarantine cages, unresolved health notes, welfare flags, movement history, and configurable thresholds
 - [x] Deepen experiment planning with exclusion examples and multi-project or missing-project allocation awareness
 - [x] Deepen breeding generator warnings with allele-level harmful homozygous, het-only maintenance, pending genotype, and prohibited-pairing metadata
+- [x] Add concrete HTTP email-provider delivery for notification digests
+- [x] Add breeder fertility-history scoring, workload penalties, expected litter size, and surplus-risk estimates
+- [x] Add treatment-arm constraints for age-band balancing and same-cage group limits
 
 ## In Progress
 
@@ -66,9 +71,9 @@ Current delivery level:
 
 ## Next
 
-- [ ] Add concrete outbound email provider delivery if email alerts are still in scope
-- [ ] Add deeper fertility-history scoring and surplus-minimization controls to the breeding helper
-- [ ] Add richer treatment-arm constraints to the experiment planner
+- [ ] Add provider-specific deployment documentation for production email delivery
+- [ ] Add formal surplus-minimization forecasting across planned studies and breedings
+- [ ] Add facility-specific fertility-history settings to tune breeding helper penalties
 - [ ] Improve local verification speed by reducing the cost of the Playwright web-server bootstrap
 - [ ] Make the local Prisma dev DB setup more resilient or documented so `verify` is less fragile on WSL
 
@@ -83,6 +88,7 @@ Most recently verified in this branch:
 - `npx vitest run tests/unit/notification-delivery.test.ts --reporter=verbose`
 - `npx vitest run tests/unit/quarantine-read.test.ts --reporter=verbose`
 - `npx vitest run tests/unit/colony.test.ts -t 'ranks breeding suggestions|evaluates harmful|builds a filtered experiment planner' --reporter=verbose`
+- `npm run verify:e2e:wsl -- --grep 'researcher can review experiment overview and tune the distribution helper|admin can review breeding overview and generator suggestions'`
 - `npm run verify:e2e:wsl -- --grep 'researcher can review experiment overview and tune the distribution helper|admin can review breeding overview and generator suggestions|staff can review quarantine and sentinel tracking'`
 - `npx vitest run tests/unit/colony.test.ts -t 'adds a cage health note that surfaces as a cage alert|records a genotype result and updates the animal detail genotype views' --reporter=verbose`
 - `npx vitest run tests/unit/integration-api-routes.test.ts --reporter=verbose`
@@ -96,6 +102,8 @@ Most recently verified in this branch:
 Notes:
 
 - On 2026-04-26, `localhost:51214` initially had no listener and `npx prisma dev -d -n colony-maintenance` stalled in this WSL/mounted-workspace session; the listener later recovered and the targeted DB-backed unit and e2e checks above passed.
+- The latest notification delivery unit suite covers webhook delivery and HTTP email-provider delivery with a mocked provider endpoint.
+- The latest experiment and breeding smoke checks passed on both Playwright `chromium` and `mobile` projects after adding age-band treatment-arm constraints and fertility/surplus helper output.
 - Targeted unit coverage, build, and attachment-specific desktop/mobile smoke flows passed after the attachment slice landed.
 - The notification inbox read model passed unit coverage, and the `/notifications` inbox smoke passed across both Playwright projects after switching the follow-up assertion to href-based navigation for mobile stability.
 - The authenticated `/api/v1` smoke check passed across both Playwright projects after trimming it to a stable list-and-export request path; the detail route is covered in the unit suite.
