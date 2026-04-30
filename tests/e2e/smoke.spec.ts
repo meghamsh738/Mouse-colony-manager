@@ -263,6 +263,33 @@ test("researcher can query the authenticated integration API surface", async ({ 
 
   expect(exportCatalog.status).toBe(200);
   expect(exportCatalog.body.data.some((entry: { entity: string }) => entry.entity === "animals")).toBe(true);
+
+  const sampleIntakeResponse = await page.request.post("/api/v1/samples", {
+    data: {
+      animalCode: "CM-26003",
+      projectCode: "PRJ-MICRO-24",
+      sampleLabel: "API-SMOKE-001",
+      sampleType: "Tail DNA",
+      status: "stored",
+      collectedAt: "2026-04-05",
+      storageLocation: "API freezer / box 1",
+      quantityLabel: "20 uL",
+      notes: "Created by the authenticated integration API smoke.",
+    },
+  });
+  const sampleIntake = {
+    status: sampleIntakeResponse.status(),
+    body: await sampleIntakeResponse.json(),
+  };
+
+  expect(sampleIntake.status).toBe(201);
+  expect(sampleIntake.body.meta.created).toBe(true);
+  expect(sampleIntake.body.data).toMatchObject({
+    animalCode: "CM-26003",
+    projectCode: "PRJ-MICRO-24",
+    sampleLabel: "API-SMOKE-001",
+    status: "stored",
+  });
 });
 
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {

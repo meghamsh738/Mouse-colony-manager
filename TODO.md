@@ -23,7 +23,7 @@ Current delivery level:
   - rules/settings and audit visibility
   - CSV exports
   - local attachment upload and viewing for genotype and welfare records
-  - authenticated read-only `/api/v1` integration routes for animals, cages, experiments, projects, and export discovery
+  - authenticated `/api/v1` integration routes for animals, cages, experiments, projects, samples, and export discovery, including audited external sample intake
   - in-app notification inbox with admin-editable delivery toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift
   - outbound notification digest preview and webhook delivery endpoint
   - quarantine and sentinel tracking workspace
@@ -45,7 +45,7 @@ Current delivery level:
   - outbound email uses a generic HTTP provider contract; production deployment still needs real provider URL and token configuration
 
 - Still missing relative to the original blueprint:
-  - external integration API beyond the current read-only `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
+  - broader external integration API beyond the current sample intake, read-mostly `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
 
 ## Done
 
@@ -75,6 +75,7 @@ Current delivery level:
 - [x] Add longer-range study demand forecasting beyond the current short-horizon planner
 - [x] Add a reusable local Playwright verification path for repeated e2e checks
 - [x] Add a read-only Prisma dev DB doctor and direct local prep path for WSL/local setup failures
+- [x] Add an audited external sample intake API under `/api/v1/samples`
 
 ## In Progress
 
@@ -82,7 +83,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external integration API slice beyond the current read-only `/api/v1`, CSV exports, and notification delivery routes
+- [ ] Define the next external write integration after sample intake, likely genotype result intake or experiment assignment sync
 
 ## Verification Snapshot
 
@@ -92,10 +93,12 @@ Most recently verified in this branch:
 - `npm run typecheck`
 - `npx vitest run tests/unit/db-doctor.test.ts --reporter=verbose`
 - `npx vitest run tests/unit/db-prepare-local.test.ts --reporter=verbose`
+- `npx vitest run tests/unit/integration-api-routes.test.ts --reporter=verbose`
 - `npm run db:doctor`
 - `npm run db:prepare:local`
 - `npx vitest run tests/unit/colony.test.ts -t 'ranks breeding suggestions|builds a live colony forecast' --reporter=verbose`
 - `npm run e2e:server`
+- `npm run verify:e2e:reuse:wsl -- --grep 'researcher can query the authenticated integration API surface' --project=chromium`
 - `npm run verify:e2e:reuse:wsl -- --grep 'seeded user can log in and reach the dashboard' --project=chromium`
 - `npm run verify:e2e:wsl -- --grep 'admin can review breeding overview and generator suggestions|researcher can review the forecast workspace'`
 - `npm run verify:e2e:wsl -- --grep 'researcher can review the forecast workspace'`
@@ -121,6 +124,7 @@ Notes:
 - On 2026-04-30, reusable Playwright verification was added through `E2E_REUSE_EXISTING_SERVER=1`; keep `npm run e2e:server` running in another shell for repeated local checks.
 - On 2026-04-30, `npm run db:doctor` was added as a read-only preflight for `DATABASE_URL` and `DIRECT_DATABASE_URL`; it reports the configured host, port, database, TCP reachability, and PostgreSQL startup-protocol status before expensive verification starts.
 - On 2026-04-30, local e2e server bootstrap switched to reseed-only startup to avoid repeated `prisma db push` cost and prepared-statement failures; use `db:prepare:local` explicitly after first setup, schema changes, or DB reset.
+- On 2026-04-30, `/api/v1/samples` was added for external sample inventory integrations, with filtered sample reads, audited POST intake, idempotent duplicate handling for the same animal, and read-only role rejection.
 - The latest notification delivery unit suite covers webhook delivery and HTTP email-provider delivery with a mocked provider endpoint.
 - The latest breeding and forecast smoke checks passed on both Playwright `chromium` and `mobile` projects after adding line-specific fertility models and configurable long-range runway forecasting.
 - The latest targeted colony unit coverage checks breeding line-fertility output and long-range forecast summary fields.

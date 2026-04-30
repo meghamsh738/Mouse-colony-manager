@@ -62,6 +62,27 @@ export function buildItemResponse<T>(data: T) {
   });
 }
 
+export function buildMutationResponse<T>(
+  data: T,
+  input: {
+    status: number;
+    message: string;
+    created: boolean;
+  },
+) {
+  return NextResponse.json(
+    {
+      data,
+      meta: {
+        created: input.created,
+        message: input.message,
+        generatedAt: new Date().toISOString(),
+      },
+    },
+    { status: input.status },
+  );
+}
+
 export function buildIndexResponse<T>(data: T) {
   return NextResponse.json({
     data,
@@ -73,4 +94,14 @@ export function buildIndexResponse<T>(data: T) {
 
 export function buildNotFoundResponse(entityLabel: string, entityId: string) {
   return NextResponse.json({ error: `${entityLabel} not found`, entityId }, { status: 404 });
+}
+
+export function buildApiErrorResponse(error: string, status = 400, details?: unknown) {
+  return NextResponse.json(
+    {
+      error,
+      ...(details ? { details } : {}),
+    },
+    { status },
+  );
 }

@@ -2,6 +2,8 @@ import { getAnimalDetailView, getAnimalListView } from "@/lib/animals-read";
 import { getCageDetailView, getCageListView } from "@/lib/cages-read";
 import { getExperimentOverviewView } from "@/lib/experiments-read";
 import { prisma } from "@/lib/prisma";
+import { getSampleInventoryView } from "@/lib/samples-read";
+import type { SampleStatus } from "@/lib/types";
 
 const defaultListLimit = 100;
 const maxListLimit = 500;
@@ -37,6 +39,35 @@ export type ProjectApiFilters = {
   search: string;
   owner: string;
   limit: number;
+};
+
+export type SampleApiFilters = {
+  search: string;
+  status: string;
+  animalCode: string;
+  projectCode: string;
+  limit: number;
+};
+
+export type CreateSampleApiInput = {
+  animalId?: string;
+  animalCode?: string;
+  projectId?: string;
+  projectCode?: string;
+  sampleLabel: string;
+  sampleType: string;
+  status: SampleStatus;
+  collectedAt: string;
+  storageLocation?: string;
+  quantityLabel?: string;
+  notes?: string;
+};
+
+export type ResolvedSampleApiInput = {
+  animalCode: string;
+  animalId: string;
+  projectCode: string | null;
+  projectId?: string;
 };
 
 function normalizeText(value?: string | null) {
@@ -109,6 +140,16 @@ export function parseProjectApiFilters(searchParams: URLSearchParams): ProjectAp
   return {
     search: normalizeText(searchParams.get("search")),
     owner: normalizeText(searchParams.get("owner")),
+    limit: parseLimit(searchParams.get("limit")),
+  };
+}
+
+export function parseSampleApiFilters(searchParams: URLSearchParams): SampleApiFilters {
+  return {
+    search: normalizeText(searchParams.get("search")),
+    status: normalizeText(searchParams.get("status")) || "all",
+    animalCode: normalizeText(searchParams.get("animalCode")),
+    projectCode: normalizeText(searchParams.get("projectCode")),
     limit: parseLimit(searchParams.get("limit")),
   };
 }
@@ -285,12 +326,132 @@ export async function getProjectApiList(filters: ProjectApiFilters) {
   };
 }
 
+export async function getSampleApiList(filters: SampleApiFilters) {
+  const samples = await getSampleInventoryView();
+  const search = normalizeSearch(filters.search);
+  const animalCode = normalizeSearch(filters.animalCode);
+  const projectCode = normalizeSearch(filters.projectCode);
+
+  const filtered = samples.filter((sample) => {
+    const matchesSearch = search
+      ? buildHaystack([
+          sample.sampleLabel,
+          sample.sampleType,
+          sample.status,
+          sample.animalCode,
+          sample.labId,
+          sample.projectCode,
+          sample.storageLocation,
+          sample.quantityLabel,
+          sample.notes,
+        ]).includes(search)
+      : true;
+    const matchesStatus = filters.status !== "all" ? sample.status === filters.status : true;
+    const matchesAnimal = animalCode ? sample.animalCode.toLowerCase().includes(animalCode) : true;
+    const matchesProject = projectCode ? sample.projectCode?.toLowerCase().includes(projectCode) : true;
+
+    return matchesSearch && matchesStatus && matchesAnimal && matchesProject;
+  });
+
+  return {
+    data: applyLimit(filtered, filters.limit),
+    total: filtered.length,
+  };
+}
+
 export async function getAnimalApiDetail(animalId: string) {
   return getAnimalDetailView(animalId);
 }
 
 export async function getCageApiDetail(cageId: string) {
   return getCageDetailView(cageId);
+}
+
+export async function resolveSampleApiInput(input: CreateSampleApiInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedSampleApiInput;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const animalRef = input.animalId?.trim();
+  const animalCode = input.animalCode?.trim();
+  const projectRef = input.projectId?.trim();
+  const projectCode = input.projectCode?.trim();
+
+  if (!animalRef && !animalCode) {
+    return { ok: false, message: "Provide animalId or animalCode.", status: 400 };
+  }
+
+  const [animal, project] = await Promise.all([
+    prisma.animal.findFirst({
+      where: {
+        OR: [
+          ...(animalRef ? [{ id: animalRef }, { animalId: animalRef }] : []),
+          ...(animalCode ? [{ animalId: animalCode }, { labId: animalCode }] : []),
+        ],
+      },
+      select: {
+        id: true,
+        animalId: true,
+        labId: true,
+      },
+    }),
+    projectRef || projectCode
+      ? prisma.project.findFirst({
+          where: {
+            OR: [
+              ...(projectRef ? [{ id: projectRef }, { projectCode: projectRef }] : []),
+              ...(projectCode ? [{ projectCode }] : []),
+            ],
+          },
+          select: {
+            id: true,
+            projectCode: true,
+          },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (!animal) {
+    return { ok: false, message: "Animal not found for the supplied animalId or animalCode.", status: 404 };
+  }
+
+  if ((projectRef || projectCode) && !project) {
+    return { ok: false, message: "Project not found for the supplied projectId or projectCode.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      animalCode: animal.animalId,
+      animalId: animal.id,
+      projectCode: project?.projectCode ?? null,
+      projectId: project?.id,
+    },
+  };
+}
+
+export async function getSampleApiRecordById(sampleId: string) {
+  const record = await prisma.sampleRecord.findUnique({
+    where: { id: sampleId },
+    select: sampleApiSelect,
+  });
+
+  return record ? formatSampleApiRecord(record) : null;
+}
+
+export async function getSampleApiRecordByLabel(sampleLabel: string) {
+  const record = await prisma.sampleRecord.findUnique({
+    where: { sampleLabel },
+    select: sampleApiSelect,
+  });
+
+  return record ? formatSampleApiRecord(record) : null;
 }
 
 const exportCatalog = [
@@ -340,6 +501,12 @@ const resourceCatalog = [
     description: "Project ownership and allocation summaries.",
   },
   {
+    name: "samples",
+    path: "/api/v1/samples",
+    description: "Sample inventory summaries and external sample intake.",
+    methods: ["GET", "POST"],
+  },
+  {
     name: "exports",
     path: "/api/v1/exports",
     description: "Discover the available operational CSV exports.",
@@ -364,4 +531,64 @@ export function getIntegrationExportCatalog(origin: string) {
     path: `/api/exports/${entry.entity}`,
     csvUrl: `${origin}/api/exports/${entry.entity}`,
   }));
+}
+
+const sampleApiSelect = {
+  id: true,
+  sampleLabel: true,
+  sampleType: true,
+  status: true,
+  collectedAt: true,
+  storageLocation: true,
+  quantityLabel: true,
+  notes: true,
+  createdAt: true,
+  animalId: true,
+  animal: {
+    select: {
+      animalId: true,
+      labId: true,
+    },
+  },
+  project: {
+    select: {
+      projectCode: true,
+    },
+  },
+} as const;
+
+function formatSampleApiRecord(record: {
+  id: string;
+  sampleLabel: string;
+  sampleType: string;
+  status: SampleStatus;
+  collectedAt: Date;
+  storageLocation: string | null;
+  quantityLabel: string | null;
+  notes: string | null;
+  createdAt: Date;
+  animalId: string;
+  animal: {
+    animalId: string;
+    labId: string;
+  };
+  project: {
+    projectCode: string;
+  } | null;
+}) {
+  return {
+    id: record.id,
+    sampleLabel: record.sampleLabel,
+    sampleType: record.sampleType,
+    status: record.status,
+    collectedAt: record.collectedAt.toISOString(),
+    storageLocation: record.storageLocation,
+    quantityLabel: record.quantityLabel,
+    notes: record.notes,
+    createdAt: record.createdAt.toISOString(),
+    animalId: record.animalId,
+    animalCode: record.animal.animalId,
+    labId: record.animal.labId,
+    projectCode: record.project?.projectCode ?? null,
+  };
 }

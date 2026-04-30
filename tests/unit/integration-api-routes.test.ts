@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SEEDED_DEV_EMAILS } from "@/lib/seed-metadata";
+import { prisma } from "@/lib/prisma";
 import { seedDatabase } from "../../prisma/seed-database";
 
 const { authMock } = vi.hoisted(() => ({
@@ -18,6 +19,17 @@ function authenticatedSession() {
       email: SEEDED_DEV_EMAILS.admin,
       name: "Colony Admin",
       role: "admin" as const,
+    },
+  };
+}
+
+function readOnlySession() {
+  return {
+    user: {
+      id: "user-readonly",
+      email: SEEDED_DEV_EMAILS.readonly,
+      name: "Readonly User",
+      role: "read_only" as const,
     },
   };
 }
@@ -78,6 +90,24 @@ describe("integration API routes", () => {
     expect(payload.data.genotypingRecords.length).toBeGreaterThan(0);
   });
 
+  it("publishes the integration index including sample intake", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { GET } = await import("@/app/api/v1/route");
+    const response = await GET(new Request("http://localhost:3000/api/v1"));
+    const payload = (await response.json()) as {
+      data: {
+        resources: Array<{ name: string; path: string; methods?: string[] }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.data.resources.find((resource) => resource.name === "samples")).toMatchObject({
+      path: "/api/v1/samples",
+      methods: ["GET", "POST"],
+    });
+  });
+
   it("publishes the export discovery catalog", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -94,5 +124,122 @@ describe("integration API routes", () => {
       csvUrl: "http://localhost:3000/api/exports/animals",
       supportedFilters: ["search", "status", "availableOnly"],
     });
+  });
+
+  it("returns filtered sample inventory from the authenticated sample route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { GET } = await import("@/app/api/v1/samples/route");
+    const response = await GET(new Request("http://localhost:3000/api/v1/samples?status=stored&limit=5"));
+    const payload = (await response.json()) as {
+      data: Array<{ status: string; sampleLabel: string; animalCode: string }>;
+      meta: { count: number; filters: Record<string, string> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.filters).toMatchObject({ status: "stored" });
+    expect(payload.meta.count).toBeGreaterThan(0);
+    expect(payload.data.every((sample) => sample.status === "stored")).toBe(true);
+  });
+
+  it("creates sample records through the external sample intake route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/samples/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/samples", {
+        method: "POST",
+        body: JSON.stringify({
+          animalCode: "CM-26003",
+          projectCode: "PRJ-MICRO-24",
+          sampleLabel: "LIMS-API-001",
+          sampleType: "Tail DNA",
+          status: "stored",
+          collectedAt: "2026-04-05",
+          storageLocation: "Freezer API / Box 1",
+          quantityLabel: "20 uL",
+          notes: "Imported through the external sample API.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { animalCode: string; projectCode: string; sampleLabel: string; status: string };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("LIMS-API-001");
+    expect(payload.data).toMatchObject({
+      animalCode: "CM-26003",
+      projectCode: "PRJ-MICRO-24",
+      sampleLabel: "LIMS-API-001",
+      status: "stored",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "sample_record",
+          action: "create",
+          newValue: {
+            path: ["sampleLabel"],
+            equals: "LIMS-API-001",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated sample intake for the same animal as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/samples/route");
+    const requestBody = {
+      animalCode: "CM-26003",
+      sampleLabel: "LIMS-API-REPEAT",
+      sampleType: "Serum",
+      status: "stored",
+      collectedAt: "2026-04-05",
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/samples", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/samples", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as { meta: { created: boolean; message: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already recorded");
+  });
+
+  it("rejects read-only sample intake requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/samples/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/samples", {
+        method: "POST",
+        body: JSON.stringify({
+          animalCode: "CM-26003",
+          sampleLabel: "LIMS-API-READONLY",
+          sampleType: "Tail DNA",
+          status: "stored",
+          collectedAt: "2026-04-05",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record new sample inventory." });
   });
 });
