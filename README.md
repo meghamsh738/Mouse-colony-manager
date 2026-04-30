@@ -88,12 +88,16 @@ npm run test:e2e:wsl
 npm run test:e2e:smoke:wsl
 npm run verify
 npm run verify:e2e
+npm run verify:e2e:reuse
 npm run verify:e2e:wsl
+npm run verify:e2e:reuse:wsl
 npm run verify:all
 npm run verify:all:wsl
+npm run db:doctor
 npm run db:seed
 npm run db:push
 npm run db:prepare
+npm run db:prepare:local
 npm run db:prepare:ci
 ```
 
@@ -153,7 +157,17 @@ If you want to debug the production-like e2e server outside Playwright, you can 
 npm run e2e:server
 ```
 
-That server bootstrap now applies the local schema automatically with `db:prepare`. In CI, the same script falls back to `db:seed` because migrations are already applied earlier in the workflow.
+That server bootstrap reseeds the database but does not rerun `prisma db push`, which keeps repeated local e2e starts faster and avoids Prisma dev prepared-statement state. Run `npm run db:prepare:local` after first setup, schema changes, or DB reset; it uses the direct database URL for Prisma CLI prep to avoid pooled-connection issues.
+
+For repeated local browser checks, keep that server running in one terminal and reuse it from another:
+
+```bash
+npm run e2e:server
+npm run verify:e2e:reuse -- --grep 'seeded user can log in and reach the dashboard' --project=chromium
+npm run verify:e2e:reuse:wsl -- --grep 'seeded user can log in and reach the dashboard' --project=chromium
+```
+
+Use the normal `verify:e2e` or `verify:e2e:wsl` path when you need Playwright to own server startup. Restart the reusable server after code, environment, schema, or seed changes.
 
 For the fastest meaningful browser check, use the seeded-login smoke:
 
@@ -161,6 +175,14 @@ For the fastest meaningful browser check, use the seeded-login smoke:
 npm run test:e2e:smoke
 npm run test:e2e:smoke:wsl
 ```
+
+If local Prisma-backed tests fail before the app starts, run the read-only DB doctor first:
+
+```bash
+npm run db:doctor
+```
+
+If the configured endpoint is down, start it with `npx prisma dev -d -n colony-maintenance`, then run `npm run db:prepare:local` and retry `npm run db:doctor`.
 
 On Ubuntu/Debian WSL without `sudo`, Playwright can fail to launch Chromium because shared libraries such as `libnspr4.so` are not present. Use the rootless wrapper scripts below to download and extract the required packages into `~/.cache/colony-maintenance/playwright-libs` and rerun Playwright with the correct `LD_LIBRARY_PATH`:
 

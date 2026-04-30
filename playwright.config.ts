@@ -3,6 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 const e2eHost = process.env.E2E_HOST ?? "127.0.0.1";
 const e2ePort = process.env.E2E_PORT ?? "3005";
 const e2eBaseUrl = process.env.E2E_BASE_URL ?? `http://localhost:${e2ePort}`;
+const reuseExistingServer =
+  process.env.E2E_REUSE_EXISTING_SERVER === "1" || process.env.E2E_REUSE_EXISTING_SERVER === "true";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -17,7 +19,7 @@ export default defineConfig({
   webServer: {
     command: "bash scripts/start-e2e-server.sh",
     url: e2eBaseUrl,
-    reuseExistingServer: false,
+    reuseExistingServer,
     env: {
       ...process.env,
       E2E_HOST: e2eHost,

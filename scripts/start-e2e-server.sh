@@ -14,7 +14,7 @@ if [[ -z "$E2E_DB_PREPARE_SCRIPT" ]]; then
   if [[ "${CI:-}" == "true" ]]; then
     E2E_DB_PREPARE_SCRIPT="db:seed"
   else
-    E2E_DB_PREPARE_SCRIPT="db:prepare"
+    E2E_DB_PREPARE_SCRIPT="db:seed"
   fi
 fi
 

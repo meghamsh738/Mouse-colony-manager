@@ -1,6 +1,6 @@
 # Colony Maintenance Tracker
 
-Last updated: 2026-04-26
+Last updated: 2026-04-30
 
 ## Overall Status
 
@@ -39,8 +39,8 @@ Current delivery level:
   - configurable longer-range study demand forecasting
 
 - Working, but still rough:
-  - e2e reliability now depends on per-test reseeding, which is correct but slow
-  - Prisma local dev DB remains the main source of flaky local verification if `prisma dev` drops; on 2026-04-26 the local `localhost:51214` endpoint was temporarily unavailable before recovering for targeted reruns
+  - e2e reliability now depends on per-test reseeding, which is correct but slow; repeated local runs can now reuse an already-started e2e server to avoid rebuilding each time
+  - Prisma local dev DB remains the main source of flaky local verification if `prisma dev` drops; `npm run db:doctor` now fails fast with endpoint and PostgreSQL startup-protocol status, and local e2e prep uses the direct database URL
   - attachment persistence is local-disk backed under `public/uploads` for MVP, not object storage
   - outbound email uses a generic HTTP provider contract; production deployment still needs real provider URL and token configuration
 
@@ -73,6 +73,8 @@ Current delivery level:
 - [x] Add facility-specific fertility-history settings to tune breeding helper penalties
 - [x] Add line-specific fertility models for strains with known productivity differences
 - [x] Add longer-range study demand forecasting beyond the current short-horizon planner
+- [x] Add a reusable local Playwright verification path for repeated e2e checks
+- [x] Add a read-only Prisma dev DB doctor and direct local prep path for WSL/local setup failures
 
 ## In Progress
 
@@ -80,8 +82,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Improve local verification speed by reducing the cost of the Playwright web-server bootstrap
-- [ ] Make the local Prisma dev DB setup more resilient or documented so `verify` is less fragile on WSL
+- [ ] Define the next external integration API slice beyond the current read-only `/api/v1`, CSV exports, and notification delivery routes
 
 ## Verification Snapshot
 
@@ -89,7 +90,13 @@ Most recently verified in this branch:
 
 - `npm run prisma:validate`
 - `npm run typecheck`
+- `npx vitest run tests/unit/db-doctor.test.ts --reporter=verbose`
+- `npx vitest run tests/unit/db-prepare-local.test.ts --reporter=verbose`
+- `npm run db:doctor`
+- `npm run db:prepare:local`
 - `npx vitest run tests/unit/colony.test.ts -t 'ranks breeding suggestions|builds a live colony forecast' --reporter=verbose`
+- `npm run e2e:server`
+- `npm run verify:e2e:reuse:wsl -- --grep 'seeded user can log in and reach the dashboard' --project=chromium`
 - `npm run verify:e2e:wsl -- --grep 'admin can review breeding overview and generator suggestions|researcher can review the forecast workspace'`
 - `npm run verify:e2e:wsl -- --grep 'researcher can review the forecast workspace'`
 - `git diff --check`
@@ -111,6 +118,9 @@ Most recently verified in this branch:
 Notes:
 
 - On 2026-04-26, `localhost:51214` initially had no listener and `npx prisma dev -d -n colony-maintenance` stalled in this WSL/mounted-workspace session; the listener later recovered and the targeted DB-backed unit and e2e checks above passed.
+- On 2026-04-30, reusable Playwright verification was added through `E2E_REUSE_EXISTING_SERVER=1`; keep `npm run e2e:server` running in another shell for repeated local checks.
+- On 2026-04-30, `npm run db:doctor` was added as a read-only preflight for `DATABASE_URL` and `DIRECT_DATABASE_URL`; it reports the configured host, port, database, TCP reachability, and PostgreSQL startup-protocol status before expensive verification starts.
+- On 2026-04-30, local e2e server bootstrap switched to reseed-only startup to avoid repeated `prisma db push` cost and prepared-statement failures; use `db:prepare:local` explicitly after first setup, schema changes, or DB reset.
 - The latest notification delivery unit suite covers webhook delivery and HTTP email-provider delivery with a mocked provider endpoint.
 - The latest breeding and forecast smoke checks passed on both Playwright `chromium` and `mobile` projects after adding line-specific fertility models and configurable long-range runway forecasting.
 - The latest targeted colony unit coverage checks breeding line-fertility output and long-range forecast summary fields.
