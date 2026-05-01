@@ -7,12 +7,13 @@ import {
   compactApiMeta,
   requireApiUser,
 } from "@/lib/api-route";
-import { createSampleRecord } from "@/lib/colony-write";
+import { createSampleRecord, updateSampleRecord } from "@/lib/colony-write";
 import {
   getSampleApiList,
   getSampleApiRecordById,
   getSampleApiRecordByLabel,
   parseSampleApiFilters,
+  resolveSampleApiRecordReference,
   resolveSampleApiInput,
 } from "@/lib/integration-api";
 
@@ -28,6 +29,15 @@ const createSampleApiSchema = z.object({
   storageLocation: z.string().trim().max(120).optional(),
   quantityLabel: z.string().trim().max(80).optional(),
   notes: z.string().trim().max(400).optional(),
+});
+
+const updateSampleApiSchema = z.object({
+  sampleId: z.string().trim().min(1).optional(),
+  sampleLabel: z.string().trim().min(3).max(80).optional(),
+  status: z.enum(["collected", "stored", "allocated", "consumed", "discarded"]).optional(),
+  storageLocation: z.string().trim().max(120).nullable().optional(),
+  quantityLabel: z.string().trim().max(80).nullable().optional(),
+  notes: z.string().trim().max(400).nullable().optional(),
 });
 
 export async function GET(request: Request) {
@@ -120,6 +130,60 @@ export async function POST(request: Request) {
   return buildMutationResponse(sample, {
     status: 201,
     created: true,
+    message: result.message,
+  });
+}
+
+export async function PATCH(request: Request) {
+  const auth = await requireApiUser();
+
+  if ("response" in auth) {
+    return auth.response;
+  }
+
+  if (auth.user.role === "read_only") {
+    return buildApiErrorResponse("Your role cannot update sample inventory.", 403);
+  }
+
+  const body = await parseJsonBody(request);
+  const parsed = updateSampleApiSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return buildApiErrorResponse("Invalid sample update payload.", 400, parsed.error.flatten().fieldErrors);
+  }
+
+  const resolved = await resolveSampleApiRecordReference(parsed.data);
+
+  if (!resolved.ok) {
+    return buildApiErrorResponse(resolved.message, resolved.status);
+  }
+
+  const result = await updateSampleRecord(
+    {
+      sampleId: resolved.value.sampleId,
+      status: parsed.data.status,
+      storageLocation: parsed.data.storageLocation,
+      quantityLabel: parsed.data.quantityLabel,
+      notes: parsed.data.notes,
+    },
+    { id: auth.user.id, role: auth.user.role },
+  );
+
+  if (!result.ok || !result.entityId) {
+    const status = result.message.includes("role cannot") ? 403 : 400;
+
+    return buildApiErrorResponse(result.message, status);
+  }
+
+  const sample = await getSampleApiRecordById(result.entityId);
+
+  if (!sample) {
+    return buildApiErrorResponse("Sample was updated but could not be read back.", 500);
+  }
+
+  return buildMutationResponse(sample, {
+    status: 200,
+    created: false,
     message: result.message,
   });
 }

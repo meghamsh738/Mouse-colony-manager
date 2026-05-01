@@ -63,6 +63,11 @@ export type CreateSampleApiInput = {
   notes?: string;
 };
 
+export type SampleApiRecordReferenceInput = {
+  sampleId?: string;
+  sampleLabel?: string;
+};
+
 export type CreateGenotypeApiInput = {
   animalId?: string;
   animalCode?: string;
@@ -102,6 +107,11 @@ export type ResolvedSampleApiInput = {
   animalId: string;
   projectCode: string | null;
   projectId?: string;
+};
+
+export type ResolvedSampleApiRecordReference = {
+  sampleId: string;
+  sampleLabel: string;
 };
 
 export type ResolvedGenotypeApiInput = {
@@ -697,6 +707,50 @@ export async function getSampleApiRecordByLabel(sampleLabel: string) {
   return record ? formatSampleApiRecord(record) : null;
 }
 
+export async function resolveSampleApiRecordReference(input: SampleApiRecordReferenceInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedSampleApiRecordReference;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const sampleId = input.sampleId?.trim();
+  const sampleLabel = input.sampleLabel?.trim();
+
+  if (!sampleId && !sampleLabel) {
+    return { ok: false, message: "Provide sampleId or sampleLabel.", status: 400 };
+  }
+
+  const record = await prisma.sampleRecord.findFirst({
+    where: {
+      OR: [
+        ...(sampleId ? [{ id: sampleId }, { sampleLabel: sampleId }] : []),
+        ...(sampleLabel ? [{ sampleLabel }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      sampleLabel: true,
+    },
+  });
+
+  if (!record) {
+    return { ok: false, message: "Sample record not found for the supplied sampleId or sampleLabel.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      sampleId: record.id,
+      sampleLabel: record.sampleLabel,
+    },
+  };
+}
+
 export async function getGenotypeApiRecordById(recordId: string) {
   const record = await prisma.genotypingRecord.findUnique({
     where: { id: recordId },
@@ -840,8 +894,8 @@ const resourceCatalog = [
   {
     name: "samples",
     path: "/api/v1/samples",
-    description: "Sample inventory summaries and external sample intake.",
-    methods: ["GET", "POST"],
+    description: "Sample inventory summaries plus external sample intake and lifecycle updates.",
+    methods: ["GET", "POST", "PATCH"],
   },
   {
     name: "genotypes",

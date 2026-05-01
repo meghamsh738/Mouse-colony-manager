@@ -128,6 +128,14 @@ type CreateSampleRecordInput = {
   notes?: string;
 };
 
+type UpdateSampleRecordInput = {
+  sampleId: string;
+  status?: SampleStatus;
+  storageLocation?: string | null;
+  quantityLabel?: string | null;
+  notes?: string | null;
+};
+
 type CreateCryostorageRecordInput = {
   strainId: string;
   projectId?: string;
@@ -2680,6 +2688,112 @@ export async function createSampleRecord(
     ok: true,
     message: `Sample ${normalizedSampleLabel} recorded for ${animal.animalId}.`,
     entityId: recordId,
+  };
+}
+
+export async function updateSampleRecord(
+  input: UpdateSampleRecordInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canRecordSample(actor.role)) {
+    return { ok: false, message: "Your role cannot update sample inventory." };
+  }
+
+  const sample = await prisma.sampleRecord.findUnique({
+    where: { id: input.sampleId },
+    select: {
+      id: true,
+      sampleLabel: true,
+      status: true,
+      storageLocation: true,
+      quantityLabel: true,
+      notes: true,
+      animal: {
+        select: {
+          animalId: true,
+        },
+      },
+    },
+  });
+
+  if (!sample) {
+    return { ok: false, message: "Sample record not found." };
+  }
+
+  const normalized = {
+    status: input.status,
+    storageLocation:
+      input.storageLocation === undefined ? undefined : input.storageLocation?.trim() || null,
+    quantityLabel: input.quantityLabel === undefined ? undefined : input.quantityLabel?.trim() || null,
+    notes: input.notes === undefined ? undefined : input.notes?.trim() || null,
+  };
+  const updateData: {
+    status?: SampleStatus;
+    storageLocation?: string | null;
+    quantityLabel?: string | null;
+    notes?: string | null;
+  } = {};
+  const previousValue: Record<string, Prisma.InputJsonValue | null> = {};
+  const newValue: Record<string, Prisma.InputJsonValue | null> = {};
+
+  if (normalized.status !== undefined && normalized.status !== sample.status) {
+    updateData.status = normalized.status;
+    previousValue.status = sample.status;
+    newValue.status = normalized.status;
+  }
+
+  if (normalized.storageLocation !== undefined && normalized.storageLocation !== sample.storageLocation) {
+    updateData.storageLocation = normalized.storageLocation;
+    previousValue.storageLocation = sample.storageLocation;
+    newValue.storageLocation = normalized.storageLocation;
+  }
+
+  if (normalized.quantityLabel !== undefined && normalized.quantityLabel !== sample.quantityLabel) {
+    updateData.quantityLabel = normalized.quantityLabel;
+    previousValue.quantityLabel = sample.quantityLabel;
+    newValue.quantityLabel = normalized.quantityLabel;
+  }
+
+  if (normalized.notes !== undefined && normalized.notes !== sample.notes) {
+    updateData.notes = normalized.notes;
+    previousValue.notes = sample.notes;
+    newValue.notes = normalized.notes;
+  }
+
+  if (!Object.keys(updateData).length) {
+    return {
+      ok: true,
+      message: `Sample ${sample.sampleLabel} is already up to date for ${sample.animal.animalId}.`,
+      entityId: sample.id,
+    };
+  }
+
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.sampleRecord.update({
+      where: { id: sample.id },
+      data: updateData,
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "sample_record",
+        entityId: sample.id,
+        action: "update",
+        previousValue: previousValue as Prisma.InputJsonObject,
+        newValue: newValue as Prisma.InputJsonObject,
+        timestamp,
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `Sample ${sample.sampleLabel} updated for ${sample.animal.animalId}.`,
+    entityId: sample.id,
   };
 }
 

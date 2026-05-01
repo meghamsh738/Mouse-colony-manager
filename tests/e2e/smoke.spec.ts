@@ -291,6 +291,29 @@ test("researcher can query the authenticated integration API surface", async ({ 
     status: "stored",
   });
 
+  const sampleLifecycleResponse = await page.request.patch("/api/v1/samples", {
+    data: {
+      sampleLabel: "API-SMOKE-001",
+      status: "allocated",
+      storageLocation: "API allocation rack / slot 2",
+      quantityLabel: "10 uL remaining",
+      notes: "Allocated by the authenticated integration API smoke.",
+    },
+  });
+  const sampleLifecycle = {
+    status: sampleLifecycleResponse.status(),
+    body: await sampleLifecycleResponse.json(),
+  };
+
+  expect(sampleLifecycle.status).toBe(200);
+  expect(sampleLifecycle.body.meta.created).toBe(false);
+  expect(sampleLifecycle.body.data).toMatchObject({
+    sampleLabel: "API-SMOKE-001",
+    status: "allocated",
+    storageLocation: "API allocation rack / slot 2",
+    quantityLabel: "10 uL remaining",
+  });
+
   const genotypeIntakeResponse = await page.request.post("/api/v1/genotypes", {
     data: {
       animalCode: "CM-25009",

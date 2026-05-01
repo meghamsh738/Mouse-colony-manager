@@ -23,7 +23,7 @@ Current delivery level:
   - rules/settings and audit visibility
   - CSV exports
   - local attachment upload and viewing for genotype and welfare records
-  - authenticated `/api/v1` integration routes for animals, cages, experiments, projects, samples, genotype intake, experiment assignment sync, and export discovery, including audited external sample, genotype result, planned-assignment intake, and assignment promote/rollback status sync
+  - authenticated `/api/v1` integration routes for animals, cages, experiments, projects, samples, genotype intake, experiment assignment sync, and export discovery, including audited external sample intake, sample lifecycle updates, genotype result intake, planned-assignment intake, and assignment promote/rollback status sync
   - in-app notification inbox with admin-editable delivery toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift
   - outbound notification digest preview and webhook delivery endpoint
   - quarantine and sentinel tracking workspace
@@ -76,6 +76,7 @@ Current delivery level:
 - [x] Add a reusable local Playwright verification path for repeated e2e checks
 - [x] Add a read-only Prisma dev DB doctor and direct local prep path for WSL/local setup failures
 - [x] Add an audited external sample intake API under `/api/v1/samples`
+- [x] Add audited external sample lifecycle update API under `/api/v1/samples`
 - [x] Add an audited external genotype result intake API under `/api/v1/genotypes`
 - [x] Add an audited external planned experiment assignment sync API under `/api/v1/experiments/assignments`
 - [x] Add audited external experiment assignment promote/rollback status sync under `/api/v1/experiments/assignments`
@@ -86,7 +87,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external write integration after sample, genotype, and experiment assignment intake/status sync, likely external equipment event ingestion or richer sample lifecycle updates
+- [ ] Define the next external write integration after sample, genotype, and experiment assignment intake/status sync, likely external equipment event ingestion or broader attachment/document handoff
 
 ## Verification Snapshot
 
@@ -128,6 +129,7 @@ Notes:
 - On 2026-04-30, `npm run db:doctor` was added as a read-only preflight for `DATABASE_URL` and `DIRECT_DATABASE_URL`; it reports the configured host, port, database, TCP reachability, and PostgreSQL startup-protocol status before expensive verification starts.
 - On 2026-04-30, local e2e server bootstrap switched to reseed-only startup to avoid repeated `prisma db push` cost and prepared-statement failures; use `db:prepare:local` explicitly after first setup, schema changes, or DB reset.
 - On 2026-04-30, `/api/v1/samples` was added for external sample inventory integrations, with filtered sample reads, audited POST intake, idempotent duplicate handling for the same animal, and read-only role rejection.
+- On 2026-05-01, `/api/v1/samples` was extended with audited `PATCH` sample lifecycle updates for status, storage location, quantity, and notes, so external LIMS workflows can update downstream sample state.
 - On 2026-05-01, `/api/v1/genotypes` was added for external genotype result integrations, with audited POST intake, animal/marker code resolution, duplicate handling for repeated vendor submissions, and read-only role rejection.
 - On 2026-05-01, `/api/v1/experiments/assignments` was added for external scheduling integrations, with audited planned-assignment sync, experiment/animal code resolution, duplicate handling for repeated scheduler submissions, and read-only role rejection.
 - On 2026-05-01, `/api/v1/experiments/assignments` was extended with `PATCH` promote/rollback actions for external assignment status sync using the same audited promotion and rollback workflow as the app UI.

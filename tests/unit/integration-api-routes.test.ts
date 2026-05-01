@@ -104,7 +104,7 @@ describe("integration API routes", () => {
     expect(response.status).toBe(200);
     expect(payload.data.resources.find((resource) => resource.name === "samples")).toMatchObject({
       path: "/api/v1/samples",
-      methods: ["GET", "POST"],
+      methods: ["GET", "POST", "PATCH"],
     });
     expect(payload.data.resources.find((resource) => resource.name === "genotypes")).toMatchObject({
       path: "/api/v1/genotypes",
@@ -230,6 +230,75 @@ describe("integration API routes", () => {
     expect(payload.meta.message).toContain("already recorded");
   });
 
+  it("updates sample lifecycle fields through the external sample route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { PATCH, POST } = await import("@/app/api/v1/samples/route");
+    const createResponse = await POST(
+      new Request("http://localhost:3000/api/v1/samples", {
+        method: "POST",
+        body: JSON.stringify({
+          animalCode: "CM-26003",
+          sampleLabel: "LIMS-API-LIFECYCLE",
+          sampleType: "Serum",
+          status: "stored",
+          collectedAt: "2026-04-05",
+          storageLocation: "Freezer API / Box 1",
+          quantityLabel: "20 uL",
+        }),
+      }),
+    );
+
+    expect(createResponse.status).toBe(201);
+
+    const updateResponse = await PATCH(
+      new Request("http://localhost:3000/api/v1/samples", {
+        method: "PATCH",
+        body: JSON.stringify({
+          sampleLabel: "LIMS-API-LIFECYCLE",
+          status: "allocated",
+          storageLocation: "Study allocation rack 4",
+          quantityLabel: "10 uL remaining",
+          notes: "Allocated by external LIMS workflow.",
+        }),
+      }),
+    );
+    const payload = (await updateResponse.json()) as {
+      data: {
+        sampleLabel: string;
+        status: string;
+        storageLocation: string;
+        quantityLabel: string;
+        notes: string;
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(updateResponse.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("LIMS-API-LIFECYCLE");
+    expect(payload.data).toMatchObject({
+      sampleLabel: "LIMS-API-LIFECYCLE",
+      status: "allocated",
+      storageLocation: "Study allocation rack 4",
+      quantityLabel: "10 uL remaining",
+      notes: "Allocated by external LIMS workflow.",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "sample_record",
+          action: "update",
+          newValue: {
+            path: ["status"],
+            equals: "allocated",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
   it("rejects read-only sample intake requests", async () => {
     authMock.mockResolvedValue(readOnlySession());
 
@@ -249,6 +318,24 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record new sample inventory." });
+  });
+
+  it("rejects read-only sample lifecycle update requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { PATCH } = await import("@/app/api/v1/samples/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/samples", {
+        method: "PATCH",
+        body: JSON.stringify({
+          sampleLabel: "LIMS-API-READONLY",
+          status: "consumed",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot update sample inventory." });
   });
 
   it("creates genotype records through the external genotype intake route", async () => {
