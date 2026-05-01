@@ -3,7 +3,13 @@ import { getCageDetailView, getCageListView } from "@/lib/cages-read";
 import { getExperimentOverviewView } from "@/lib/experiments-read";
 import { prisma } from "@/lib/prisma";
 import { getSampleInventoryView } from "@/lib/samples-read";
-import type { AssignmentStatus, GenotypeCallStatus, SampleStatus } from "@/lib/types";
+import type {
+  AlertSeverity,
+  AssignmentStatus,
+  GenotypeCallStatus,
+  HealthNoteType,
+  SampleStatus,
+} from "@/lib/types";
 
 const defaultListLimit = 100;
 const maxListLimit = 500;
@@ -85,6 +91,16 @@ export type CreateGenotypeApiInput = {
   sampleId?: string;
 };
 
+export type CreateCageHealthNoteApiInput = {
+  cageId?: string;
+  cageBarcode?: string;
+  noteType: HealthNoteType;
+  severity: AlertSeverity;
+  note: string;
+  followupRequired: boolean;
+  actionTaken?: string;
+};
+
 export type CreateExperimentAssignmentApiInput = {
   experimentId?: string;
   experimentCode?: string;
@@ -119,6 +135,11 @@ export type ResolvedGenotypeApiInput = {
   animalCode: string;
   animalId: string;
   marker: string;
+};
+
+export type ResolvedCageApiInput = {
+  cageBarcode: string;
+  cageId: string;
 };
 
 export type ResolvedExperimentAssignmentApiInput = {
@@ -431,6 +452,53 @@ export async function getAnimalApiDetail(animalId: string) {
 
 export async function getCageApiDetail(cageId: string) {
   return getCageDetailView(cageId);
+}
+
+export async function resolveCageByApiReference(input: {
+  cageId?: string;
+  cageBarcode?: string;
+}): Promise<
+  | {
+      ok: true;
+      value: ResolvedCageApiInput;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const cageRef = input.cageId?.trim();
+  const cageBarcode = input.cageBarcode?.trim();
+
+  if (!cageRef && !cageBarcode) {
+    return { ok: false, message: "Provide cageId or cageBarcode.", status: 400 };
+  }
+
+  const cage = await prisma.cage.findFirst({
+    where: {
+      OR: [
+        ...(cageRef ? [{ id: cageRef }, { barcode: cageRef }] : []),
+        ...(cageBarcode ? [{ barcode: cageBarcode }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      barcode: true,
+    },
+  });
+
+  if (!cage) {
+    return { ok: false, message: "Cage not found for the supplied cageId or cageBarcode.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      cageBarcode: cage.barcode,
+      cageId: cage.id,
+    },
+  };
 }
 
 export async function resolveAnimalByApiReference(input: {
@@ -760,6 +828,47 @@ export async function getGenotypeApiRecordById(recordId: string) {
   return record ? formatGenotypeApiRecord(record) : null;
 }
 
+export async function getCageHealthNoteApiRecordById(noteId: string) {
+  const record = await prisma.healthNote.findUnique({
+    where: { id: noteId },
+    select: cageHealthNoteApiSelect,
+  });
+
+  return record ? formatCageHealthNoteApiRecord(record) : null;
+}
+
+export async function getExistingCageHealthNoteApiRecord(input: {
+  cageId: string;
+  createdById: string;
+  noteType: HealthNoteType;
+  severity: AlertSeverity;
+  note: string;
+  followupRequired: boolean;
+  actionTaken?: string;
+}) {
+  const record = await prisma.healthNote.findFirst({
+    where: {
+      cageId: input.cageId,
+      createdById: input.createdById,
+      noteType: input.noteType,
+      severity: input.severity,
+      note: input.note.trim(),
+      followupRequired: input.followupRequired,
+      actionTaken: input.actionTaken?.trim() || null,
+    },
+    orderBy: { createdAt: "desc" },
+    select: cageHealthNoteApiSelect,
+  });
+
+  if (!record) {
+    return null;
+  }
+
+  const now = Date.now();
+
+  return now - record.createdAt.getTime() < 2 * 60 * 1000 ? formatCageHealthNoteApiRecord(record) : null;
+}
+
 export async function getExperimentAssignmentApiRecords(input: {
   experimentId: string;
   animalIds: string[];
@@ -872,7 +981,14 @@ const resourceCatalog = [
     name: "cages",
     path: "/api/v1/cages",
     detailPath: "/api/v1/cages/{cageId}",
-    description: "Cage summaries, occupancy, notes, and movement history.",
+    description: "Cage summaries, occupancy, notes, movement history, and external welfare event intake.",
+    methods: ["GET"],
+  },
+  {
+    name: "cage-health-notes",
+    path: "/api/v1/cages/health-notes",
+    description: "External cage welfare or equipment event intake with audit provenance.",
+    methods: ["POST"],
   },
   {
     name: "experiments",
@@ -976,6 +1092,23 @@ const genotypeApiSelect = {
   },
 } as const;
 
+const cageHealthNoteApiSelect = {
+  id: true,
+  cageId: true,
+  noteType: true,
+  severity: true,
+  note: true,
+  followupRequired: true,
+  actionTaken: true,
+  resolved: true,
+  createdAt: true,
+  cage: {
+    select: {
+      barcode: true,
+    },
+  },
+} as const;
+
 const experimentAssignmentApiSelect = {
   id: true,
   animalId: true,
@@ -1069,6 +1202,34 @@ function formatExperimentAssignmentApiRecord(record: {
     treatmentGroup: record.treatmentGroup,
     notes: record.notes,
     isPrimary: record.isPrimary,
+  };
+}
+
+function formatCageHealthNoteApiRecord(record: {
+  id: string;
+  cageId: string | null;
+  noteType: HealthNoteType;
+  severity: AlertSeverity;
+  note: string;
+  followupRequired: boolean;
+  actionTaken: string | null;
+  resolved: boolean;
+  createdAt: Date;
+  cage: {
+    barcode: string;
+  } | null;
+}) {
+  return {
+    id: record.id,
+    cageId: record.cageId,
+    cageBarcode: record.cage?.barcode ?? null,
+    noteType: record.noteType,
+    severity: record.severity,
+    note: record.note,
+    followupRequired: record.followupRequired,
+    actionTaken: record.actionTaken,
+    resolved: record.resolved,
+    createdAt: record.createdAt.toISOString(),
   };
 }
 

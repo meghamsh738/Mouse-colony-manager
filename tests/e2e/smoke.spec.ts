@@ -401,6 +401,34 @@ test("researcher can query the authenticated integration API surface", async ({ 
   );
 });
 
+test("staff can ingest an external cage welfare event through the integration API", async ({ page }) => {
+  await signInForApiRequests(page, "staff");
+
+  const response = await page.request.post("/api/v1/cages/health-notes", {
+    data: {
+      cageBarcode: "CM-A101-003",
+      noteType: "routine_welfare",
+      severity: "warning",
+      note: "External rack sensor reported persistent wet bedding.",
+      followupRequired: true,
+      actionTaken: "Flagged for cage-change triage.",
+    },
+  });
+  const payload = {
+    status: response.status(),
+    body: await response.json(),
+  };
+
+  expect(payload.status).toBe(201);
+  expect(payload.body.meta.created).toBe(true);
+  expect(payload.body.data).toMatchObject({
+    cageBarcode: "CM-A101-003",
+    noteType: "routine_welfare",
+    severity: "warning",
+    followupRequired: true,
+  });
+});
+
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {
   await signInAs(page, "staff");
   await page.goto("/notifications");

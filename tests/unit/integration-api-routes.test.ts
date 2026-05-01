@@ -106,6 +106,10 @@ describe("integration API routes", () => {
       path: "/api/v1/samples",
       methods: ["GET", "POST", "PATCH"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "cage-health-notes")).toMatchObject({
+      path: "/api/v1/cages/health-notes",
+      methods: ["POST"],
+    });
     expect(payload.data.resources.find((resource) => resource.name === "genotypes")).toMatchObject({
       path: "/api/v1/genotypes",
       methods: ["POST"],
@@ -132,6 +136,113 @@ describe("integration API routes", () => {
       csvUrl: "http://localhost:3000/api/exports/animals",
       supportedFilters: ["search", "status", "availableOnly"],
     });
+  });
+
+  it("logs external cage welfare events through the cage health-note route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/cages/health-notes/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/cages/health-notes", {
+        method: "POST",
+        body: JSON.stringify({
+          cageBarcode: "CM-A101-003",
+          noteType: "routine_welfare",
+          severity: "warning",
+          note: "External rack sensor reported persistent wet bedding.",
+          followupRequired: true,
+          actionTaken: "Flagged for cage-change triage.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        cageBarcode: string;
+        noteType: string;
+        severity: string;
+        note: string;
+        followupRequired: boolean;
+        actionTaken: string;
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.data).toMatchObject({
+      cageBarcode: "CM-A101-003",
+      noteType: "routine_welfare",
+      severity: "warning",
+      note: "External rack sensor reported persistent wet bedding.",
+      followupRequired: true,
+      actionTaken: "Flagged for cage-change triage.",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "health_note",
+          action: "create",
+          newValue: {
+            path: ["severity"],
+            equals: "warning",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated cage welfare event ingestion as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/cages/health-notes/route");
+    const requestBody = {
+      cageBarcode: "CM-A101-003",
+      noteType: "routine_welfare",
+      severity: "warning",
+      note: "External rack sensor repeated wet bedding alert.",
+      followupRequired: true,
+      actionTaken: "Flagged for cage-change triage.",
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/cages/health-notes", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/cages/health-notes", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as { meta: { created: boolean; message: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already logged");
+  });
+
+  it("rejects read-only cage welfare event ingestion requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/cages/health-notes/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/cages/health-notes", {
+        method: "POST",
+        body: JSON.stringify({
+          cageBarcode: "CM-A101-003",
+          noteType: "routine_welfare",
+          severity: "warning",
+          note: "Readonly users cannot create this welfare event.",
+          followupRequired: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot add cage health notes." });
   });
 
   it("returns filtered sample inventory from the authenticated sample route", async () => {

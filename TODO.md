@@ -23,7 +23,7 @@ Current delivery level:
   - rules/settings and audit visibility
   - CSV exports
   - local attachment upload and viewing for genotype and welfare records
-  - authenticated `/api/v1` integration routes for animals, cages, experiments, projects, samples, genotype intake, experiment assignment sync, and export discovery, including audited external sample intake, sample lifecycle updates, genotype result intake, planned-assignment intake, and assignment promote/rollback status sync
+  - authenticated `/api/v1` integration routes for animals, cages, experiments, projects, samples, genotype intake, experiment assignment sync, cage welfare event intake, and export discovery, including audited external sample intake, sample lifecycle updates, genotype result intake, planned-assignment intake, assignment promote/rollback status sync, and cage health-note ingestion
   - in-app notification inbox with admin-editable delivery toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift
   - outbound notification digest preview and webhook delivery endpoint
   - quarantine and sentinel tracking workspace
@@ -45,7 +45,7 @@ Current delivery level:
   - outbound email uses a generic HTTP provider contract; production deployment still needs real provider URL and token configuration
 
 - Still missing relative to the original blueprint:
-  - broader external integration API beyond current sample/genotype/experiment-assignment intake and status sync, read-mostly `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
+  - broader external integration API beyond current sample/genotype/experiment-assignment/cage-welfare intake and status sync, read-mostly `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
 
 ## Done
 
@@ -77,6 +77,7 @@ Current delivery level:
 - [x] Add a read-only Prisma dev DB doctor and direct local prep path for WSL/local setup failures
 - [x] Add an audited external sample intake API under `/api/v1/samples`
 - [x] Add audited external sample lifecycle update API under `/api/v1/samples`
+- [x] Add audited external cage welfare/equipment event intake under `/api/v1/cages/health-notes`
 - [x] Add an audited external genotype result intake API under `/api/v1/genotypes`
 - [x] Add an audited external planned experiment assignment sync API under `/api/v1/experiments/assignments`
 - [x] Add audited external experiment assignment promote/rollback status sync under `/api/v1/experiments/assignments`
@@ -87,7 +88,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external write integration after sample, genotype, and experiment assignment intake/status sync, likely external equipment event ingestion or broader attachment/document handoff
+- [ ] Define the next external write integration after sample, genotype, experiment assignment, and cage welfare intake/status sync, likely broader attachment/document handoff or cryostorage lifecycle sync
 
 ## Verification Snapshot
 
@@ -130,6 +131,7 @@ Notes:
 - On 2026-04-30, local e2e server bootstrap switched to reseed-only startup to avoid repeated `prisma db push` cost and prepared-statement failures; use `db:prepare:local` explicitly after first setup, schema changes, or DB reset.
 - On 2026-04-30, `/api/v1/samples` was added for external sample inventory integrations, with filtered sample reads, audited POST intake, idempotent duplicate handling for the same animal, and read-only role rejection.
 - On 2026-05-01, `/api/v1/samples` was extended with audited `PATCH` sample lifecycle updates for status, storage location, quantity, and notes, so external LIMS workflows can update downstream sample state.
+- On 2026-05-01, `/api/v1/cages/health-notes` was added for external cage welfare and equipment-event intake, using the same audited cage health-note workflow as scan-based staff entry.
 - On 2026-05-01, `/api/v1/genotypes` was added for external genotype result integrations, with audited POST intake, animal/marker code resolution, duplicate handling for repeated vendor submissions, and read-only role rejection.
 - On 2026-05-01, `/api/v1/experiments/assignments` was added for external scheduling integrations, with audited planned-assignment sync, experiment/animal code resolution, duplicate handling for repeated scheduler submissions, and read-only role rejection.
 - On 2026-05-01, `/api/v1/experiments/assignments` was extended with `PATCH` promote/rollback actions for external assignment status sync using the same audited promotion and rollback workflow as the app UI.
