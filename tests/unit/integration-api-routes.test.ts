@@ -110,6 +110,10 @@ describe("integration API routes", () => {
       path: "/api/v1/genotypes",
       methods: ["POST"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "experiment-assignments")).toMatchObject({
+      path: "/api/v1/experiments/assignments",
+      methods: ["POST"],
+    });
   });
 
   it("publishes the export discovery catalog", async () => {
@@ -361,5 +365,115 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record genotyping results." });
+  });
+
+  it("syncs planned experiment assignments through the external assignment route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/experiments/assignments/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "POST",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          startDate: "2026-04-18",
+          notes: "Synced from an external scheduling system.",
+          assignments: [
+            { animalCode: "CM-26005", treatmentGroup: "Arm A" },
+            { animalCode: "CM-26012", treatmentGroup: "Arm B" },
+          ],
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: Array<{ animalCode: string; experimentCode: string; status: string; treatmentGroup: string }>;
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("Planned 2 cohort assignments for EXP-LPS-005");
+    expect(payload.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          animalCode: "CM-26005",
+          experimentCode: "EXP-LPS-005",
+          status: "planned",
+          treatmentGroup: "Arm A",
+        }),
+        expect.objectContaining({
+          animalCode: "CM-26012",
+          experimentCode: "EXP-LPS-005",
+          status: "planned",
+          treatmentGroup: "Arm B",
+        }),
+      ]),
+    );
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "experiment_assignment",
+          action: "plan",
+          newValue: {
+            path: ["experimentId"],
+            equals: "experiment-002",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated experiment assignment sync as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/experiments/assignments/route");
+    const requestBody = {
+      experimentCode: "EXP-LPS-005",
+      startDate: "2026-04-18",
+      notes: "Repeated sync payload.",
+      assignments: [
+        { animalCode: "CM-26005", treatmentGroup: "Arm A" },
+        { animalCode: "CM-26012", treatmentGroup: "Arm B" },
+      ],
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as { data: Array<unknown>; meta: { created: boolean; message: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already has assignments");
+    expect(payload.data).toHaveLength(2);
+  });
+
+  it("rejects read-only experiment assignment sync requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/experiments/assignments/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "POST",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          startDate: "2026-04-18",
+          assignments: [{ animalCode: "CM-26005", treatmentGroup: "Arm A" }],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot sync experiment assignments." });
   });
 });

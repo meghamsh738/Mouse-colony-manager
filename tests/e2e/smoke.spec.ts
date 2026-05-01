@@ -321,6 +321,41 @@ test("researcher can query the authenticated integration API surface", async ({ 
     sampleId: "TX-SMOKE-001",
     status: "confirmed",
   });
+
+  const assignmentSyncResponse = await page.request.post("/api/v1/experiments/assignments", {
+    data: {
+      experimentCode: "EXP-LPS-005",
+      startDate: "2026-04-18",
+      notes: "Created by the authenticated integration API smoke.",
+      assignments: [
+        { animalCode: "CM-26005", treatmentGroup: "Arm A" },
+        { animalCode: "CM-26012", treatmentGroup: "Arm B" },
+      ],
+    },
+  });
+  const assignmentSync = {
+    status: assignmentSyncResponse.status(),
+    body: await assignmentSyncResponse.json(),
+  };
+
+  expect(assignmentSync.status).toBe(201);
+  expect(assignmentSync.body.meta.created).toBe(true);
+  expect(assignmentSync.body.data).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        animalCode: "CM-26005",
+        experimentCode: "EXP-LPS-005",
+        status: "planned",
+        treatmentGroup: "Arm A",
+      }),
+      expect.objectContaining({
+        animalCode: "CM-26012",
+        experimentCode: "EXP-LPS-005",
+        status: "planned",
+        treatmentGroup: "Arm B",
+      }),
+    ]),
+  );
 });
 
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {

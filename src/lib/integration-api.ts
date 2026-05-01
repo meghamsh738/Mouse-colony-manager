@@ -3,7 +3,7 @@ import { getCageDetailView, getCageListView } from "@/lib/cages-read";
 import { getExperimentOverviewView } from "@/lib/experiments-read";
 import { prisma } from "@/lib/prisma";
 import { getSampleInventoryView } from "@/lib/samples-read";
-import type { GenotypeCallStatus, SampleStatus } from "@/lib/types";
+import type { AssignmentStatus, GenotypeCallStatus, SampleStatus } from "@/lib/types";
 
 const defaultListLimit = 100;
 const maxListLimit = 500;
@@ -80,6 +80,18 @@ export type CreateGenotypeApiInput = {
   sampleId?: string;
 };
 
+export type CreateExperimentAssignmentApiInput = {
+  experimentId?: string;
+  experimentCode?: string;
+  startDate: string;
+  notes?: string;
+  assignments: Array<{
+    animalId?: string;
+    animalCode?: string;
+    treatmentGroup?: string;
+  }>;
+};
+
 export type ResolvedSampleApiInput = {
   animalCode: string;
   animalId: string;
@@ -92,6 +104,16 @@ export type ResolvedGenotypeApiInput = {
   animalCode: string;
   animalId: string;
   marker: string;
+};
+
+export type ResolvedExperimentAssignmentApiInput = {
+  experimentCode: string;
+  experimentId: string;
+  assignments: Array<{
+    animalCode: string;
+    animalId: string;
+    treatmentGroup: string;
+  }>;
 };
 
 function normalizeText(value?: string | null) {
@@ -545,6 +567,82 @@ export async function resolveGenotypeApiInput(input: CreateGenotypeApiInput): Pr
   };
 }
 
+export async function resolveExperimentAssignmentApiInput(input: CreateExperimentAssignmentApiInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedExperimentAssignmentApiInput;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const experimentRef = input.experimentId?.trim();
+  const experimentCode = input.experimentCode?.trim();
+
+  if (!experimentRef && !experimentCode) {
+    return { ok: false, message: "Provide experimentId or experimentCode.", status: 400 };
+  }
+
+  const experiment = await prisma.experiment.findFirst({
+    where: {
+      OR: [
+        ...(experimentRef ? [{ id: experimentRef }, { experimentCode: experimentRef }] : []),
+        ...(experimentCode ? [{ experimentCode }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      experimentCode: true,
+      status: true,
+    },
+  });
+
+  if (!experiment || experiment.status === "completed" || experiment.status === "cancelled") {
+    return { ok: false, message: "Experiment not found or no longer accepts assignment sync.", status: 404 };
+  }
+
+  if (!input.assignments.length) {
+    return { ok: false, message: "Provide at least one assignment.", status: 400 };
+  }
+
+  const resolvedAssignments = [];
+  const seenAnimalIds = new Set<string>();
+
+  for (const assignment of input.assignments) {
+    const animal = await resolveAnimalByApiReference(assignment);
+
+    if (!animal.ok) {
+      return animal;
+    }
+
+    if (seenAnimalIds.has(animal.value.animalId)) {
+      continue;
+    }
+
+    seenAnimalIds.add(animal.value.animalId);
+    resolvedAssignments.push({
+      animalCode: animal.value.animalCode,
+      animalId: animal.value.animalId,
+      treatmentGroup: assignment.treatmentGroup?.trim() || "Group A",
+    });
+  }
+
+  if (!resolvedAssignments.length) {
+    return { ok: false, message: "Provide at least one unique assignment.", status: 400 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      experimentCode: experiment.experimentCode,
+      experimentId: experiment.id,
+      assignments: resolvedAssignments,
+    },
+  };
+}
+
 export async function getSampleApiRecordById(sampleId: string) {
   const record = await prisma.sampleRecord.findUnique({
     where: { id: sampleId },
@@ -570,6 +668,23 @@ export async function getGenotypeApiRecordById(recordId: string) {
   });
 
   return record ? formatGenotypeApiRecord(record) : null;
+}
+
+export async function getExperimentAssignmentApiRecords(input: {
+  experimentId: string;
+  animalIds: string[];
+}) {
+  const records = await prisma.experimentAssignment.findMany({
+    where: {
+      experimentId: input.experimentId,
+      animalId: { in: input.animalIds },
+      status: { in: ["planned", "reserved", "active", "completed"] },
+    },
+    orderBy: [{ startDate: "asc" }, { id: "asc" }],
+    select: experimentAssignmentApiSelect,
+  });
+
+  return records.map(formatExperimentAssignmentApiRecord);
 }
 
 export async function getExistingGenotypeApiRecord(input: {
@@ -656,7 +771,14 @@ const resourceCatalog = [
   {
     name: "experiments",
     path: "/api/v1/experiments",
-    description: "Experiment overview with assignment provenance.",
+    description: "Experiment overview with assignment provenance and planned assignment sync.",
+    methods: ["GET"],
+  },
+  {
+    name: "experiment-assignments",
+    path: "/api/v1/experiments/assignments",
+    description: "External planned experiment assignment sync with audit provenance.",
+    methods: ["POST"],
   },
   {
     name: "projects",
@@ -748,6 +870,30 @@ const genotypeApiSelect = {
   },
 } as const;
 
+const experimentAssignmentApiSelect = {
+  id: true,
+  animalId: true,
+  experimentId: true,
+  status: true,
+  startDate: true,
+  endDate: true,
+  treatmentGroup: true,
+  notes: true,
+  isPrimary: true,
+  animal: {
+    select: {
+      animalId: true,
+      labId: true,
+    },
+  },
+  experiment: {
+    select: {
+      experimentCode: true,
+      title: true,
+    },
+  },
+} as const;
+
 function formatSampleApiRecord(record: {
   id: string;
   sampleLabel: string;
@@ -781,6 +927,42 @@ function formatSampleApiRecord(record: {
     animalCode: record.animal.animalId,
     labId: record.animal.labId,
     projectCode: record.project?.projectCode ?? null,
+  };
+}
+
+function formatExperimentAssignmentApiRecord(record: {
+  id: string;
+  animalId: string;
+  experimentId: string;
+  status: AssignmentStatus;
+  startDate: Date;
+  endDate: Date | null;
+  treatmentGroup: string | null;
+  notes: string | null;
+  isPrimary: boolean;
+  animal: {
+    animalId: string;
+    labId: string;
+  };
+  experiment: {
+    experimentCode: string;
+    title: string;
+  };
+}) {
+  return {
+    id: record.id,
+    experimentId: record.experimentId,
+    experimentCode: record.experiment.experimentCode,
+    experimentTitle: record.experiment.title,
+    animalId: record.animalId,
+    animalCode: record.animal.animalId,
+    labId: record.animal.labId,
+    status: record.status,
+    startDate: record.startDate.toISOString(),
+    endDate: record.endDate?.toISOString() ?? null,
+    treatmentGroup: record.treatmentGroup,
+    notes: record.notes,
+    isPrimary: record.isPrimary,
   };
 }
 
