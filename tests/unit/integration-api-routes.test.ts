@@ -90,7 +90,7 @@ describe("integration API routes", () => {
     expect(payload.data.genotypingRecords.length).toBeGreaterThan(0);
   });
 
-  it("publishes the integration index including sample intake", async () => {
+  it("publishes the integration index including write-capable intake routes", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
     const { GET } = await import("@/app/api/v1/route");
@@ -105,6 +105,10 @@ describe("integration API routes", () => {
     expect(payload.data.resources.find((resource) => resource.name === "samples")).toMatchObject({
       path: "/api/v1/samples",
       methods: ["GET", "POST"],
+    });
+    expect(payload.data.resources.find((resource) => resource.name === "genotypes")).toMatchObject({
+      path: "/api/v1/genotypes",
+      methods: ["POST"],
     });
   });
 
@@ -241,5 +245,121 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record new sample inventory." });
+  });
+
+  it("creates genotype records through the external genotype intake route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/genotypes/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/genotypes", {
+        method: "POST",
+        body: JSON.stringify({
+          animalCode: "CM-25009",
+          marker: "CreER",
+          zygosity: "+/-",
+          status: "confirmed",
+          sourceType: "external vendor",
+          assayType: "Transnetyx panel",
+          sampleDate: "2026-04-09",
+          resultDate: "2026-04-09",
+          resultText: "External API CreER positive call.",
+          provider: "Transnetyx",
+          confidence: "high",
+          sampleId: "TX-API-001",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { animalCode: string; finalCall: string; markerTested: string; sampleId: string; status: string };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("CreER genotype recorded");
+    expect(payload.data).toMatchObject({
+      animalCode: "CM-25009",
+      finalCall: "CreER +/-",
+      markerTested: "CreER",
+      sampleId: "TX-API-001",
+      status: "confirmed",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "genotyping_record",
+          action: "create",
+          newValue: {
+            path: ["sampleId"],
+            equals: "TX-API-001",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated genotype intake as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/genotypes/route");
+    const requestBody = {
+      animalCode: "CM-25009",
+      marker: "CreER",
+      zygosity: "+/-",
+      status: "confirmed",
+      sourceType: "external vendor",
+      assayType: "Transnetyx panel",
+      sampleDate: "2026-04-09",
+      resultDate: "2026-04-09",
+      resultText: "External API repeated CreER call.",
+      provider: "Transnetyx",
+      confidence: "high",
+      sampleId: "TX-API-REPEAT",
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/genotypes", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/genotypes", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as { meta: { created: boolean; message: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already recorded");
+  });
+
+  it("rejects read-only genotype intake requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/genotypes/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/genotypes", {
+        method: "POST",
+        body: JSON.stringify({
+          animalCode: "CM-25009",
+          marker: "CreER",
+          zygosity: "+/-",
+          status: "confirmed",
+          sourceType: "external vendor",
+          assayType: "Transnetyx panel",
+          sampleDate: "2026-04-09",
+          resultDate: "2026-04-09",
+          resultText: "Readonly user should not create this.",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record genotyping results." });
   });
 });

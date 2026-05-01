@@ -290,6 +290,37 @@ test("researcher can query the authenticated integration API surface", async ({ 
     sampleLabel: "API-SMOKE-001",
     status: "stored",
   });
+
+  const genotypeIntakeResponse = await page.request.post("/api/v1/genotypes", {
+    data: {
+      animalCode: "CM-25009",
+      marker: "CreER",
+      zygosity: "+/-",
+      status: "confirmed",
+      sourceType: "external vendor",
+      assayType: "Transnetyx panel",
+      sampleDate: "2026-04-09",
+      resultDate: "2026-04-09",
+      resultText: "External API smoke CreER positive call.",
+      provider: "Transnetyx",
+      confidence: "high",
+      sampleId: "TX-SMOKE-001",
+    },
+  });
+  const genotypeIntake = {
+    status: genotypeIntakeResponse.status(),
+    body: await genotypeIntakeResponse.json(),
+  };
+
+  expect(genotypeIntake.status).toBe(201);
+  expect(genotypeIntake.body.meta.created).toBe(true);
+  expect(genotypeIntake.body.data).toMatchObject({
+    animalCode: "CM-25009",
+    finalCall: "CreER +/-",
+    markerTested: "CreER",
+    sampleId: "TX-SMOKE-001",
+    status: "confirmed",
+  });
 });
 
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {

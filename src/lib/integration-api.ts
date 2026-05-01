@@ -3,7 +3,7 @@ import { getCageDetailView, getCageListView } from "@/lib/cages-read";
 import { getExperimentOverviewView } from "@/lib/experiments-read";
 import { prisma } from "@/lib/prisma";
 import { getSampleInventoryView } from "@/lib/samples-read";
-import type { SampleStatus } from "@/lib/types";
+import type { GenotypeCallStatus, SampleStatus } from "@/lib/types";
 
 const defaultListLimit = 100;
 const maxListLimit = 500;
@@ -63,11 +63,35 @@ export type CreateSampleApiInput = {
   notes?: string;
 };
 
+export type CreateGenotypeApiInput = {
+  animalId?: string;
+  animalCode?: string;
+  alleleId?: string;
+  marker?: string;
+  zygosity: string;
+  status: GenotypeCallStatus;
+  sourceType: string;
+  assayType: string;
+  sampleDate: string;
+  resultDate: string;
+  resultText: string;
+  confidence?: string;
+  provider?: string;
+  sampleId?: string;
+};
+
 export type ResolvedSampleApiInput = {
   animalCode: string;
   animalId: string;
   projectCode: string | null;
   projectId?: string;
+};
+
+export type ResolvedGenotypeApiInput = {
+  alleleId: string;
+  animalCode: string;
+  animalId: string;
+  marker: string;
 };
 
 function normalizeText(value?: string | null) {
@@ -367,6 +391,59 @@ export async function getCageApiDetail(cageId: string) {
   return getCageDetailView(cageId);
 }
 
+export async function resolveAnimalByApiReference(input: {
+  animalId?: string;
+  animalCode?: string;
+}): Promise<
+  | {
+      ok: true;
+      value: {
+        animalCode: string;
+        animalId: string;
+        labId: string;
+      };
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const animalRef = input.animalId?.trim();
+  const animalCode = input.animalCode?.trim();
+
+  if (!animalRef && !animalCode) {
+    return { ok: false, message: "Provide animalId or animalCode.", status: 400 };
+  }
+
+  const animal = await prisma.animal.findFirst({
+    where: {
+      OR: [
+        ...(animalRef ? [{ id: animalRef }, { animalId: animalRef }] : []),
+        ...(animalCode ? [{ animalId: animalCode }, { labId: animalCode }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      animalId: true,
+      labId: true,
+    },
+  });
+
+  if (!animal) {
+    return { ok: false, message: "Animal not found for the supplied animalId or animalCode.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      animalCode: animal.animalId,
+      animalId: animal.id,
+      labId: animal.labId,
+    },
+  };
+}
+
 export async function resolveSampleApiInput(input: CreateSampleApiInput): Promise<
   | {
       ok: true;
@@ -378,31 +455,17 @@ export async function resolveSampleApiInput(input: CreateSampleApiInput): Promis
       status: number;
     }
 > {
-  const animalRef = input.animalId?.trim();
-  const animalCode = input.animalCode?.trim();
   const projectRef = input.projectId?.trim();
   const projectCode = input.projectCode?.trim();
+  const animal = await resolveAnimalByApiReference(input);
 
-  if (!animalRef && !animalCode) {
-    return { ok: false, message: "Provide animalId or animalCode.", status: 400 };
+  if (!animal.ok) {
+    return animal;
   }
 
-  const [animal, project] = await Promise.all([
-    prisma.animal.findFirst({
-      where: {
-        OR: [
-          ...(animalRef ? [{ id: animalRef }, { animalId: animalRef }] : []),
-          ...(animalCode ? [{ animalId: animalCode }, { labId: animalCode }] : []),
-        ],
-      },
-      select: {
-        id: true,
-        animalId: true,
-        labId: true,
-      },
-    }),
+  const project =
     projectRef || projectCode
-      ? prisma.project.findFirst({
+      ? await prisma.project.findFirst({
           where: {
             OR: [
               ...(projectRef ? [{ id: projectRef }, { projectCode: projectRef }] : []),
@@ -414,12 +477,7 @@ export async function resolveSampleApiInput(input: CreateSampleApiInput): Promis
             projectCode: true,
           },
         })
-      : Promise.resolve(null),
-  ]);
-
-  if (!animal) {
-    return { ok: false, message: "Animal not found for the supplied animalId or animalCode.", status: 404 };
-  }
+      : null;
 
   if ((projectRef || projectCode) && !project) {
     return { ok: false, message: "Project not found for the supplied projectId or projectCode.", status: 404 };
@@ -428,10 +486,61 @@ export async function resolveSampleApiInput(input: CreateSampleApiInput): Promis
   return {
     ok: true,
     value: {
-      animalCode: animal.animalId,
-      animalId: animal.id,
+      animalCode: animal.value.animalCode,
+      animalId: animal.value.animalId,
       projectCode: project?.projectCode ?? null,
       projectId: project?.id,
+    },
+  };
+}
+
+export async function resolveGenotypeApiInput(input: CreateGenotypeApiInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedGenotypeApiInput;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const animal = await resolveAnimalByApiReference(input);
+  const alleleRef = input.alleleId?.trim();
+  const marker = input.marker?.trim();
+
+  if (!animal.ok) {
+    return animal;
+  }
+
+  if (!alleleRef && !marker) {
+    return { ok: false, message: "Provide alleleId or marker.", status: 400 };
+  }
+
+  const allele = await prisma.allele.findFirst({
+    where: {
+      OR: [
+        ...(alleleRef ? [{ id: alleleRef }, { name: alleleRef }] : []),
+        ...(marker ? [{ name: marker }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!allele) {
+    return { ok: false, message: "Allele or marker not found for the supplied alleleId or marker.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      alleleId: allele.id,
+      animalCode: animal.value.animalCode,
+      animalId: animal.value.animalId,
+      marker: allele.name,
     },
   };
 }
@@ -452,6 +561,60 @@ export async function getSampleApiRecordByLabel(sampleLabel: string) {
   });
 
   return record ? formatSampleApiRecord(record) : null;
+}
+
+export async function getGenotypeApiRecordById(recordId: string) {
+  const record = await prisma.genotypingRecord.findUnique({
+    where: { id: recordId },
+    select: genotypeApiSelect,
+  });
+
+  return record ? formatGenotypeApiRecord(record) : null;
+}
+
+export async function getExistingGenotypeApiRecord(input: {
+  animalId: string;
+  marker: string;
+  status: GenotypeCallStatus;
+  sampleDate: string;
+  resultDate: string;
+  finalCall: string;
+  resultText: string;
+}) {
+  const sampleDate = new Date(input.sampleDate);
+  const resultDate = new Date(input.resultDate);
+
+  if (Number.isNaN(sampleDate.getTime()) || Number.isNaN(resultDate.getTime())) {
+    return null;
+  }
+
+  const record = await prisma.genotypingRecord.findFirst({
+    where: {
+      animalId: input.animalId,
+      markerTested: input.marker,
+      status: input.status,
+      sampleDate,
+      resultDate,
+      finalCall: input.finalCall,
+      resultText: input.resultText.trim(),
+    },
+    orderBy: { resultDate: "desc" },
+    select: genotypeApiSelect,
+  });
+
+  return record ? formatGenotypeApiRecord(record) : null;
+}
+
+export function buildGenotypeApiFinalCall(input: { marker: string; status: GenotypeCallStatus; zygosity: string }) {
+  if (input.status === "pending") {
+    return "Pending";
+  }
+
+  if (input.status === "conflict") {
+    return `${input.marker} conflict`;
+  }
+
+  return `${input.marker} ${input.zygosity.trim()}`;
 }
 
 const exportCatalog = [
@@ -507,6 +670,12 @@ const resourceCatalog = [
     methods: ["GET", "POST"],
   },
   {
+    name: "genotypes",
+    path: "/api/v1/genotypes",
+    description: "External genotype result intake with audited animal allele updates.",
+    methods: ["POST"],
+  },
+  {
     name: "exports",
     path: "/api/v1/exports",
     description: "Discover the available operational CSV exports.",
@@ -557,6 +726,28 @@ const sampleApiSelect = {
   },
 } as const;
 
+const genotypeApiSelect = {
+  id: true,
+  animalId: true,
+  sourceType: true,
+  assayType: true,
+  sampleId: true,
+  markerTested: true,
+  resultText: true,
+  sampleDate: true,
+  resultDate: true,
+  provider: true,
+  finalCall: true,
+  status: true,
+  confidence: true,
+  animal: {
+    select: {
+      animalId: true,
+      labId: true,
+    },
+  },
+} as const;
+
 function formatSampleApiRecord(record: {
   id: string;
   sampleLabel: string;
@@ -590,5 +781,46 @@ function formatSampleApiRecord(record: {
     animalCode: record.animal.animalId,
     labId: record.animal.labId,
     projectCode: record.project?.projectCode ?? null,
+  };
+}
+
+function formatGenotypeApiRecord(record: {
+  id: string;
+  animalId: string;
+  sourceType: string;
+  assayType: string;
+  sampleId: string | null;
+  markerTested: string;
+  resultText: string;
+  sampleDate: Date;
+  resultDate: Date;
+  provider: string | null;
+  finalCall: string;
+  status: GenotypeCallStatus;
+  confidence: string | null;
+  animal: {
+    animalId: string;
+    labId: string;
+  };
+}) {
+  return {
+    id: record.id,
+    animalId: record.animalId,
+    animalCode: record.animal.animalId,
+    labId: record.animal.labId,
+    markerTested: record.markerTested,
+    finalCall: record.finalCall,
+    zygosity: record.finalCall.startsWith(`${record.markerTested} `)
+      ? record.finalCall.slice(record.markerTested.length + 1)
+      : null,
+    status: record.status,
+    resultText: record.resultText,
+    sourceType: record.sourceType,
+    assayType: record.assayType,
+    provider: record.provider,
+    confidence: record.confidence,
+    sampleId: record.sampleId,
+    sampleDate: record.sampleDate.toISOString(),
+    resultDate: record.resultDate.toISOString(),
   };
 }

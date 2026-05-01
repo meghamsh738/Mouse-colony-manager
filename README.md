@@ -120,7 +120,7 @@ npm run db:prepare:ci
   - rules updates
 - Genotype records and cage health notes can include attachment uploads. Metadata is stored in PostgreSQL, and uploaded files are stored locally under `public/uploads/attachments` for the MVP runtime.
 - Audit logs, status events, project allocations, and experiment assignments are written transactionally.
-- An authenticated integration API is available under `/api/v1` for animals, cages, experiments, projects, sample inventory, and export discovery. `/api/v1/samples` supports filtered `GET` reads and audited `POST` sample intake for external LIMS-style systems using `animalCode`/`animalId` and optional `projectCode`/`projectId`.
+- An authenticated integration API is available under `/api/v1` for animals, cages, experiments, projects, sample inventory, genotype intake, and export discovery. `/api/v1/samples` supports filtered `GET` reads and audited `POST` sample intake for external LIMS-style systems using `animalCode`/`animalId` and optional `projectCode`/`projectId`; `/api/v1/genotypes` supports audited `POST` genotype result intake using `animalCode`/`animalId` plus `marker`/`alleleId`.
 - An in-app notification inbox is available under `/notifications`, with admin-editable rule toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift.
 - Outbound notification delivery is available at `/api/v1/notifications/delivery` for dry-run payload preview, configured webhook delivery, and configured HTTP email-provider delivery.
 - Quarantine and sentinel tracking is available under `/quarantine`, using quarantine cage status, welfare notes, cage flags, and rule-configured review thresholds.
