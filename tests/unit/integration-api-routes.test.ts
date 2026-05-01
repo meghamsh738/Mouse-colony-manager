@@ -112,7 +112,7 @@ describe("integration API routes", () => {
     });
     expect(payload.data.resources.find((resource) => resource.name === "experiment-assignments")).toMatchObject({
       path: "/api/v1/experiments/assignments",
-      methods: ["POST"],
+      methods: ["POST", "PATCH"],
     });
   });
 
@@ -458,6 +458,88 @@ describe("integration API routes", () => {
     expect(payload.data).toHaveLength(2);
   });
 
+  it("syncs experiment assignment status through external promote and rollback actions", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { PATCH, POST } = await import("@/app/api/v1/experiments/assignments/route");
+    const plannedResponse = await POST(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "POST",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          startDate: "2026-04-18",
+          notes: "Status sync setup.",
+          assignments: [
+            { animalCode: "CM-26005", treatmentGroup: "Arm A" },
+            { animalCode: "CM-26012", treatmentGroup: "Arm B" },
+          ],
+        }),
+      }),
+    );
+
+    expect(plannedResponse.status).toBe(201);
+
+    const promoteResponse = await PATCH(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "PATCH",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          action: "promote_planned",
+        }),
+      }),
+    );
+    const promoted = (await promoteResponse.json()) as {
+      data: Array<{ animalCode: string; status: string }>;
+      meta: { created: boolean; message: string };
+    };
+
+    expect(promoteResponse.status).toBe(200);
+    expect(promoted.meta.created).toBe(false);
+    expect(promoted.meta.message).toContain("Promoted 2 planned assignments for EXP-LPS-005");
+    expect(promoted.data.filter((assignment) => ["CM-26005", "CM-26012"].includes(assignment.animalCode))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ animalCode: "CM-26005", status: "reserved" }),
+        expect.objectContaining({ animalCode: "CM-26012", status: "reserved" }),
+      ]),
+    );
+
+    const rollbackResponse = await PATCH(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "PATCH",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          action: "rollback_reserved",
+        }),
+      }),
+    );
+    const rolledBack = (await rollbackResponse.json()) as {
+      data: Array<{ animalCode: string; status: string }>;
+      meta: { message: string };
+    };
+
+    expect(rollbackResponse.status).toBe(200);
+    expect(rolledBack.meta.message).toContain("Rolled back 3 reserved assignments for EXP-LPS-005");
+    expect(rolledBack.data.filter((assignment) => ["CM-26005", "CM-26012"].includes(assignment.animalCode))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ animalCode: "CM-26005", status: "planned" }),
+        expect.objectContaining({ animalCode: "CM-26012", status: "planned" }),
+      ]),
+    );
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "experiment_assignment",
+          action: "demote_reservation",
+          newValue: {
+            path: ["status"],
+            equals: "planned",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
   it("rejects read-only experiment assignment sync requests", async () => {
     authMock.mockResolvedValue(readOnlySession());
 
@@ -475,5 +557,25 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot sync experiment assignments." });
+  });
+
+  it("rejects read-only experiment assignment status sync requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { PATCH } = await import("@/app/api/v1/experiments/assignments/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "PATCH",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          action: "promote_planned",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Your role cannot sync experiment assignment status.",
+    });
   });
 });

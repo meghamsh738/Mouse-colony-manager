@@ -92,6 +92,11 @@ export type CreateExperimentAssignmentApiInput = {
   }>;
 };
 
+export type ExperimentApiReferenceInput = {
+  experimentId?: string;
+  experimentCode?: string;
+};
+
 export type ResolvedSampleApiInput = {
   animalCode: string;
   animalId: string;
@@ -114,6 +119,11 @@ export type ResolvedExperimentAssignmentApiInput = {
     animalId: string;
     treatmentGroup: string;
   }>;
+};
+
+export type ResolvedExperimentApiReference = {
+  experimentCode: string;
+  experimentId: string;
 };
 
 function normalizeText(value?: string | null) {
@@ -578,29 +588,10 @@ export async function resolveExperimentAssignmentApiInput(input: CreateExperimen
       status: number;
     }
 > {
-  const experimentRef = input.experimentId?.trim();
-  const experimentCode = input.experimentCode?.trim();
+  const experiment = await resolveExperimentApiReference(input);
 
-  if (!experimentRef && !experimentCode) {
-    return { ok: false, message: "Provide experimentId or experimentCode.", status: 400 };
-  }
-
-  const experiment = await prisma.experiment.findFirst({
-    where: {
-      OR: [
-        ...(experimentRef ? [{ id: experimentRef }, { experimentCode: experimentRef }] : []),
-        ...(experimentCode ? [{ experimentCode }] : []),
-      ],
-    },
-    select: {
-      id: true,
-      experimentCode: true,
-      status: true,
-    },
-  });
-
-  if (!experiment || experiment.status === "completed" || experiment.status === "cancelled") {
-    return { ok: false, message: "Experiment not found or no longer accepts assignment sync.", status: 404 };
+  if (!experiment.ok) {
+    return experiment;
   }
 
   if (!input.assignments.length) {
@@ -636,9 +627,54 @@ export async function resolveExperimentAssignmentApiInput(input: CreateExperimen
   return {
     ok: true,
     value: {
+      experimentCode: experiment.value.experimentCode,
+      experimentId: experiment.value.experimentId,
+      assignments: resolvedAssignments,
+    },
+  };
+}
+
+export async function resolveExperimentApiReference(input: ExperimentApiReferenceInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedExperimentApiReference;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const experimentRef = input.experimentId?.trim();
+  const experimentCode = input.experimentCode?.trim();
+
+  if (!experimentRef && !experimentCode) {
+    return { ok: false, message: "Provide experimentId or experimentCode.", status: 400 };
+  }
+
+  const experiment = await prisma.experiment.findFirst({
+    where: {
+      OR: [
+        ...(experimentRef ? [{ id: experimentRef }, { experimentCode: experimentRef }] : []),
+        ...(experimentCode ? [{ experimentCode }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      experimentCode: true,
+      status: true,
+    },
+  });
+
+  if (!experiment || experiment.status === "completed" || experiment.status === "cancelled") {
+    return { ok: false, message: "Experiment not found or no longer accepts assignment sync.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
       experimentCode: experiment.experimentCode,
       experimentId: experiment.id,
-      assignments: resolvedAssignments,
     },
   };
 }
@@ -679,6 +715,22 @@ export async function getExperimentAssignmentApiRecords(input: {
       experimentId: input.experimentId,
       animalId: { in: input.animalIds },
       status: { in: ["planned", "reserved", "active", "completed"] },
+    },
+    orderBy: [{ startDate: "asc" }, { id: "asc" }],
+    select: experimentAssignmentApiSelect,
+  });
+
+  return records.map(formatExperimentAssignmentApiRecord);
+}
+
+export async function getExperimentAssignmentApiRecordsForExperiment(input: {
+  experimentId: string;
+  statuses?: AssignmentStatus[];
+}) {
+  const records = await prisma.experimentAssignment.findMany({
+    where: {
+      experimentId: input.experimentId,
+      ...(input.statuses?.length ? { status: { in: input.statuses } } : {}),
     },
     orderBy: [{ startDate: "asc" }, { id: "asc" }],
     select: experimentAssignmentApiSelect,
@@ -778,7 +830,7 @@ const resourceCatalog = [
     name: "experiment-assignments",
     path: "/api/v1/experiments/assignments",
     description: "External planned experiment assignment sync with audit provenance.",
-    methods: ["POST"],
+    methods: ["POST", "PATCH"],
   },
   {
     name: "projects",

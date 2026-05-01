@@ -1,9 +1,15 @@
 import { z } from "zod";
 
 import { buildApiErrorResponse, buildMutationResponse, requireApiUser } from "@/lib/api-route";
-import { planExperimentCohortAssignments } from "@/lib/colony-write";
+import {
+  demoteReservedExperimentAssignments,
+  planExperimentCohortAssignments,
+  promotePlannedExperimentAssignments,
+} from "@/lib/colony-write";
 import {
   getExperimentAssignmentApiRecords,
+  getExperimentAssignmentApiRecordsForExperiment,
+  resolveExperimentApiReference,
   resolveExperimentAssignmentApiInput,
 } from "@/lib/integration-api";
 
@@ -19,6 +25,12 @@ const assignmentSyncSchema = z.object({
       treatmentGroup: z.string().trim().max(80).optional(),
     }),
   ).min(1).max(100),
+});
+
+const assignmentStatusSyncSchema = z.object({
+  experimentId: z.string().trim().min(1).optional(),
+  experimentCode: z.string().trim().min(1).optional(),
+  action: z.enum(["promote_planned", "rollback_reserved"]),
 });
 
 export async function POST(request: Request) {
@@ -90,6 +102,59 @@ export async function POST(request: Request) {
   return buildMutationResponse(assignments, {
     status: 201,
     created: true,
+    message: result.message,
+  });
+}
+
+export async function PATCH(request: Request) {
+  const auth = await requireApiUser();
+
+  if ("response" in auth) {
+    return auth.response;
+  }
+
+  if (auth.user.role === "read_only") {
+    return buildApiErrorResponse("Your role cannot sync experiment assignment status.", 403);
+  }
+
+  const body = await parseJsonBody(request);
+  const parsed = assignmentStatusSyncSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return buildApiErrorResponse("Invalid experiment assignment status payload.", 400, parsed.error.flatten().fieldErrors);
+  }
+
+  const resolved = await resolveExperimentApiReference(parsed.data);
+
+  if (!resolved.ok) {
+    return buildApiErrorResponse(resolved.message, resolved.status);
+  }
+
+  const result =
+    parsed.data.action === "promote_planned"
+      ? await promotePlannedExperimentAssignments(
+          { experimentId: resolved.value.experimentId },
+          { id: auth.user.id, role: auth.user.role },
+        )
+      : await demoteReservedExperimentAssignments(
+          { experimentId: resolved.value.experimentId },
+          { id: auth.user.id, role: auth.user.role },
+        );
+
+  if (!result.ok) {
+    const status = result.message.includes("role cannot") ? 403 : 400;
+
+    return buildApiErrorResponse(result.message, status);
+  }
+
+  const assignments = await getExperimentAssignmentApiRecordsForExperiment({
+    experimentId: resolved.value.experimentId,
+    statuses: parsed.data.action === "promote_planned" ? ["reserved"] : ["planned"],
+  });
+
+  return buildMutationResponse(assignments, {
+    status: 200,
+    created: false,
     message: result.message,
   });
 }

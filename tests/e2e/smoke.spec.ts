@@ -356,6 +356,26 @@ test("researcher can query the authenticated integration API surface", async ({ 
       }),
     ]),
   );
+
+  const assignmentPromoteResponse = await page.request.patch("/api/v1/experiments/assignments", {
+    data: {
+      experimentCode: "EXP-LPS-005",
+      action: "promote_planned",
+    },
+  });
+  const assignmentPromote = {
+    status: assignmentPromoteResponse.status(),
+    body: await assignmentPromoteResponse.json(),
+  };
+
+  expect(assignmentPromote.status).toBe(200);
+  expect(assignmentPromote.body.meta.message).toContain("Promoted 2 planned assignments for EXP-LPS-005");
+  expect(assignmentPromote.body.data).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ animalCode: "CM-26005", status: "reserved" }),
+      expect.objectContaining({ animalCode: "CM-26012", status: "reserved" }),
+    ]),
+  );
 });
 
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {
