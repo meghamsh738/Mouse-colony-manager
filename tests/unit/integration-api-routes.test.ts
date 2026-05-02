@@ -69,6 +69,115 @@ describe("integration API routes", () => {
     expect(payload.data.every((animal) => animal.sex === "male" && animal.availableForExperiment)).toBe(true);
   });
 
+  it("updates animal lifecycle state through the external animal route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { PATCH } = await import("@/app/api/v1/animals/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "PATCH",
+        body: JSON.stringify({
+          animalCode: "CM-26003",
+          targetStatus: "euthanized",
+          happenedAt: "2026-04-18",
+          reason: "External colony system recorded humane endpoint completion.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        animal: {
+          animalId: string;
+          status: string;
+          outcomeStatus: string;
+          deathReason: string | null;
+        };
+        cageLabel: string | null;
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("CM-26003 marked euthanized");
+    expect(payload.data.animal).toMatchObject({
+      animalId: "CM-26003",
+      status: "euthanized",
+      outcomeStatus: "euthanized",
+      deathReason: "External colony system recorded humane endpoint completion.",
+    });
+    expect(payload.data.cageLabel).toBe("Archived");
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "animal",
+          action: "lifecycle_update",
+          newValue: {
+            path: ["status"],
+            equals: "euthanized",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated terminal lifecycle sync as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { PATCH } = await import("@/app/api/v1/animals/route");
+    const requestBody = {
+      animalCode: "CM-26003",
+      targetStatus: "euthanized",
+      happenedAt: "2026-04-18",
+      reason: "External colony system recorded humane endpoint completion.",
+    };
+
+    await PATCH(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "PATCH",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "PATCH",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { animal: { status: string } };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already marked euthanized");
+    expect(payload.data.animal.status).toBe("euthanized");
+  });
+
+  it("rejects read-only animal lifecycle sync requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { PATCH } = await import("@/app/api/v1/animals/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "PATCH",
+        body: JSON.stringify({
+          animalCode: "CM-26003",
+          targetStatus: "dead",
+          happenedAt: "2026-04-18",
+          reason: "Readonly user should not perform lifecycle sync.",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Your role cannot change terminal lifecycle states.",
+    });
+  });
+
   it("returns animal detail records for known ids", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -102,6 +211,10 @@ describe("integration API routes", () => {
     };
 
     expect(response.status).toBe(200);
+    expect(payload.data.resources.find((resource) => resource.name === "animals")).toMatchObject({
+      path: "/api/v1/animals",
+      methods: ["GET", "PATCH"],
+    });
     expect(payload.data.resources.find((resource) => resource.name === "samples")).toMatchObject({
       path: "/api/v1/samples",
       methods: ["GET", "POST", "PATCH"],

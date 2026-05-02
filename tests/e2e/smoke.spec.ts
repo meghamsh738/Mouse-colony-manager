@@ -507,6 +507,34 @@ test("staff can ingest an external cage welfare event through the integration AP
   ]);
 });
 
+test("staff can sync an external animal lifecycle update through the integration API", async ({ page }) => {
+  await signInForApiRequests(page, "staff");
+
+  const response = await page.request.patch("/api/v1/animals", {
+    data: {
+      animalCode: "CM-26003",
+      targetStatus: "euthanized",
+      happenedAt: "2026-04-18",
+      reason: "External colony system recorded humane endpoint completion.",
+    },
+  });
+  const payload = {
+    status: response.status(),
+    body: await response.json(),
+  };
+
+  expect(payload.status).toBe(200);
+  expect(payload.body.meta.created).toBe(false);
+  expect(payload.body.meta.message).toContain("CM-26003 marked euthanized");
+  expect(payload.body.data.animal).toMatchObject({
+    animalId: "CM-26003",
+    status: "euthanized",
+    outcomeStatus: "euthanized",
+    deathReason: "External colony system recorded humane endpoint completion.",
+  });
+  expect(payload.body.data.cageLabel).toBe("Archived");
+});
+
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {
   await signInAs(page, "staff");
   await page.goto("/notifications");

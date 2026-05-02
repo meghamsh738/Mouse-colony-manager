@@ -535,6 +535,81 @@ export async function getAnimalApiDetail(animalId: string) {
   return getAnimalDetailView(animalId);
 }
 
+export async function getAnimalApiRecordById(animalId: string) {
+  const animal = await prisma.animal.findUnique({
+    where: { id: animalId },
+    select: {
+      id: true,
+      animalId: true,
+      labId: true,
+      status: true,
+      dob: true,
+      outcomeStatus: true,
+      experimentalStatus: true,
+      deathDate: true,
+      deathReason: true,
+      currentCage: {
+        select: {
+          cageNumber: true,
+          room: {
+            select: {
+              roomNumber: true,
+            },
+          },
+          rack: {
+            select: {
+              rackNumber: true,
+            },
+          },
+        },
+      },
+      strain: {
+        select: {
+          name: true,
+        },
+      },
+      projectAllocations: {
+        where: {
+          endedAt: null,
+        },
+        orderBy: {
+          startedAt: "asc",
+        },
+        select: {
+          project: {
+            select: {
+              projectCode: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!animal) {
+    return null;
+  }
+
+  return {
+    animal: {
+      id: animal.id,
+      animalId: animal.animalId,
+      labId: animal.labId,
+      status: animal.status,
+      dob: animal.dob.toISOString(),
+      outcomeStatus: animal.outcomeStatus,
+      experimentalStatus: animal.experimentalStatus,
+      deathDate: animal.deathDate?.toISOString() ?? null,
+      deathReason: animal.deathReason ?? null,
+    },
+    cageLabel: animal.currentCage
+      ? `${animal.currentCage.room.roomNumber} / ${animal.currentCage.rack.rackNumber} / ${animal.currentCage.cageNumber}`
+      : "Archived",
+    strainName: animal.strain.name,
+    projectCodes: animal.projectAllocations.map((allocation) => allocation.project.projectCode),
+  };
+}
+
 export async function getCageApiDetail(cageId: string) {
   return getCageDetailView(cageId);
 }
@@ -1191,6 +1266,7 @@ const resourceCatalog = [
     path: "/api/v1/animals",
     detailPath: "/api/v1/animals/{animalId}",
     description: "Animal summaries and animal detail records.",
+    methods: ["GET", "PATCH"],
   },
   {
     name: "cages",
