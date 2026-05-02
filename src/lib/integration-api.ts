@@ -1,11 +1,13 @@
 import { getAnimalDetailView, getAnimalListView } from "@/lib/animals-read";
 import { getCageDetailView, getCageListView } from "@/lib/cages-read";
+import { getCryostorageInventoryView } from "@/lib/cryostorage-read";
 import { getExperimentOverviewView } from "@/lib/experiments-read";
 import { prisma } from "@/lib/prisma";
 import { getSampleInventoryView } from "@/lib/samples-read";
 import type {
   AlertSeverity,
   AssignmentStatus,
+  CryostorageStatus,
   GenotypeCallStatus,
   HealthNoteType,
   SampleStatus,
@@ -55,6 +57,14 @@ export type SampleApiFilters = {
   limit: number;
 };
 
+export type CryostorageApiFilters = {
+  search: string;
+  status: string;
+  strain: string;
+  projectCode: string;
+  limit: number;
+};
+
 export type CreateSampleApiInput = {
   animalId?: string;
   animalCode?: string;
@@ -71,6 +81,26 @@ export type CreateSampleApiInput = {
 
 export type SampleApiRecordReferenceInput = {
   sampleId?: string;
+  sampleLabel?: string;
+};
+
+export type CreateCryostorageApiInput = {
+  strainId?: string;
+  strainName?: string;
+  projectId?: string;
+  projectCode?: string;
+  sampleLabel: string;
+  materialType: string;
+  status: CryostorageStatus;
+  storedAt: string;
+  storageLocation?: string;
+  quantityLabel?: string;
+  recoveryNotes?: string;
+  notes?: string;
+};
+
+export type CryostorageApiRecordReferenceInput = {
+  recordId?: string;
   sampleLabel?: string;
 };
 
@@ -127,6 +157,18 @@ export type ResolvedSampleApiInput = {
 
 export type ResolvedSampleApiRecordReference = {
   sampleId: string;
+  sampleLabel: string;
+};
+
+export type ResolvedCryostorageApiInput = {
+  projectCode: string | null;
+  projectId?: string;
+  strainId: string;
+  strainName: string;
+};
+
+export type ResolvedCryostorageApiRecordReference = {
+  recordId: string;
   sampleLabel: string;
 };
 
@@ -236,6 +278,16 @@ export function parseSampleApiFilters(searchParams: URLSearchParams): SampleApiF
     search: normalizeText(searchParams.get("search")),
     status: normalizeText(searchParams.get("status")) || "all",
     animalCode: normalizeText(searchParams.get("animalCode")),
+    projectCode: normalizeText(searchParams.get("projectCode")),
+    limit: parseLimit(searchParams.get("limit")),
+  };
+}
+
+export function parseCryostorageApiFilters(searchParams: URLSearchParams): CryostorageApiFilters {
+  return {
+    search: normalizeText(searchParams.get("search")),
+    status: normalizeText(searchParams.get("status")) || "all",
+    strain: normalizeText(searchParams.get("strain")),
     projectCode: normalizeText(searchParams.get("projectCode")),
     limit: parseLimit(searchParams.get("limit")),
   };
@@ -446,6 +498,39 @@ export async function getSampleApiList(filters: SampleApiFilters) {
   };
 }
 
+export async function getCryostorageApiList(filters: CryostorageApiFilters) {
+  const records = await getCryostorageInventoryView();
+  const search = normalizeSearch(filters.search);
+  const strain = normalizeSearch(filters.strain);
+  const projectCode = normalizeSearch(filters.projectCode);
+
+  const filtered = records.filter((record) => {
+    const matchesSearch = search
+      ? buildHaystack([
+          record.sampleLabel,
+          record.materialType,
+          record.status,
+          record.strainName,
+          record.projectCode,
+          record.storageLocation,
+          record.quantityLabel,
+          record.recoveryNotes,
+          record.notes,
+        ]).includes(search)
+      : true;
+    const matchesStatus = filters.status !== "all" ? record.status === filters.status : true;
+    const matchesStrain = strain ? record.strainName.toLowerCase().includes(strain) : true;
+    const matchesProject = projectCode ? record.projectCode?.toLowerCase().includes(projectCode) : true;
+
+    return matchesSearch && matchesStatus && matchesStrain && matchesProject;
+  });
+
+  return {
+    data: applyLimit(filtered, filters.limit),
+    total: filtered.length,
+  };
+}
+
 export async function getAnimalApiDetail(animalId: string) {
   return getAnimalDetailView(animalId);
 }
@@ -600,6 +685,74 @@ export async function resolveSampleApiInput(input: CreateSampleApiInput): Promis
       animalId: animal.value.animalId,
       projectCode: project?.projectCode ?? null,
       projectId: project?.id,
+    },
+  };
+}
+
+export async function resolveCryostorageApiInput(input: CreateCryostorageApiInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedCryostorageApiInput;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const strainRef = input.strainId?.trim();
+  const strainName = input.strainName?.trim();
+  const projectRef = input.projectId?.trim();
+  const projectCode = input.projectCode?.trim();
+
+  if (!strainRef && !strainName) {
+    return { ok: false, message: "Provide strainId or strainName.", status: 400 };
+  }
+
+  const strain = await prisma.strain.findFirst({
+    where: {
+      OR: [
+        ...(strainRef ? [{ id: strainRef }, { name: strainRef }] : []),
+        ...(strainName ? [{ name: strainName }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!strain) {
+    return { ok: false, message: "Strain not found for the supplied strainId or strainName.", status: 404 };
+  }
+
+  const project =
+    projectRef || projectCode
+      ? await prisma.project.findFirst({
+          where: {
+            OR: [
+              ...(projectRef ? [{ id: projectRef }, { projectCode: projectRef }] : []),
+              ...(projectCode ? [{ projectCode }] : []),
+            ],
+          },
+          select: {
+            id: true,
+            projectCode: true,
+          },
+        })
+      : null;
+
+  if ((projectRef || projectCode) && !project) {
+    return { ok: false, message: "Project not found for the supplied projectId or projectCode.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      projectCode: project?.projectCode ?? null,
+      projectId: project?.id,
+      strainId: strain.id,
+      strainName: strain.name,
     },
   };
 }
@@ -766,6 +919,24 @@ export async function getSampleApiRecordById(sampleId: string) {
   return record ? formatSampleApiRecord(record) : null;
 }
 
+export async function getCryostorageApiRecordById(recordId: string) {
+  const record = await prisma.cryostorageRecord.findUnique({
+    where: { id: recordId },
+    select: cryostorageApiSelect,
+  });
+
+  return record ? formatCryostorageApiRecord(record) : null;
+}
+
+export async function getCryostorageApiRecordByLabel(sampleLabel: string) {
+  const record = await prisma.cryostorageRecord.findUnique({
+    where: { sampleLabel },
+    select: cryostorageApiSelect,
+  });
+
+  return record ? formatCryostorageApiRecord(record) : null;
+}
+
 export async function getSampleApiRecordByLabel(sampleLabel: string) {
   const record = await prisma.sampleRecord.findUnique({
     where: { sampleLabel },
@@ -773,6 +944,50 @@ export async function getSampleApiRecordByLabel(sampleLabel: string) {
   });
 
   return record ? formatSampleApiRecord(record) : null;
+}
+
+export async function resolveCryostorageApiRecordReference(input: CryostorageApiRecordReferenceInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedCryostorageApiRecordReference;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const recordId = input.recordId?.trim();
+  const sampleLabel = input.sampleLabel?.trim();
+
+  if (!recordId && !sampleLabel) {
+    return { ok: false, message: "Provide recordId or sampleLabel.", status: 400 };
+  }
+
+  const record = await prisma.cryostorageRecord.findFirst({
+    where: {
+      OR: [
+        ...(recordId ? [{ id: recordId }, { sampleLabel: recordId }] : []),
+        ...(sampleLabel ? [{ sampleLabel }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      sampleLabel: true,
+    },
+  });
+
+  if (!record) {
+    return { ok: false, message: "Cryostorage record not found for the supplied recordId or sampleLabel.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      recordId: record.id,
+      sampleLabel: record.sampleLabel,
+    },
+  };
 }
 
 export async function resolveSampleApiRecordReference(input: SampleApiRecordReferenceInput): Promise<
@@ -1014,6 +1229,12 @@ const resourceCatalog = [
     methods: ["GET", "POST", "PATCH"],
   },
   {
+    name: "cryostorage",
+    path: "/api/v1/cryostorage",
+    description: "Cryostorage inventory summaries plus external intake and lifecycle updates.",
+    methods: ["GET", "POST", "PATCH"],
+  },
+  {
     name: "genotypes",
     path: "/api/v1/genotypes",
     description: "External genotype result intake with audited animal allele updates.",
@@ -1061,6 +1282,30 @@ const sampleApiSelect = {
     select: {
       animalId: true,
       labId: true,
+    },
+  },
+  project: {
+    select: {
+      projectCode: true,
+    },
+  },
+} as const;
+
+const cryostorageApiSelect = {
+  id: true,
+  sampleLabel: true,
+  materialType: true,
+  status: true,
+  storedAt: true,
+  storageLocation: true,
+  quantityLabel: true,
+  recoveryNotes: true,
+  notes: true,
+  createdAt: true,
+  strainId: true,
+  strain: {
+    select: {
+      name: true,
     },
   },
   project: {
@@ -1165,6 +1410,42 @@ function formatSampleApiRecord(record: {
     animalId: record.animalId,
     animalCode: record.animal.animalId,
     labId: record.animal.labId,
+    projectCode: record.project?.projectCode ?? null,
+  };
+}
+
+function formatCryostorageApiRecord(record: {
+  id: string;
+  sampleLabel: string;
+  materialType: string;
+  status: CryostorageStatus;
+  storedAt: Date;
+  storageLocation: string | null;
+  quantityLabel: string | null;
+  recoveryNotes: string | null;
+  notes: string | null;
+  createdAt: Date;
+  strainId: string;
+  strain: {
+    name: string;
+  };
+  project: {
+    projectCode: string;
+  } | null;
+}) {
+  return {
+    id: record.id,
+    sampleLabel: record.sampleLabel,
+    materialType: record.materialType,
+    status: record.status,
+    storedAt: record.storedAt.toISOString(),
+    storageLocation: record.storageLocation,
+    quantityLabel: record.quantityLabel,
+    recoveryNotes: record.recoveryNotes,
+    notes: record.notes,
+    createdAt: record.createdAt.toISOString(),
+    strainId: record.strainId,
+    strainName: record.strain.name,
     projectCode: record.project?.projectCode ?? null,
   };
 }

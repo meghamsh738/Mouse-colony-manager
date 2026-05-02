@@ -149,6 +149,15 @@ type CreateCryostorageRecordInput = {
   notes?: string;
 };
 
+type UpdateCryostorageRecordInput = {
+  recordId: string;
+  status?: CryostorageStatus;
+  storageLocation?: string | null;
+  quantityLabel?: string | null;
+  recoveryNotes?: string | null;
+  notes?: string | null;
+};
+
 type ImportGenotypeCsvInput = {
   csvText: string;
   fileName?: string;
@@ -2922,6 +2931,121 @@ export async function createCryostorageRecord(
     ok: true,
     message: `Cryostorage record ${normalizedSampleLabel} saved for ${strain.name}.`,
     entityId: recordId,
+  };
+}
+
+export async function updateCryostorageRecord(
+  input: UpdateCryostorageRecordInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canRecordCryostorage(actor.role)) {
+    return { ok: false, message: "Your role cannot update cryostorage inventory." };
+  }
+
+  const record = await prisma.cryostorageRecord.findUnique({
+    where: { id: input.recordId },
+    select: {
+      id: true,
+      sampleLabel: true,
+      status: true,
+      storageLocation: true,
+      quantityLabel: true,
+      recoveryNotes: true,
+      notes: true,
+      strain: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  });
+
+  if (!record) {
+    return { ok: false, message: "Cryostorage record not found." };
+  }
+
+  const normalized = {
+    status: input.status,
+    storageLocation:
+      input.storageLocation === undefined ? undefined : input.storageLocation?.trim() || null,
+    quantityLabel: input.quantityLabel === undefined ? undefined : input.quantityLabel?.trim() || null,
+    recoveryNotes: input.recoveryNotes === undefined ? undefined : input.recoveryNotes?.trim() || null,
+    notes: input.notes === undefined ? undefined : input.notes?.trim() || null,
+  };
+  const updateData: {
+    status?: CryostorageStatus;
+    storageLocation?: string | null;
+    quantityLabel?: string | null;
+    recoveryNotes?: string | null;
+    notes?: string | null;
+  } = {};
+  const previousValue: Record<string, Prisma.InputJsonValue | null> = {};
+  const newValue: Record<string, Prisma.InputJsonValue | null> = {};
+
+  if (normalized.status !== undefined && normalized.status !== record.status) {
+    updateData.status = normalized.status;
+    previousValue.status = record.status;
+    newValue.status = normalized.status;
+  }
+
+  if (normalized.storageLocation !== undefined && normalized.storageLocation !== record.storageLocation) {
+    updateData.storageLocation = normalized.storageLocation;
+    previousValue.storageLocation = record.storageLocation;
+    newValue.storageLocation = normalized.storageLocation;
+  }
+
+  if (normalized.quantityLabel !== undefined && normalized.quantityLabel !== record.quantityLabel) {
+    updateData.quantityLabel = normalized.quantityLabel;
+    previousValue.quantityLabel = record.quantityLabel;
+    newValue.quantityLabel = normalized.quantityLabel;
+  }
+
+  if (normalized.recoveryNotes !== undefined && normalized.recoveryNotes !== record.recoveryNotes) {
+    updateData.recoveryNotes = normalized.recoveryNotes;
+    previousValue.recoveryNotes = record.recoveryNotes;
+    newValue.recoveryNotes = normalized.recoveryNotes;
+  }
+
+  if (normalized.notes !== undefined && normalized.notes !== record.notes) {
+    updateData.notes = normalized.notes;
+    previousValue.notes = record.notes;
+    newValue.notes = normalized.notes;
+  }
+
+  if (!Object.keys(updateData).length) {
+    return {
+      ok: true,
+      message: `Cryostorage record ${record.sampleLabel} is already up to date for ${record.strain.name}.`,
+      entityId: record.id,
+    };
+  }
+
+  const timestamp = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.cryostorageRecord.update({
+      where: { id: record.id },
+      data: updateData,
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "cryostorage_record",
+        entityId: record.id,
+        action: "update",
+        previousValue: previousValue as Prisma.InputJsonObject,
+        newValue: newValue as Prisma.InputJsonObject,
+        timestamp,
+      },
+    });
+  }, { timeout: 15_000, maxWait: 10_000 });
+
+  return {
+    ok: true,
+    message: `Cryostorage record ${record.sampleLabel} updated for ${record.strain.name}.`,
+    entityId: record.id,
   };
 }
 

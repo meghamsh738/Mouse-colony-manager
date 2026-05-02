@@ -106,6 +106,10 @@ describe("integration API routes", () => {
       path: "/api/v1/samples",
       methods: ["GET", "POST", "PATCH"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "cryostorage")).toMatchObject({
+      path: "/api/v1/cryostorage",
+      methods: ["GET", "POST", "PATCH"],
+    });
     expect(payload.data.resources.find((resource) => resource.name === "cage-health-notes")).toMatchObject({
       path: "/api/v1/cages/health-notes",
       methods: ["POST"],
@@ -259,6 +263,177 @@ describe("integration API routes", () => {
     expect(payload.meta.filters).toMatchObject({ status: "stored" });
     expect(payload.meta.count).toBeGreaterThan(0);
     expect(payload.data.every((sample) => sample.status === "stored")).toBe(true);
+  });
+
+  it("returns filtered cryostorage inventory from the authenticated cryostorage route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { GET } = await import("@/app/api/v1/cryostorage/route");
+    const response = await GET(new Request("http://localhost:3000/api/v1/cryostorage?status=stored&limit=5"));
+    const payload = (await response.json()) as {
+      data: Array<{ status: string; sampleLabel: string; strainName: string }>;
+      meta: { count: number; filters: Record<string, string> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.filters).toMatchObject({ status: "stored" });
+    expect(payload.meta.count).toBeGreaterThan(0);
+    expect(payload.data.every((record) => record.status === "stored")).toBe(true);
+  });
+
+  it("creates cryostorage records through the external cryostorage route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/cryostorage/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/cryostorage", {
+        method: "POST",
+        body: JSON.stringify({
+          strainName: "Cx3cr1-CreER",
+          projectCode: "PRJ-NEURO-07",
+          sampleLabel: "CRYO-API-001",
+          materialType: "Frozen embryos",
+          status: "stored",
+          storedAt: "2026-04-12",
+          storageLocation: "LN2 Tank C / Cane 2 / Goblet 1",
+          quantityLabel: "14 embryos",
+          recoveryNotes: "Suitable for line recovery if breeders fail.",
+          notes: "Imported through the external cryostorage API.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { sampleLabel: string; strainName: string; projectCode: string; status: string; materialType: string };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("CRYO-API-001");
+    expect(payload.data).toMatchObject({
+      sampleLabel: "CRYO-API-001",
+      strainName: "Cx3cr1-CreER",
+      projectCode: "PRJ-NEURO-07",
+      status: "stored",
+      materialType: "Frozen embryos",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "cryostorage_record",
+          action: "create",
+          newValue: {
+            path: ["sampleLabel"],
+            equals: "CRYO-API-001",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated cryostorage intake as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/cryostorage/route");
+    const requestBody = {
+      strainName: "Cx3cr1-CreER",
+      projectCode: "PRJ-NEURO-07",
+      sampleLabel: "CRYO-API-REPEAT",
+      materialType: "Frozen sperm",
+      status: "stored",
+      storedAt: "2026-04-12",
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/cryostorage", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/cryostorage", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as { meta: { created: boolean; message: string } };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already recorded");
+  });
+
+  it("updates cryostorage lifecycle fields through the external cryostorage route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { PATCH, POST } = await import("@/app/api/v1/cryostorage/route");
+    const createResponse = await POST(
+      new Request("http://localhost:3000/api/v1/cryostorage", {
+        method: "POST",
+        body: JSON.stringify({
+          strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
+          sampleLabel: "CRYO-API-LIFECYCLE",
+          materialType: "Frozen embryos",
+          status: "stored",
+          storedAt: "2026-04-11",
+          storageLocation: "LN2 Tank A / Cane 3",
+          quantityLabel: "8 embryos",
+        }),
+      }),
+    );
+
+    expect(createResponse.status).toBe(201);
+
+    const updateResponse = await PATCH(
+      new Request("http://localhost:3000/api/v1/cryostorage", {
+        method: "PATCH",
+        body: JSON.stringify({
+          sampleLabel: "CRYO-API-LIFECYCLE",
+          status: "reserved",
+          storageLocation: "Recovery staging rack",
+          quantityLabel: "6 embryos reserved",
+          recoveryNotes: "Reserved for August recovery attempt.",
+          notes: "Updated by external cryostorage workflow.",
+        }),
+      }),
+    );
+    const payload = (await updateResponse.json()) as {
+      data: {
+        sampleLabel: string;
+        status: string;
+        storageLocation: string;
+        quantityLabel: string;
+        recoveryNotes: string;
+        notes: string;
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(updateResponse.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("CRYO-API-LIFECYCLE");
+    expect(payload.data).toMatchObject({
+      sampleLabel: "CRYO-API-LIFECYCLE",
+      status: "reserved",
+      storageLocation: "Recovery staging rack",
+      quantityLabel: "6 embryos reserved",
+      recoveryNotes: "Reserved for August recovery attempt.",
+      notes: "Updated by external cryostorage workflow.",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "cryostorage_record",
+          action: "update",
+          newValue: {
+            path: ["status"],
+            equals: "reserved",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
   });
 
   it("creates sample records through the external sample intake route", async () => {
@@ -431,6 +606,27 @@ describe("integration API routes", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record new sample inventory." });
   });
 
+  it("rejects read-only cryostorage intake requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/cryostorage/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/cryostorage", {
+        method: "POST",
+        body: JSON.stringify({
+          strainName: "Cx3cr1-CreER",
+          sampleLabel: "CRYO-API-READONLY",
+          materialType: "Frozen embryos",
+          status: "stored",
+          storedAt: "2026-04-12",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record cryostorage inventory." });
+  });
+
   it("rejects read-only sample lifecycle update requests", async () => {
     authMock.mockResolvedValue(readOnlySession());
 
@@ -447,6 +643,24 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot update sample inventory." });
+  });
+
+  it("rejects read-only cryostorage lifecycle update requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { PATCH } = await import("@/app/api/v1/cryostorage/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/cryostorage", {
+        method: "PATCH",
+        body: JSON.stringify({
+          sampleLabel: "CRYO-API-READONLY",
+          status: "reserved",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot update cryostorage inventory." });
   });
 
   it("creates genotype records through the external genotype intake route", async () => {

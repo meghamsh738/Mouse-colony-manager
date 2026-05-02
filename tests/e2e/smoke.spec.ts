@@ -314,6 +314,58 @@ test("researcher can query the authenticated integration API surface", async ({ 
     quantityLabel: "10 uL remaining",
   });
 
+  const cryostorageCreateResponse = await page.request.post("/api/v1/cryostorage", {
+    data: {
+      strainName: "Cx3cr1-CreER",
+      projectCode: "PRJ-NEURO-07",
+      sampleLabel: "CRYO-SMOKE-001",
+      materialType: "Frozen embryos",
+      status: "stored",
+      storedAt: "2026-04-12",
+      storageLocation: "LN2 Tank C / Cane 2 / Goblet 1",
+      quantityLabel: "14 embryos",
+      recoveryNotes: "Suitable for line recovery if breeders fail.",
+      notes: "Created by the authenticated integration API smoke.",
+    },
+  });
+  const cryostorageCreate = {
+    status: cryostorageCreateResponse.status(),
+    body: await cryostorageCreateResponse.json(),
+  };
+
+  expect(cryostorageCreate.status).toBe(201);
+  expect(cryostorageCreate.body.meta.created).toBe(true);
+  expect(cryostorageCreate.body.data).toMatchObject({
+    sampleLabel: "CRYO-SMOKE-001",
+    strainName: "Cx3cr1-CreER",
+    projectCode: "PRJ-NEURO-07",
+    status: "stored",
+  });
+
+  const cryostorageUpdateResponse = await page.request.patch("/api/v1/cryostorage", {
+    data: {
+      sampleLabel: "CRYO-SMOKE-001",
+      status: "reserved",
+      storageLocation: "Recovery staging rack",
+      quantityLabel: "12 embryos reserved",
+      recoveryNotes: "Reserved for August recovery attempt.",
+      notes: "Updated by the authenticated integration API smoke.",
+    },
+  });
+  const cryostorageUpdate = {
+    status: cryostorageUpdateResponse.status(),
+    body: await cryostorageUpdateResponse.json(),
+  };
+
+  expect(cryostorageUpdate.status).toBe(200);
+  expect(cryostorageUpdate.body.meta.created).toBe(false);
+  expect(cryostorageUpdate.body.data).toMatchObject({
+    sampleLabel: "CRYO-SMOKE-001",
+    status: "reserved",
+    storageLocation: "Recovery staging rack",
+    quantityLabel: "12 embryos reserved",
+  });
+
   const genotypeIntakeResponse = await page.request.post("/api/v1/genotypes", {
     data: {
       animalCode: "CM-25009",
