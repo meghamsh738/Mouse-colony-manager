@@ -79,6 +79,7 @@ Current delivery level:
 - [x] Add audited external sample lifecycle update API under `/api/v1/samples`
 - [x] Add audited external cryostorage intake and lifecycle update API under `/api/v1/cryostorage`
 - [x] Add audited external animal terminal lifecycle sync under `/api/v1/animals`
+- [x] Add audited external cage move sync under `/api/v1/cages`
 - [x] Add audited external cage welfare/equipment event intake under `/api/v1/cages/health-notes`
 - [x] Add an audited external genotype result intake API under `/api/v1/genotypes`
 - [x] Add multipart attachment/document handoff support to genotype and cage-welfare integration intake routes
@@ -91,7 +92,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external write integration after animal lifecycle, sample, cryostorage, genotype, attachment-aware cage welfare intake, and experiment assignment sync/status
+- [ ] Define the next external write integration after animal lifecycle, cage moves, sample, cryostorage, genotype, attachment-aware cage welfare intake, and experiment assignment sync/status
 
 ## Verification Snapshot
 
@@ -135,6 +136,7 @@ Notes:
 - On 2026-04-30, `/api/v1/samples` was added for external sample inventory integrations, with filtered sample reads, audited POST intake, idempotent duplicate handling for the same animal, and read-only role rejection.
 - On 2026-05-01, `/api/v1/samples` was extended with audited `PATCH` sample lifecycle updates for status, storage location, quantity, and notes, so external LIMS workflows can update downstream sample state.
 - On 2026-05-02, `/api/v1/animals` was extended with audited `PATCH` terminal lifecycle sync so external systems can mark euthanasia, death, transfer out, or archive states using the same transactional workflow as the app UI.
+- On 2026-05-03, `/api/v1/cages` was extended with audited `PATCH` cage move sync so external room-balancing or rack-tracking systems can relocate cages using the same transactional movement workflow as the app UI.
 - On 2026-05-02, `/api/v1/cryostorage` was added for external backup inventory integrations, with filtered reads, audited `POST` intake using `strainName`/`strainId` plus optional project resolution, idempotent duplicate handling, and audited `PATCH` lifecycle updates for status, storage location, quantity, recovery notes, and notes.
 - On 2026-05-01, `/api/v1/cages/health-notes` was added for external cage welfare and equipment-event intake, using the same audited cage health-note workflow as scan-based staff entry.
 - On 2026-05-01, `/api/v1/genotypes` was added for external genotype result integrations, with audited POST intake, animal/marker code resolution, duplicate handling for repeated vendor submissions, and read-only role rejection.

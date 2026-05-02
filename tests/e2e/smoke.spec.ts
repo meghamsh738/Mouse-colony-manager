@@ -507,6 +507,36 @@ test("staff can ingest an external cage welfare event through the integration AP
   ]);
 });
 
+test("staff can sync an external cage move through the integration API", async ({ page }) => {
+  await signInForApiRequests(page, "staff");
+
+  const response = await page.request.patch("/api/v1/cages", {
+    data: {
+      cageBarcode: "CM-A101-003",
+      roomNumber: "A102",
+      rackNumber: "R1",
+      cageNumber: "009",
+      movedAt: "2026-04-18",
+      reason: "External room-balancing workflow relocated the cage.",
+    },
+  });
+  const payload = {
+    status: response.status(),
+    body: await response.json(),
+  };
+
+  expect(payload.status).toBe(200);
+  expect(payload.body.meta.created).toBe(false);
+  expect(payload.body.meta.message).toContain("CM-A101-003 moved to A102 / R1 / 009");
+  expect(payload.body.data).toMatchObject({
+    cageBarcode: "CM-A101-003",
+    roomNumber: "A102",
+    rackNumber: "R1",
+    cageNumber: "009",
+    cageLabel: "A102 / R1 / 009",
+  });
+});
+
 test("staff can sync an external animal lifecycle update through the integration API", async ({ page }) => {
   await signInForApiRequests(page, "staff");
 

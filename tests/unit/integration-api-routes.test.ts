@@ -227,6 +227,10 @@ describe("integration API routes", () => {
       path: "/api/v1/cages/health-notes",
       methods: ["POST"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "cages")).toMatchObject({
+      path: "/api/v1/cages",
+      methods: ["GET", "PATCH"],
+    });
     expect(payload.data.resources.find((resource) => resource.name === "genotypes")).toMatchObject({
       path: "/api/v1/genotypes",
       methods: ["POST"],
@@ -307,6 +311,81 @@ describe("integration API routes", () => {
         },
       }),
     ).resolves.toBeTruthy();
+  });
+
+  it("moves cages through the external cage route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { PATCH } = await import("@/app/api/v1/cages/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/cages", {
+        method: "PATCH",
+        body: JSON.stringify({
+          cageBarcode: "CM-A101-003",
+          roomNumber: "A102",
+          rackNumber: "R1",
+          cageNumber: "009",
+          movedAt: "2026-04-18",
+          reason: "External room-balancing workflow relocated the cage.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        cageBarcode: string;
+        roomNumber: string;
+        rackNumber: string;
+        cageNumber: string;
+        cageLabel: string;
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("CM-A101-003 moved to A102 / R1 / 009");
+    expect(payload.data).toMatchObject({
+      cageBarcode: "CM-A101-003",
+      roomNumber: "A102",
+      rackNumber: "R1",
+      cageNumber: "009",
+      cageLabel: "A102 / R1 / 009",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "cage",
+          action: "move",
+          newValue: {
+            path: ["location"],
+            equals: "A102 / R1 / 009",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("rejects read-only cage move requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { PATCH } = await import("@/app/api/v1/cages/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/cages", {
+        method: "PATCH",
+        body: JSON.stringify({
+          cageBarcode: "CM-A101-003",
+          roomNumber: "A102",
+          rackNumber: "R1",
+          cageNumber: "009",
+          movedAt: "2026-04-18",
+          reason: "Readonly user should not move cages.",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot move cages." });
   });
 
   it("treats repeated cage welfare event ingestion as idempotent", async () => {

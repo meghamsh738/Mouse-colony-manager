@@ -36,6 +36,18 @@ export type CageApiFilters = {
   limit: number;
 };
 
+export type MoveCageApiInput = {
+  cageId?: string;
+  cageBarcode?: string;
+  roomId?: string;
+  roomNumber?: string;
+  rackId?: string;
+  rackNumber?: string;
+  cageNumber: string;
+  movedAt: string;
+  reason: string;
+};
+
 export type ExperimentApiFilters = {
   search: string;
   status: string;
@@ -182,6 +194,15 @@ export type ResolvedGenotypeApiInput = {
 export type ResolvedCageApiInput = {
   cageBarcode: string;
   cageId: string;
+};
+
+export type ResolvedCageMoveApiInput = {
+  cageBarcode: string;
+  cageId: string;
+  roomId: string;
+  roomNumber: string;
+  rackId: string;
+  rackNumber: string;
 };
 
 export type ResolvedExperimentAssignmentApiInput = {
@@ -614,6 +635,44 @@ export async function getCageApiDetail(cageId: string) {
   return getCageDetailView(cageId);
 }
 
+export async function getCageApiRecordById(cageId: string) {
+  const cage = await prisma.cage.findUnique({
+    where: { id: cageId },
+    select: {
+      id: true,
+      barcode: true,
+      status: true,
+      cageNumber: true,
+      lastUpdatedAt: true,
+      room: {
+        select: {
+          roomNumber: true,
+        },
+      },
+      rack: {
+        select: {
+          rackNumber: true,
+        },
+      },
+    },
+  });
+
+  if (!cage) {
+    return null;
+  }
+
+  return {
+    id: cage.id,
+    cageBarcode: cage.barcode,
+    status: cage.status,
+    cageNumber: cage.cageNumber,
+    roomNumber: cage.room.roomNumber,
+    rackNumber: cage.rack.rackNumber,
+    cageLabel: `${cage.room.roomNumber} / ${cage.rack.rackNumber} / ${cage.cageNumber}`,
+    lastUpdatedAt: cage.lastUpdatedAt.toISOString(),
+  };
+}
+
 export async function resolveCageByApiReference(input: {
   cageId?: string;
   cageBarcode?: string;
@@ -657,6 +716,84 @@ export async function resolveCageByApiReference(input: {
     value: {
       cageBarcode: cage.barcode,
       cageId: cage.id,
+    },
+  };
+}
+
+export async function resolveCageMoveApiInput(input: MoveCageApiInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedCageMoveApiInput;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const cage = await resolveCageByApiReference(input);
+
+  if (!cage.ok) {
+    return cage;
+  }
+
+  const roomRef = input.roomId?.trim();
+  const roomNumber = input.roomNumber?.trim();
+  const rackRef = input.rackId?.trim();
+  const rackNumber = input.rackNumber?.trim();
+
+  if ((!roomRef && !roomNumber) || (!rackRef && !rackNumber)) {
+    return {
+      ok: false,
+      message: "Provide roomId or roomNumber and rackId or rackNumber for the destination cage move.",
+      status: 400,
+    };
+  }
+
+  const room = await prisma.room.findFirst({
+    where: {
+      OR: [
+        ...(roomRef ? [{ id: roomRef }, { roomNumber: roomRef }] : []),
+        ...(roomNumber ? [{ roomNumber }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      roomNumber: true,
+    },
+  });
+
+  if (!room) {
+    return { ok: false, message: "Destination room not found for the supplied roomId or roomNumber.", status: 404 };
+  }
+
+  const rack = await prisma.rack.findFirst({
+    where: {
+      roomId: room.id,
+      OR: [
+        ...(rackRef ? [{ id: rackRef }, { rackNumber: rackRef }] : []),
+        ...(rackNumber ? [{ rackNumber }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      rackNumber: true,
+    },
+  });
+
+  if (!rack) {
+    return { ok: false, message: "Destination rack not found for the supplied rackId or rackNumber in that room.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      cageBarcode: cage.value.cageBarcode,
+      cageId: cage.value.cageId,
+      roomId: room.id,
+      roomNumber: room.roomNumber,
+      rackId: rack.id,
+      rackNumber: rack.rackNumber,
     },
   };
 }
@@ -1273,7 +1410,7 @@ const resourceCatalog = [
     path: "/api/v1/cages",
     detailPath: "/api/v1/cages/{cageId}",
     description: "Cage summaries, occupancy, notes, movement history, and external welfare event intake.",
-    methods: ["GET"],
+    methods: ["GET", "PATCH"],
   },
   {
     name: "cage-health-notes",
