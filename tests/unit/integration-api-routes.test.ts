@@ -228,6 +228,57 @@ describe("integration API routes", () => {
     expect(payload.meta.message).toContain("already logged");
   });
 
+  it("accepts cage welfare event attachment handoff through multipart intake", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/cages/health-notes/route");
+    const formData = new FormData();
+    formData.set("cageBarcode", "CM-A101-003");
+    formData.set("noteType", "routine_welfare");
+    formData.set("severity", "warning");
+    formData.set("note", "External rack camera captured a wet-bedding event.");
+    formData.set("followupRequired", "true");
+    formData.set("actionTaken", "Escalated for cage-change triage.");
+    formData.set("attachmentLabel", "Wet bedding photo");
+    formData.set("attachment", new File(["camera frame"], "wet-bedding.txt", { type: "text/plain" }));
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/cages/health-notes", {
+        method: "POST",
+        body: formData,
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        note: string;
+        attachments: Array<{ label: string; fileName: string; fileType: string; storageUrl: string }>;
+      };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.data.note).toContain("wet-bedding event");
+    expect(payload.data.attachments).toEqual([
+      expect.objectContaining({
+        label: "Wet bedding photo",
+        fileName: "wet-bedding.txt",
+        fileType: "text/plain",
+      }),
+    ]);
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "attachment",
+          action: "create",
+          newValue: {
+            path: ["label"],
+            equals: "Wet bedding photo",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
   it("rejects read-only cage welfare event ingestion requests", async () => {
     authMock.mockResolvedValue(readOnlySession());
 
@@ -752,6 +803,63 @@ describe("integration API routes", () => {
     expect(response.status).toBe(200);
     expect(payload.meta.created).toBe(false);
     expect(payload.meta.message).toContain("already recorded");
+  });
+
+  it("accepts genotype attachment handoff through multipart intake", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/genotypes/route");
+    const formData = new FormData();
+    formData.set("animalCode", "CM-25009");
+    formData.set("marker", "CreER");
+    formData.set("zygosity", "+/-");
+    formData.set("status", "confirmed");
+    formData.set("sourceType", "external vendor");
+    formData.set("assayType", "Transnetyx panel");
+    formData.set("sampleDate", "2026-04-10");
+    formData.set("resultDate", "2026-04-10");
+    formData.set("resultText", "External API attachment-backed CreER call.");
+    formData.set("provider", "Transnetyx");
+    formData.set("confidence", "high");
+    formData.set("sampleId", "TX-API-ATTACH-001");
+    formData.set("attachmentLabel", "Vendor PDF");
+    formData.set("attachment", new File(["pdf bytes"], "vendor-report.txt", { type: "text/plain" }));
+
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/genotypes", {
+        method: "POST",
+        body: formData,
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        sampleId: string;
+        attachments: Array<{ label: string; fileName: string; fileType: string; storageUrl: string }>;
+      };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.data.sampleId).toBe("TX-API-ATTACH-001");
+    expect(payload.data.attachments).toEqual([
+      expect.objectContaining({
+        label: "Vendor PDF",
+        fileName: "vendor-report.txt",
+        fileType: "text/plain",
+      }),
+    ]);
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "attachment",
+          action: "create",
+          newValue: {
+            path: ["label"],
+            equals: "Vendor PDF",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
   });
 
   it("rejects read-only genotype intake requests", async () => {

@@ -80,6 +80,7 @@ Current delivery level:
 - [x] Add audited external cryostorage intake and lifecycle update API under `/api/v1/cryostorage`
 - [x] Add audited external cage welfare/equipment event intake under `/api/v1/cages/health-notes`
 - [x] Add an audited external genotype result intake API under `/api/v1/genotypes`
+- [x] Add multipart attachment/document handoff support to genotype and cage-welfare integration intake routes
 - [x] Add an audited external planned experiment assignment sync API under `/api/v1/experiments/assignments`
 - [x] Add audited external experiment assignment promote/rollback status sync under `/api/v1/experiments/assignments`
 
@@ -89,7 +90,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external write integration after sample, cryostorage, genotype, experiment assignment, and cage welfare intake/status sync, likely broader attachment/document handoff
+- [ ] Define the next external write integration after sample, cryostorage, genotype, attachment-aware cage welfare intake, and experiment assignment sync/status
 
 ## Verification Snapshot
 
@@ -135,6 +136,7 @@ Notes:
 - On 2026-05-02, `/api/v1/cryostorage` was added for external backup inventory integrations, with filtered reads, audited `POST` intake using `strainName`/`strainId` plus optional project resolution, idempotent duplicate handling, and audited `PATCH` lifecycle updates for status, storage location, quantity, recovery notes, and notes.
 - On 2026-05-01, `/api/v1/cages/health-notes` was added for external cage welfare and equipment-event intake, using the same audited cage health-note workflow as scan-based staff entry.
 - On 2026-05-01, `/api/v1/genotypes` was added for external genotype result integrations, with audited POST intake, animal/marker code resolution, duplicate handling for repeated vendor submissions, and read-only role rejection.
+- On 2026-05-02, `/api/v1/genotypes` and `/api/v1/cages/health-notes` were extended to accept multipart attachment handoff so external vendors or monitoring systems can upload supporting documents into the same audited attachment flow the app UI already uses.
 - On 2026-05-01, `/api/v1/experiments/assignments` was added for external scheduling integrations, with audited planned-assignment sync, experiment/animal code resolution, duplicate handling for repeated scheduler submissions, and read-only role rejection.
 - On 2026-05-01, `/api/v1/experiments/assignments` was extended with `PATCH` promote/rollback actions for external assignment status sync using the same audited promotion and rollback workflow as the app UI.
 - The latest notification delivery unit suite covers webhook delivery and HTTP email-provider delivery with a mocked provider endpoint.

@@ -28,6 +28,7 @@ const cageHealthNoteApiSchema = z.object({
   note: z.string().trim().min(6).max(500),
   followupRequired: z.boolean().default(false),
   actionTaken: z.string().trim().max(300).optional(),
+  attachmentLabel: z.string().trim().max(120).optional(),
 });
 
 export async function POST(request: Request) {
@@ -41,14 +42,15 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Your role cannot add cage health notes.", 403);
   }
 
-  const body = await parseJsonBody(request);
-  const parsed = cageHealthNoteApiSchema.safeParse(body);
+  const parsedRequest = await parseCageHealthNoteApiRequest(request);
 
-  if (!parsed.success) {
-    return buildApiErrorResponse("Invalid cage health-note payload.", 400, parsed.error.flatten().fieldErrors);
+  if (!parsedRequest.ok) {
+    return buildApiErrorResponse(parsedRequest.message, 400, parsedRequest.details);
   }
 
-  const resolved = await resolveCageByApiReference(parsed.data);
+  const parsed = parsedRequest.value;
+
+  const resolved = await resolveCageByApiReference(parsed);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
@@ -57,14 +59,14 @@ export async function POST(request: Request) {
   const existingNote = await getExistingCageHealthNoteApiRecord({
     cageId: resolved.value.cageId,
     createdById: auth.user.id,
-    noteType: parsed.data.noteType,
-    severity: parsed.data.severity,
-    note: parsed.data.note,
-    followupRequired: parsed.data.followupRequired,
-    actionTaken: parsed.data.actionTaken,
+    noteType: parsed.noteType,
+    severity: parsed.severity,
+    note: parsed.note,
+    followupRequired: parsed.followupRequired,
+    actionTaken: parsed.actionTaken,
   });
 
-  if (existingNote) {
+  if (existingNote && !parsedRequest.attachment) {
     return buildMutationResponse(existingNote, {
       status: 200,
       created: false,
@@ -75,11 +77,17 @@ export async function POST(request: Request) {
   const result = await addCageHealthNote(
     {
       cageId: resolved.value.cageId,
-      noteType: parsed.data.noteType,
-      severity: parsed.data.severity,
-      note: parsed.data.note,
-      followupRequired: parsed.data.followupRequired,
-      actionTaken: parsed.data.actionTaken,
+      noteType: parsed.noteType,
+      severity: parsed.severity,
+      note: parsed.note,
+      followupRequired: parsed.followupRequired,
+      actionTaken: parsed.actionTaken,
+      attachment: parsedRequest.attachment
+        ? {
+            file: parsedRequest.attachment,
+            label: parsed.attachmentLabel,
+          }
+        : undefined,
     },
     { id: auth.user.id, role: auth.user.role },
   );
@@ -97,16 +105,89 @@ export async function POST(request: Request) {
   }
 
   return buildMutationResponse(healthNote, {
-    status: 201,
-    created: true,
+    status: existingNote ? 200 : 201,
+    created: !existingNote,
     message: result.message,
   });
 }
 
-async function parseJsonBody(request: Request) {
-  try {
-    return await request.json();
-  } catch {
-    return null;
+async function parseCageHealthNoteApiRequest(request: Request): Promise<
+  | {
+      ok: true;
+      value: z.infer<typeof cageHealthNoteApiSchema>;
+      attachment?: File;
+    }
+  | {
+      ok: false;
+      message: string;
+      details?: unknown;
+    }
+> {
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    try {
+      const formData = await request.formData();
+      const attachmentField = formData.get("attachment");
+      const attachment = attachmentField instanceof File && attachmentField.size > 0 ? attachmentField : undefined;
+      const parsed = cageHealthNoteApiSchema.safeParse({
+        cageId: getFormText(formData, "cageId"),
+        cageBarcode: getFormText(formData, "cageBarcode"),
+        noteType: getFormText(formData, "noteType"),
+        severity: getFormText(formData, "severity"),
+        note: getFormText(formData, "note"),
+        followupRequired: parseFormBoolean(formData.get("followupRequired")),
+        actionTaken: getFormText(formData, "actionTaken"),
+        attachmentLabel: getFormText(formData, "attachmentLabel"),
+      });
+
+      if (!parsed.success) {
+        return {
+          ok: false,
+          message: "Invalid cage health-note payload.",
+          details: parsed.error.flatten().fieldErrors,
+        };
+      }
+
+      return {
+        ok: true,
+        value: parsed.data,
+        attachment,
+      };
+    } catch {
+      return { ok: false, message: "Invalid cage health-note payload." };
+    }
   }
+
+  try {
+    const parsed = cageHealthNoteApiSchema.safeParse(await request.json());
+
+    if (!parsed.success) {
+      return {
+        ok: false,
+        message: "Invalid cage health-note payload.",
+        details: parsed.error.flatten().fieldErrors,
+      };
+    }
+
+    return {
+      ok: true,
+      value: parsed.data,
+    };
+  } catch {
+    return { ok: false, message: "Invalid cage health-note payload." };
+  }
+}
+
+function getFormText(formData: FormData, key: string) {
+  const value = formData.get(key);
+  return typeof value === "string" ? value : undefined;
+}
+
+function parseFormBoolean(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  return value === "true" || value === "1" || value === "on";
 }

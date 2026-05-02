@@ -24,6 +24,7 @@ const createGenotypeApiSchema = z.object({
   confidence: z.string().trim().max(40).optional(),
   provider: z.string().trim().max(80).optional(),
   sampleId: z.string().trim().max(80).optional(),
+  attachmentLabel: z.string().trim().max(120).optional(),
 });
 
 export async function POST(request: Request) {
@@ -37,14 +38,15 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Your role cannot record genotyping results.", 403);
   }
 
-  const body = await parseJsonBody(request);
-  const parsed = createGenotypeApiSchema.safeParse(body);
+  const parsedRequest = await parseGenotypeApiRequest(request);
 
-  if (!parsed.success) {
-    return buildApiErrorResponse("Invalid genotype payload.", 400, parsed.error.flatten().fieldErrors);
+  if (!parsedRequest.ok) {
+    return buildApiErrorResponse(parsedRequest.message, 400, parsedRequest.details);
   }
 
-  const resolved = await resolveGenotypeApiInput(parsed.data);
+  const parsed = parsedRequest.value;
+
+  const resolved = await resolveGenotypeApiInput(parsed);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
@@ -52,20 +54,20 @@ export async function POST(request: Request) {
 
   const finalCall = buildGenotypeApiFinalCall({
     marker: resolved.value.marker,
-    status: parsed.data.status,
-    zygosity: parsed.data.zygosity,
+    status: parsed.status,
+    zygosity: parsed.zygosity,
   });
   const existingRecord = await getExistingGenotypeApiRecord({
     animalId: resolved.value.animalId,
     marker: resolved.value.marker,
-    status: parsed.data.status,
-    sampleDate: parsed.data.sampleDate,
-    resultDate: parsed.data.resultDate,
+    status: parsed.status,
+    sampleDate: parsed.sampleDate,
+    resultDate: parsed.resultDate,
     finalCall,
-    resultText: parsed.data.resultText,
+    resultText: parsed.resultText,
   });
 
-  if (existingRecord) {
+  if (existingRecord && !parsedRequest.attachment) {
     return buildMutationResponse(existingRecord, {
       status: 200,
       created: false,
@@ -77,16 +79,22 @@ export async function POST(request: Request) {
     {
       animalId: resolved.value.animalId,
       alleleId: resolved.value.alleleId,
-      zygosity: parsed.data.zygosity,
-      status: parsed.data.status,
-      sourceType: parsed.data.sourceType,
-      assayType: parsed.data.assayType,
-      sampleDate: parsed.data.sampleDate,
-      resultDate: parsed.data.resultDate,
-      resultText: parsed.data.resultText,
-      confidence: parsed.data.confidence,
-      provider: parsed.data.provider,
-      sampleId: parsed.data.sampleId,
+      zygosity: parsed.zygosity,
+      status: parsed.status,
+      sourceType: parsed.sourceType,
+      assayType: parsed.assayType,
+      sampleDate: parsed.sampleDate,
+      resultDate: parsed.resultDate,
+      resultText: parsed.resultText,
+      confidence: parsed.confidence,
+      provider: parsed.provider,
+      sampleId: parsed.sampleId,
+      attachment: parsedRequest.attachment
+        ? {
+            file: parsedRequest.attachment,
+            label: parsed.attachmentLabel,
+          }
+        : undefined,
     },
     { id: auth.user.id, role: auth.user.role },
   );
@@ -104,16 +112,88 @@ export async function POST(request: Request) {
   }
 
   return buildMutationResponse(genotype, {
-    status: 201,
-    created: true,
+    status: existingRecord ? 200 : 201,
+    created: !existingRecord,
     message: result.message,
   });
 }
 
-async function parseJsonBody(request: Request) {
-  try {
-    return await request.json();
-  } catch {
-    return null;
+async function parseGenotypeApiRequest(request: Request): Promise<
+  | {
+      ok: true;
+      value: z.infer<typeof createGenotypeApiSchema>;
+      attachment?: File;
+    }
+  | {
+      ok: false;
+      message: string;
+      details?: unknown;
+    }
+> {
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    try {
+      const formData = await request.formData();
+      const attachmentField = formData.get("attachment");
+      const attachment = attachmentField instanceof File && attachmentField.size > 0 ? attachmentField : undefined;
+      const parsed = createGenotypeApiSchema.safeParse({
+        animalId: getFormText(formData, "animalId"),
+        animalCode: getFormText(formData, "animalCode"),
+        alleleId: getFormText(formData, "alleleId"),
+        marker: getFormText(formData, "marker"),
+        zygosity: getFormText(formData, "zygosity"),
+        status: getFormText(formData, "status") ?? undefined,
+        sourceType: getFormText(formData, "sourceType"),
+        assayType: getFormText(formData, "assayType"),
+        sampleDate: getFormText(formData, "sampleDate"),
+        resultDate: getFormText(formData, "resultDate"),
+        resultText: getFormText(formData, "resultText"),
+        confidence: getFormText(formData, "confidence"),
+        provider: getFormText(formData, "provider"),
+        sampleId: getFormText(formData, "sampleId"),
+        attachmentLabel: getFormText(formData, "attachmentLabel"),
+      });
+
+      if (!parsed.success) {
+        return {
+          ok: false,
+          message: "Invalid genotype payload.",
+          details: parsed.error.flatten().fieldErrors,
+        };
+      }
+
+      return {
+        ok: true,
+        value: parsed.data,
+        attachment,
+      };
+    } catch {
+      return { ok: false, message: "Invalid genotype payload." };
+    }
   }
+
+  try {
+    const parsed = createGenotypeApiSchema.safeParse(await request.json());
+
+    if (!parsed.success) {
+      return {
+        ok: false,
+        message: "Invalid genotype payload.",
+        details: parsed.error.flatten().fieldErrors,
+      };
+    }
+
+    return {
+      ok: true,
+      value: parsed.data,
+    };
+  } catch {
+    return { ok: false, message: "Invalid genotype payload." };
+  }
+}
+
+function getFormText(formData: FormData, key: string) {
+  const value = formData.get(key);
+  return typeof value === "string" ? value : undefined;
 }

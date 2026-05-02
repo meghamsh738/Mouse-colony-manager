@@ -367,7 +367,7 @@ test("researcher can query the authenticated integration API surface", async ({ 
   });
 
   const genotypeIntakeResponse = await page.request.post("/api/v1/genotypes", {
-    data: {
+    multipart: {
       animalCode: "CM-25009",
       marker: "CreER",
       zygosity: "+/-",
@@ -380,6 +380,12 @@ test("researcher can query the authenticated integration API surface", async ({ 
       provider: "Transnetyx",
       confidence: "high",
       sampleId: "TX-SMOKE-001",
+      attachmentLabel: "Vendor smoke report",
+      attachment: {
+        name: "vendor-smoke-report.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("smoke genotype attachment"),
+      },
     },
   });
   const genotypeIntake = {
@@ -396,6 +402,13 @@ test("researcher can query the authenticated integration API surface", async ({ 
     sampleId: "TX-SMOKE-001",
     status: "confirmed",
   });
+  expect(genotypeIntake.body.data.attachments).toEqual([
+    expect.objectContaining({
+      label: "Vendor smoke report",
+      fileName: "vendor-smoke-report.txt",
+      fileType: "text/plain",
+    }),
+  ]);
 
   const assignmentSyncResponse = await page.request.post("/api/v1/experiments/assignments", {
     data: {
@@ -457,13 +470,19 @@ test("staff can ingest an external cage welfare event through the integration AP
   await signInForApiRequests(page, "staff");
 
   const response = await page.request.post("/api/v1/cages/health-notes", {
-    data: {
+    multipart: {
       cageBarcode: "CM-A101-003",
       noteType: "routine_welfare",
       severity: "warning",
       note: "External rack sensor reported persistent wet bedding.",
       followupRequired: true,
       actionTaken: "Flagged for cage-change triage.",
+      attachmentLabel: "Rack sensor snapshot",
+      attachment: {
+        name: "rack-sensor-snapshot.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("sensor snapshot"),
+      },
     },
   });
   const payload = {
@@ -479,6 +498,13 @@ test("staff can ingest an external cage welfare event through the integration AP
     severity: "warning",
     followupRequired: true,
   });
+  expect(payload.body.data.attachments).toEqual([
+    expect.objectContaining({
+      label: "Rack sensor snapshot",
+      fileName: "rack-sensor-snapshot.txt",
+      fileType: "text/plain",
+    }),
+  ]);
 });
 
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {

@@ -1335,6 +1335,16 @@ const genotypeApiSelect = {
       labId: true,
     },
   },
+  attachments: {
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      label: true,
+      fileName: true,
+      fileType: true,
+      storageUrl: true,
+    },
+  },
 } as const;
 
 const cageHealthNoteApiSelect = {
@@ -1350,6 +1360,16 @@ const cageHealthNoteApiSelect = {
   cage: {
     select: {
       barcode: true,
+    },
+  },
+  attachments: {
+    orderBy: { id: "asc" },
+    select: {
+      id: true,
+      label: true,
+      fileName: true,
+      fileType: true,
+      storageUrl: true,
     },
   },
 } as const;
@@ -1499,6 +1519,13 @@ function formatCageHealthNoteApiRecord(record: {
   cage: {
     barcode: string;
   } | null;
+  attachments: Array<{
+    id: string;
+    label: string;
+    fileName: string;
+    fileType: string;
+    storageUrl: string;
+  }>;
 }) {
   return {
     id: record.id,
@@ -1511,6 +1538,13 @@ function formatCageHealthNoteApiRecord(record: {
     actionTaken: record.actionTaken,
     resolved: record.resolved,
     createdAt: record.createdAt.toISOString(),
+    attachments: record.attachments.map((attachment) => ({
+      id: attachment.id,
+      label: attachment.label,
+      fileName: attachment.fileName,
+      fileType: attachment.fileType,
+      storageUrl: attachment.storageUrl,
+    })),
   };
 }
 
@@ -1532,6 +1566,13 @@ function formatGenotypeApiRecord(record: {
     animalId: string;
     labId: string;
   };
+  attachments: Array<{
+    id: string;
+    label: string;
+    fileName: string;
+    fileType: string;
+    storageUrl: string;
+  }>;
 }) {
   return {
     id: record.id,
@@ -1552,5 +1593,12 @@ function formatGenotypeApiRecord(record: {
     sampleId: record.sampleId,
     sampleDate: record.sampleDate.toISOString(),
     resultDate: record.resultDate.toISOString(),
+    attachments: record.attachments.map((attachment) => ({
+      id: attachment.id,
+      label: attachment.label,
+      fileName: attachment.fileName,
+      fileType: attachment.fileType,
+      storageUrl: attachment.storageUrl,
+    })),
   };
 }
