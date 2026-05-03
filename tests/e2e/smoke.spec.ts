@@ -633,6 +633,65 @@ test("admin can record a litter through the integration API", async ({ page }) =
   );
 });
 
+test("admin can record weaning through the integration API", async ({ page }) => {
+  await signInForApiRequests(page, "admin");
+
+  const breedingResponse = await page.request.post("/api/v1/breeding-setups", {
+    data: {
+      sireCode: "CM-22008",
+      damCode: "CM-25009",
+      startDate: "2026-04-18",
+      targetGenotype: "Weaning API smoke",
+      allowOverride: true,
+    },
+  });
+  const breedingPayload = await breedingResponse.json();
+
+  const litterResponse = await page.request.post("/api/v1/litters", {
+    data: {
+      breedingSetupId: breedingPayload.data.id,
+      birthDate: "2026-04-20",
+      litterSizeBirth: 5,
+      notes: "Created before the authenticated weaning integration API smoke.",
+    },
+  });
+  const litterPayload = await litterResponse.json();
+
+  const response = await page.request.post("/api/v1/weanings", {
+    data: {
+      litterId: litterPayload.data.id,
+      weanDate: "2026-05-01",
+      femaleCount: 2,
+      maleCount: 3,
+      femaleCageBarcode: "CM-A101-003",
+      maleCageBarcode: "CM-A101-002",
+      strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
+    },
+  });
+  const payload = {
+    status: response.status(),
+    body: await response.json(),
+  };
+
+  expect(payload.status).toBe(201);
+  expect(payload.body.meta.created).toBe(true);
+  expect(payload.body.meta.message).toContain("5 pups weaned");
+  expect(payload.body.data).toMatchObject({
+    litterId: litterPayload.data.id,
+    femaleCount: 2,
+    maleCount: 3,
+    strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
+    femaleCage: { cageBarcode: "CM-A101-003" },
+    maleCage: { cageBarcode: "CM-A101-002" },
+  });
+  expect(payload.body.data.progeny).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ sex: "female", cageBarcode: "CM-A101-003" }),
+      expect.objectContaining({ sex: "male", cageBarcode: "CM-A101-002" }),
+    ]),
+  );
+});
+
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {
   await signInAs(page, "staff");
   await page.goto("/notifications");

@@ -176,6 +176,19 @@ export type CreateLitterApiInput = {
   notes?: string;
 };
 
+export type CreateWeaningApiInput = {
+  litterId: string;
+  weanDate: string;
+  femaleCount: number;
+  maleCount: number;
+  femaleCageId?: string;
+  femaleCageBarcode?: string;
+  maleCageId?: string;
+  maleCageBarcode?: string;
+  strainId?: string;
+  strainName?: string;
+};
+
 export type ExperimentApiReferenceInput = {
   experimentId?: string;
   experimentCode?: string;
@@ -241,6 +254,11 @@ export type ResolvedBreedingSetupApiInput = {
   sireId: string;
   damCode: string;
   damId: string;
+};
+
+export type ResolvedStrainApiReference = {
+  strainId: string;
+  strainName: string;
 };
 
 export type ResolvedExperimentApiReference = {
@@ -879,6 +897,53 @@ export async function resolveAnimalByApiReference(input: {
   };
 }
 
+export async function resolveStrainByApiReference(input: {
+  strainId?: string;
+  strainName?: string;
+}): Promise<
+  | {
+      ok: true;
+      value: ResolvedStrainApiReference;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const strainRef = input.strainId?.trim();
+  const strainName = input.strainName?.trim();
+
+  if (!strainRef && !strainName) {
+    return { ok: false, message: "Provide strainId or strainName.", status: 400 };
+  }
+
+  const strain = await prisma.strain.findFirst({
+    where: {
+      OR: [
+        ...(strainRef ? [{ id: strainRef }, { name: strainRef }] : []),
+        ...(strainName ? [{ name: strainName }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      name: true,
+    },
+  });
+
+  if (!strain) {
+    return { ok: false, message: "Strain not found for the supplied strainId or strainName.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      strainId: strain.id,
+      strainName: strain.name,
+    },
+  };
+}
+
 export async function resolveSampleApiInput(input: CreateSampleApiInput): Promise<
   | {
       ok: true;
@@ -940,30 +1005,12 @@ export async function resolveCryostorageApiInput(input: CreateCryostorageApiInpu
       status: number;
     }
 > {
-  const strainRef = input.strainId?.trim();
-  const strainName = input.strainName?.trim();
   const projectRef = input.projectId?.trim();
   const projectCode = input.projectCode?.trim();
+  const strain = await resolveStrainByApiReference(input);
 
-  if (!strainRef && !strainName) {
-    return { ok: false, message: "Provide strainId or strainName.", status: 400 };
-  }
-
-  const strain = await prisma.strain.findFirst({
-    where: {
-      OR: [
-        ...(strainRef ? [{ id: strainRef }, { name: strainRef }] : []),
-        ...(strainName ? [{ name: strainName }] : []),
-      ],
-    },
-    select: {
-      id: true,
-      name: true,
-    },
-  });
-
-  if (!strain) {
-    return { ok: false, message: "Strain not found for the supplied strainId or strainName.", status: 404 };
+  if (!strain.ok) {
+    return strain;
   }
 
   const project =
@@ -991,8 +1038,8 @@ export async function resolveCryostorageApiInput(input: CreateCryostorageApiInpu
     value: {
       projectCode: project?.projectCode ?? null,
       projectId: project?.id,
-      strainId: strain.id,
-      strainName: strain.name,
+      strainId: strain.value.strainId,
+      strainName: strain.value.strainName,
     },
   };
 }
@@ -1494,6 +1541,28 @@ export async function getExistingLitterApiRecord(input: {
   return record.birthDate.toISOString().slice(0, 10) === normalizedBirthKey ? formatLitterApiRecord(record) : null;
 }
 
+export async function getWeaningApiRecordByLitterId(litterId: string) {
+  const [record, auditLog] = await Promise.all([
+    prisma.litter.findUnique({
+      where: { id: litterId },
+      select: weaningApiSelect,
+    }),
+    prisma.auditLog.findFirst({
+      where: {
+        entityType: "litter",
+        entityId: litterId,
+        action: "wean",
+      },
+      orderBy: [{ timestamp: "desc" }, { id: "desc" }],
+      select: {
+        newValue: true,
+      },
+    }),
+  ]);
+
+  return record ? formatWeaningApiRecord(record, auditLog?.newValue) : null;
+}
+
 export async function getExistingGenotypeApiRecord(input: {
   animalId: string;
   marker: string;
@@ -1593,6 +1662,12 @@ const resourceCatalog = [
     name: "litters",
     path: "/api/v1/litters",
     description: "External litter intake for active breeding setups with audit provenance.",
+    methods: ["POST"],
+  },
+  {
+    name: "weanings",
+    path: "/api/v1/weanings",
+    description: "External weaning sync for litters with audited progeny creation and cage assignment.",
     methods: ["POST"],
   },
   {
@@ -1819,6 +1894,56 @@ const litterApiSelect = {
   litterAnimals: {
     select: {
       id: true,
+    },
+  },
+} satisfies Prisma.LitterSelect;
+
+const weaningApiSelect = {
+  id: true,
+  birthDate: true,
+  litterSizeBirth: true,
+  litterSizeWean: true,
+  notes: true,
+  breedingSetupId: true,
+  breedingSetup: {
+    select: {
+      targetGenotype: true,
+      status: true,
+    },
+  },
+  litterAnimals: {
+    orderBy: [{ animal: { sex: "asc" } }, { animal: { animalId: "asc" } }],
+    select: {
+      animal: {
+        select: {
+          id: true,
+          animalId: true,
+          sex: true,
+          strain: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          currentCage: {
+            select: {
+              id: true,
+              barcode: true,
+              cageNumber: true,
+              rack: {
+                select: {
+                  rackNumber: true,
+                  room: {
+                    select: {
+                      roomNumber: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     },
   },
 } satisfies Prisma.LitterSelect;
@@ -2080,6 +2205,91 @@ function formatLitterApiRecord(record: {
       animalCode: adult.animal.animalId,
     })),
     progenyCount: record.litterAnimals.length,
+  };
+}
+
+function formatWeaningApiRecord(
+  record: {
+    id: string;
+    birthDate: Date;
+    litterSizeBirth: number;
+    litterSizeWean: number | null;
+    notes: string | null;
+    breedingSetupId: string;
+    breedingSetup: {
+      targetGenotype: string;
+      status: string;
+    };
+    litterAnimals: Array<{
+      animal: {
+        id: string;
+        animalId: string;
+        sex: string;
+        strain: {
+          id: string;
+          name: string;
+        };
+        currentCage: {
+          id: string;
+          barcode: string;
+          cageNumber: string;
+          rack: {
+            rackNumber: string;
+            room: {
+              roomNumber: string;
+            };
+          };
+        } | null;
+      };
+    }>;
+  },
+  newValue?: Prisma.JsonValue | null,
+) {
+  const animals = record.litterAnimals.map((entry) => entry.animal);
+  const femaleAnimals = animals.filter((animal) => animal.sex === "female");
+  const maleAnimals = animals.filter((animal) => animal.sex === "male");
+  const strain = animals[0]?.strain ?? null;
+  const toCageSummary = (animal: (typeof animals)[number] | undefined) =>
+    animal?.currentCage
+      ? {
+          cageId: animal.currentCage.id,
+          cageBarcode: animal.currentCage.barcode,
+          cageLabel: `${animal.currentCage.rack.room.roomNumber} / ${animal.currentCage.rack.rackNumber} / ${animal.currentCage.cageNumber}`,
+        }
+      : null;
+  const auditValue =
+    newValue && typeof newValue === "object" && !Array.isArray(newValue)
+      ? (newValue as Record<string, Prisma.JsonValue>)
+      : null;
+  const weanDate = typeof auditValue?.weanDate === "string" ? auditValue.weanDate : null;
+
+  return {
+    litterId: record.id,
+    breedingSetupId: record.breedingSetupId,
+    birthDate: record.birthDate.toISOString().slice(0, 10),
+    litterSizeBirth: record.litterSizeBirth,
+    litterSizeWean: record.litterSizeWean,
+    notes: record.notes,
+    targetGenotype: record.breedingSetup.targetGenotype,
+    breedingStatus: record.breedingSetup.status,
+    weanDate,
+    femaleCount: femaleAnimals.length,
+    maleCount: maleAnimals.length,
+    strainId: strain?.id ?? null,
+    strainName: strain?.name ?? null,
+    femaleCage: toCageSummary(femaleAnimals[0]),
+    maleCage: toCageSummary(maleAnimals[0]),
+    progeny: animals.map((animal) => ({
+      animalCode: animal.animalId,
+      sex: animal.sex,
+      strainId: animal.strain.id,
+      strainName: animal.strain.name,
+      cageId: animal.currentCage?.id ?? null,
+      cageBarcode: animal.currentCage?.barcode ?? null,
+      cageLabel: animal.currentCage
+        ? `${animal.currentCage.rack.room.roomNumber} / ${animal.currentCage.rack.rackNumber} / ${animal.currentCage.cageNumber}`
+        : null,
+    })),
   };
 }
 

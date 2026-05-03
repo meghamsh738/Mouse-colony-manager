@@ -235,6 +235,10 @@ describe("integration API routes", () => {
       path: "/api/v1/litters",
       methods: ["POST"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "weanings")).toMatchObject({
+      path: "/api/v1/weanings",
+      methods: ["POST"],
+    });
     expect(payload.data.resources.find((resource) => resource.name === "cages")).toMatchObject({
       path: "/api/v1/cages",
       methods: ["GET", "PATCH"],
@@ -513,6 +517,168 @@ describe("integration API routes", () => {
     expect(payload.data.litterSizeBirth).toBe(6);
   });
 
+  it("records litter weaning through the external weaning route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST: createBreedingSetup } = await import("@/app/api/v1/breeding-setups/route");
+    const breedingResponse = await createBreedingSetup(
+      new Request("http://localhost:3000/api/v1/breeding-setups", {
+        method: "POST",
+        body: JSON.stringify({
+          sireCode: "CM-22008",
+          damCode: "CM-25009",
+          startDate: "2026-04-18",
+          targetGenotype: "Weaning route verification",
+          allowOverride: true,
+        }),
+      }),
+    );
+    const breedingPayload = (await breedingResponse.json()) as { data: { id: string } };
+
+    const { POST: createLitter } = await import("@/app/api/v1/litters/route");
+    const litterResponse = await createLitter(
+      new Request("http://localhost:3000/api/v1/litters", {
+        method: "POST",
+        body: JSON.stringify({
+          breedingSetupId: breedingPayload.data.id,
+          birthDate: "2026-04-20",
+          litterSizeBirth: 5,
+          notes: "Created before external weaning sync.",
+        }),
+      }),
+    );
+    const litterPayload = (await litterResponse.json()) as { data: { id: string } };
+
+    const { POST } = await import("@/app/api/v1/weanings/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/weanings", {
+        method: "POST",
+        body: JSON.stringify({
+          litterId: litterPayload.data.id,
+          weanDate: "2026-05-01",
+          femaleCount: 2,
+          maleCount: 3,
+          femaleCageBarcode: "CM-A101-003",
+          maleCageBarcode: "CM-A101-002",
+          strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        litterId: string;
+        litterSizeWean: number;
+        femaleCount: number;
+        maleCount: number;
+        strainName: string | null;
+        femaleCage: { cageBarcode: string } | null;
+        maleCage: { cageBarcode: string } | null;
+        progeny: Array<{ sex: string; cageBarcode: string | null; strainName: string }>;
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("5 pups weaned");
+    expect(payload.data).toMatchObject({
+      litterId: litterPayload.data.id,
+      litterSizeWean: 5,
+      femaleCount: 2,
+      maleCount: 3,
+      strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
+      femaleCage: { cageBarcode: "CM-A101-003" },
+      maleCage: { cageBarcode: "CM-A101-002" },
+    });
+    expect(payload.data.progeny).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sex: "female", cageBarcode: "CM-A101-003", strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato" }),
+        expect.objectContaining({ sex: "male", cageBarcode: "CM-A101-002", strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato" }),
+      ]),
+    );
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "litter",
+          action: "wean",
+          newValue: {
+            path: ["litterSizeWean"],
+            equals: 5,
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated weaning sync as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST: createBreedingSetup } = await import("@/app/api/v1/breeding-setups/route");
+    const breedingResponse = await createBreedingSetup(
+      new Request("http://localhost:3000/api/v1/breeding-setups", {
+        method: "POST",
+        body: JSON.stringify({
+          sireCode: "CM-22008",
+          damCode: "CM-25009",
+          startDate: "2026-04-18",
+          targetGenotype: "Repeated weaning verification",
+          allowOverride: true,
+        }),
+      }),
+    );
+    const breedingPayload = (await breedingResponse.json()) as { data: { id: string } };
+
+    const { POST: createLitter } = await import("@/app/api/v1/litters/route");
+    const litterResponse = await createLitter(
+      new Request("http://localhost:3000/api/v1/litters", {
+        method: "POST",
+        body: JSON.stringify({
+          breedingSetupId: breedingPayload.data.id,
+          birthDate: "2026-04-20",
+          litterSizeBirth: 5,
+          notes: "Created before repeated weaning sync.",
+        }),
+      }),
+    );
+    const litterPayload = (await litterResponse.json()) as { data: { id: string } };
+
+    const { POST } = await import("@/app/api/v1/weanings/route");
+    const requestBody = {
+      litterId: litterPayload.data.id,
+      weanDate: "2026-05-01",
+      femaleCount: 2,
+      maleCount: 3,
+      femaleCageBarcode: "CM-A101-003",
+      maleCageBarcode: "CM-A101-002",
+      strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/weanings", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/weanings", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { femaleCount: number; maleCount: number; litterSizeWean: number | null };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already matches the submitted weaning outcome");
+    expect(payload.data.femaleCount).toBe(2);
+    expect(payload.data.maleCount).toBe(3);
+    expect(payload.data.litterSizeWean).toBe(5);
+  });
+
   it("moves cages through the external cage route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -625,6 +791,29 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record litters." });
+  });
+
+  it("rejects read-only weaning sync requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/weanings/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/weanings", {
+        method: "POST",
+        body: JSON.stringify({
+          litterId: "litter-001",
+          weanDate: "2026-05-01",
+          femaleCount: 2,
+          maleCount: 3,
+          femaleCageBarcode: "CM-A101-003",
+          maleCageBarcode: "CM-A101-002",
+          strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record litter weaning." });
   });
 
   it("treats repeated cage welfare event ingestion as idempotent", async () => {

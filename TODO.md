@@ -23,7 +23,7 @@ Current delivery level:
   - rules/settings and audit visibility
   - CSV exports
   - local attachment upload and viewing for genotype and welfare records
-  - authenticated `/api/v1` integration routes for animals, cages, breeding setup intake, litter intake, experiments, projects, samples, genotype intake, experiment assignment sync, cage welfare event intake, and export discovery, including audited external sample intake, sample lifecycle updates, genotype result intake, breeding setup intake, litter intake, planned-assignment intake, assignment promote/rollback status sync, and cage health-note ingestion
+  - authenticated `/api/v1` integration routes for animals, cages, breeding setup intake, litter intake, weaning sync, experiments, projects, samples, genotype intake, experiment assignment sync, cage welfare event intake, and export discovery, including audited external sample intake, sample lifecycle updates, genotype result intake, breeding setup intake, litter intake, weaning sync, planned-assignment intake, assignment promote/rollback status sync, and cage health-note ingestion
   - in-app notification inbox with admin-editable delivery toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift
   - outbound notification digest preview and webhook delivery endpoint
   - quarantine and sentinel tracking workspace
@@ -83,6 +83,7 @@ Current delivery level:
 - [x] Add audited external cage welfare/equipment event intake under `/api/v1/cages/health-notes`
 - [x] Add audited external breeding setup intake under `/api/v1/breeding-setups`
 - [x] Add audited external litter intake under `/api/v1/litters`
+- [x] Add audited external weaning sync under `/api/v1/weanings`
 - [x] Add an audited external genotype result intake API under `/api/v1/genotypes`
 - [x] Add multipart attachment/document handoff support to genotype and cage-welfare integration intake routes
 - [x] Add an audited external planned experiment assignment sync API under `/api/v1/experiments/assignments`
@@ -94,7 +95,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external write integration after breeding setup intake, litter intake, animal lifecycle, cage moves, sample, cryostorage, genotype, attachment-aware cage welfare intake, and experiment assignment sync/status
+- [ ] Define the next external write integration after breeding setup intake, litter intake, weaning sync, animal lifecycle, cage moves, sample, cryostorage, genotype, attachment-aware cage welfare intake, and experiment assignment sync/status
 
 ## Verification Snapshot
 
@@ -141,6 +142,7 @@ Notes:
 - On 2026-05-03, `/api/v1/cages` was extended with audited `PATCH` cage move sync so external room-balancing or rack-tracking systems can relocate cages using the same transactional movement workflow as the app UI.
 - On 2026-05-03, `/api/v1/breeding-setups` was added for external breeding scheduler intake, with audited `POST` creation using `sireCode`/`sireId` plus `damCode`/`damId`, duplicate-safe repeated submission handling, and optional admin override support for duplicate-breeder safeguards.
 - On 2026-05-03, `/api/v1/litters` was added for external breeding-room litter intake, with audited `POST` creation on active breeding setups using `breedingSetupId` and duplicate-safe repeated submission handling.
+- On 2026-05-03, `/api/v1/weanings` was added for external breeding-room weaning sync, with audited `POST` weaning on litters using `litterId`, holding-cage ids or barcodes, strain resolution by `strainId` or `strainName`, and duplicate-safe repeated submission handling.
 - On 2026-05-02, `/api/v1/cryostorage` was added for external backup inventory integrations, with filtered reads, audited `POST` intake using `strainName`/`strainId` plus optional project resolution, idempotent duplicate handling, and audited `PATCH` lifecycle updates for status, storage location, quantity, recovery notes, and notes.
 - On 2026-05-01, `/api/v1/cages/health-notes` was added for external cage welfare and equipment-event intake, using the same audited cage health-note workflow as scan-based staff entry.
 - On 2026-05-01, `/api/v1/genotypes` was added for external genotype result integrations, with audited POST intake, animal/marker code resolution, duplicate handling for repeated vendor submissions, and read-only role rejection.
