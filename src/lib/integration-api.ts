@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client";
+
 import { getAnimalDetailView, getAnimalListView } from "@/lib/animals-read";
 import { getCageDetailView, getCageListView } from "@/lib/cages-read";
 import { getCryostorageInventoryView } from "@/lib/cryostorage-read";
@@ -155,6 +157,18 @@ export type CreateExperimentAssignmentApiInput = {
   }>;
 };
 
+export type CreateBreedingSetupApiInput = {
+  sireId?: string;
+  sireCode?: string;
+  damId?: string;
+  damCode?: string;
+  startDate: string;
+  targetGenotype: string;
+  targetSex?: "male" | "female" | "unknown";
+  notes?: string;
+  allowOverride?: boolean;
+};
+
 export type ExperimentApiReferenceInput = {
   experimentId?: string;
   experimentCode?: string;
@@ -213,6 +227,13 @@ export type ResolvedExperimentAssignmentApiInput = {
     animalId: string;
     treatmentGroup: string;
   }>;
+};
+
+export type ResolvedBreedingSetupApiInput = {
+  sireCode: string;
+  sireId: string;
+  damCode: string;
+  damId: string;
 };
 
 export type ResolvedExperimentApiReference = {
@@ -1122,6 +1143,45 @@ export async function resolveExperimentApiReference(input: ExperimentApiReferenc
   };
 }
 
+export async function resolveBreedingSetupApiInput(input: CreateBreedingSetupApiInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedBreedingSetupApiInput;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const [sire, dam] = await Promise.all([
+    resolveAnimalByApiReference({ animalId: input.sireId, animalCode: input.sireCode }),
+    resolveAnimalByApiReference({ animalId: input.damId, animalCode: input.damCode }),
+  ]);
+
+  if (!sire.ok) {
+    return sire;
+  }
+
+  if (!dam.ok) {
+    return dam;
+  }
+
+  if (sire.value.animalId === dam.value.animalId) {
+    return { ok: false, message: "Choose two different animals for the breeding setup.", status: 400 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      sireCode: sire.value.animalCode,
+      sireId: sire.value.animalId,
+      damCode: dam.value.animalCode,
+      damId: dam.value.animalId,
+    },
+  };
+}
+
 export async function getSampleApiRecordById(sampleId: string) {
   const record = await prisma.sampleRecord.findUnique({
     where: { id: sampleId },
@@ -1329,6 +1389,63 @@ export async function getExperimentAssignmentApiRecordsForExperiment(input: {
   return records.map(formatExperimentAssignmentApiRecord);
 }
 
+export async function getBreedingSetupApiRecordById(breedingSetupId: string) {
+  const record = await prisma.breedingSetup.findUnique({
+    where: { id: breedingSetupId },
+    select: breedingSetupApiSelect,
+  });
+
+  return record ? formatBreedingSetupApiRecord(record) : null;
+}
+
+export async function getExistingBreedingSetupApiRecord(input: {
+  sireId: string;
+  damId: string;
+  startDate: string;
+  targetGenotype: string;
+  targetSex?: "male" | "female" | "unknown";
+  notes?: string;
+}) {
+  const startDate = new Date(input.startDate);
+
+  if (Number.isNaN(startDate.getTime())) {
+    return null;
+  }
+
+  const normalizedTargetGenotype = input.targetGenotype.trim();
+  const normalizedNotes = input.notes?.trim() || null;
+  const normalizedTargetSex = input.targetSex && input.targetSex !== "unknown" ? input.targetSex : null;
+
+  const record = await prisma.breedingSetup.findFirst({
+    where: {
+      startDate,
+      status: { in: ["planned", "active", "paused"] },
+      targetGenotype: normalizedTargetGenotype,
+      targetSex: normalizedTargetSex,
+      notes: normalizedNotes,
+      adults: {
+        some: {
+          animalId: input.sireId,
+          role: "sire",
+        },
+      },
+      AND: [
+        {
+          adults: {
+            some: {
+              animalId: input.damId,
+              role: "dam",
+            },
+          },
+        },
+      ],
+    },
+    select: breedingSetupApiSelect,
+  });
+
+  return record ? formatBreedingSetupApiRecord(record) : null;
+}
+
 export async function getExistingGenotypeApiRecord(input: {
   animalId: string;
   marker: string;
@@ -1416,6 +1533,12 @@ const resourceCatalog = [
     name: "cage-health-notes",
     path: "/api/v1/cages/health-notes",
     description: "External cage welfare or equipment event intake with audit provenance.",
+    methods: ["POST"],
+  },
+  {
+    name: "breeding-setups",
+    path: "/api/v1/breeding-setups",
+    description: "External breeding setup intake with audited breeder state transitions.",
     methods: ["POST"],
   },
   {
@@ -1559,6 +1682,61 @@ const genotypeApiSelect = {
     },
   },
 } as const;
+
+const breedingSetupApiSelect = {
+  id: true,
+  startDate: true,
+  status: true,
+  targetGenotype: true,
+  targetSex: true,
+  notes: true,
+  adults: {
+    orderBy: [{ role: "asc" }, { id: "asc" }],
+    select: {
+      role: true,
+      animal: {
+        select: {
+          id: true,
+          animalId: true,
+          sex: true,
+          status: true,
+          currentCage: {
+            select: {
+              barcode: true,
+              cageNumber: true,
+              rack: {
+                select: {
+                  rackNumber: true,
+                  room: {
+                    select: {
+                      roomNumber: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  litters: {
+    orderBy: [{ birthDate: "desc" }, { id: "desc" }],
+    take: 1,
+    select: {
+      id: true,
+      birthDate: true,
+      litterSizeBirth: true,
+      litterSizeWean: true,
+      notes: true,
+      litterAnimals: {
+        select: {
+          id: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.BreedingSetupSelect;
 
 const cageHealthNoteApiSelect = {
   id: true,
@@ -1716,6 +1894,71 @@ function formatExperimentAssignmentApiRecord(record: {
     treatmentGroup: record.treatmentGroup,
     notes: record.notes,
     isPrimary: record.isPrimary,
+  };
+}
+
+function formatBreedingSetupApiRecord(record: {
+  id: string;
+  startDate: Date;
+  status: string;
+  targetGenotype: string;
+  targetSex: string | null;
+  notes: string | null;
+  adults: Array<{
+    role: string;
+    animal: {
+      id: string;
+      animalId: string;
+      sex: string;
+      status: string;
+      currentCage: {
+        barcode: string;
+        cageNumber: string;
+        rack: {
+          rackNumber: string;
+          room: {
+            roomNumber: string;
+          };
+        };
+      } | null;
+    };
+  }>;
+  litters: Array<{
+    id: string;
+    birthDate: Date;
+    litterSizeBirth: number;
+    litterSizeWean: number | null;
+    notes: string | null;
+    litterAnimals: Array<{ id: string }>;
+  }>;
+}) {
+  return {
+    id: record.id,
+    startDate: record.startDate.toISOString().slice(0, 10),
+    status: record.status,
+    targetGenotype: record.targetGenotype,
+    targetSex: record.targetSex ?? "unknown",
+    notes: record.notes,
+    adults: record.adults.map((adult) => ({
+      role: adult.role,
+      animalCode: adult.animal.animalId,
+      sex: adult.animal.sex,
+      status: adult.animal.status,
+      cageBarcode: adult.animal.currentCage?.barcode ?? null,
+      cageLabel: adult.animal.currentCage
+        ? `${adult.animal.currentCage.rack.room.roomNumber} / ${adult.animal.currentCage.rack.rackNumber} / ${adult.animal.currentCage.cageNumber}`
+        : null,
+    })),
+    latestLitter: record.litters[0]
+      ? {
+          id: record.litters[0].id,
+          birthDate: record.litters[0].birthDate.toISOString().slice(0, 10),
+          litterSizeBirth: record.litters[0].litterSizeBirth,
+          litterSizeWean: record.litters[0].litterSizeWean,
+          notes: record.litters[0].notes,
+          progenyCount: record.litters[0].litterAnimals.length,
+        }
+      : null,
   };
 }
 

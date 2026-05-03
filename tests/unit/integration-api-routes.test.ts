@@ -227,6 +227,10 @@ describe("integration API routes", () => {
       path: "/api/v1/cages/health-notes",
       methods: ["POST"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "breeding-setups")).toMatchObject({
+      path: "/api/v1/breeding-setups",
+      methods: ["POST"],
+    });
     expect(payload.data.resources.find((resource) => resource.name === "cages")).toMatchObject({
       path: "/api/v1/cages",
       methods: ["GET", "PATCH"],
@@ -313,6 +317,107 @@ describe("integration API routes", () => {
     ).resolves.toBeTruthy();
   });
 
+  it("creates breeding setups through the external breeding route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/breeding-setups/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/breeding-setups", {
+        method: "POST",
+        body: JSON.stringify({
+          sireCode: "CM-22008",
+          damCode: "CM-25009",
+          startDate: "2026-04-18",
+          targetGenotype: "CreER maintenance API",
+          targetSex: "female",
+          notes: "Created by the authenticated breeding integration route test.",
+          allowOverride: true,
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        id: string;
+        status: string;
+        targetGenotype: string;
+        targetSex: string;
+        adults: Array<{ role: string; animalCode: string; status: string; cageBarcode: string | null }>;
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("Breeding setup created for CM-22008 and CM-25009");
+    expect(payload.data).toMatchObject({
+      status: "active",
+      targetGenotype: "CreER maintenance API",
+      targetSex: "female",
+    });
+    expect(payload.data.adults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "sire", animalCode: "CM-22008", status: "breeding", cageBarcode: "CM-A102-005" }),
+        expect.objectContaining({ role: "dam", animalCode: "CM-25009", status: "breeding", cageBarcode: "CM-A102-005" }),
+      ]),
+    );
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "breeding_setup",
+          action: "create",
+          newValue: {
+            path: ["targetGenotype"],
+            equals: "CreER maintenance API",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated breeding setup intake as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/breeding-setups/route");
+    const requestBody = {
+      sireCode: "CM-22008",
+      damCode: "CM-25009",
+      startDate: "2026-04-18",
+      targetGenotype: "CreER maintenance API",
+      targetSex: "female",
+      notes: "Repeated by the breeding integration route test.",
+      allowOverride: true,
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/breeding-setups", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/breeding-setups", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { status: string; adults: Array<{ animalCode: string }> };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already matches the submitted breeding setup");
+    expect(payload.data.status).toBe("active");
+    expect(payload.data.adults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ animalCode: "CM-22008" }),
+        expect.objectContaining({ animalCode: "CM-25009" }),
+      ]),
+    );
+  });
+
   it("moves cages through the external cage route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -386,6 +491,26 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot move cages." });
+  });
+
+  it("rejects read-only breeding setup intake requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/breeding-setups/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/breeding-setups", {
+        method: "POST",
+        body: JSON.stringify({
+          sireCode: "CM-22008",
+          damCode: "CM-25009",
+          startDate: "2026-04-18",
+          targetGenotype: "Readonly breeding sync",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot create breeding setups." });
   });
 
   it("treats repeated cage welfare event ingestion as idempotent", async () => {

@@ -565,6 +565,41 @@ test("staff can sync an external animal lifecycle update through the integration
   expect(payload.body.data.cageLabel).toBe("Archived");
 });
 
+test("admin can create a breeding setup through the integration API", async ({ page }) => {
+  await signInForApiRequests(page, "admin");
+
+  const response = await page.request.post("/api/v1/breeding-setups", {
+    data: {
+      sireCode: "CM-22008",
+      damCode: "CM-25009",
+      startDate: "2026-04-18",
+      targetGenotype: "CreER maintenance API smoke",
+      targetSex: "female",
+      notes: "Created by the authenticated breeding setup integration API smoke.",
+      allowOverride: true,
+    },
+  });
+  const payload = {
+    status: response.status(),
+    body: await response.json(),
+  };
+
+  expect(payload.status).toBe(201);
+  expect(payload.body.meta.created).toBe(true);
+  expect(payload.body.meta.message).toContain("Breeding setup created for CM-22008 and CM-25009");
+  expect(payload.body.data).toMatchObject({
+    status: "active",
+    targetGenotype: "CreER maintenance API smoke",
+    targetSex: "female",
+  });
+  expect(payload.body.data.adults).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ role: "sire", animalCode: "CM-22008", status: "breeding" }),
+      expect.objectContaining({ role: "dam", animalCode: "CM-25009", status: "breeding" }),
+    ]),
+  );
+});
+
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {
   await signInAs(page, "staff");
   await page.goto("/notifications");
