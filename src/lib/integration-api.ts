@@ -169,6 +169,13 @@ export type CreateBreedingSetupApiInput = {
   allowOverride?: boolean;
 };
 
+export type CreateLitterApiInput = {
+  breedingSetupId: string;
+  birthDate: string;
+  litterSizeBirth: number;
+  notes?: string;
+};
+
 export type ExperimentApiReferenceInput = {
   experimentId?: string;
   experimentCode?: string;
@@ -1446,6 +1453,47 @@ export async function getExistingBreedingSetupApiRecord(input: {
   return record ? formatBreedingSetupApiRecord(record) : null;
 }
 
+export async function getLitterApiRecordById(litterId: string) {
+  const record = await prisma.litter.findUnique({
+    where: { id: litterId },
+    select: litterApiSelect,
+  });
+
+  return record ? formatLitterApiRecord(record) : null;
+}
+
+export async function getExistingLitterApiRecord(input: {
+  breedingSetupId: string;
+  birthDate: string;
+  litterSizeBirth: number;
+  notes?: string;
+}) {
+  const birthDate = new Date(input.birthDate);
+
+  if (Number.isNaN(birthDate.getTime())) {
+    return null;
+  }
+
+  const normalizedBirthKey = birthDate.toISOString().slice(0, 10);
+  const normalizedNotes = input.notes?.trim() || null;
+
+  const record = await prisma.litter.findFirst({
+    where: {
+      breedingSetupId: input.breedingSetupId,
+      birthDate,
+      litterSizeBirth: input.litterSizeBirth,
+      notes: normalizedNotes,
+    },
+    select: litterApiSelect,
+  });
+
+  if (!record) {
+    return null;
+  }
+
+  return record.birthDate.toISOString().slice(0, 10) === normalizedBirthKey ? formatLitterApiRecord(record) : null;
+}
+
 export async function getExistingGenotypeApiRecord(input: {
   animalId: string;
   marker: string;
@@ -1539,6 +1587,12 @@ const resourceCatalog = [
     name: "breeding-setups",
     path: "/api/v1/breeding-setups",
     description: "External breeding setup intake with audited breeder state transitions.",
+    methods: ["POST"],
+  },
+  {
+    name: "litters",
+    path: "/api/v1/litters",
+    description: "External litter intake for active breeding setups with audit provenance.",
     methods: ["POST"],
   },
   {
@@ -1737,6 +1791,37 @@ const breedingSetupApiSelect = {
     },
   },
 } satisfies Prisma.BreedingSetupSelect;
+
+const litterApiSelect = {
+  id: true,
+  birthDate: true,
+  litterSizeBirth: true,
+  litterSizeWean: true,
+  notes: true,
+  breedingSetupId: true,
+  breedingSetup: {
+    select: {
+      targetGenotype: true,
+      status: true,
+      adults: {
+        orderBy: [{ role: "asc" }, { id: "asc" }],
+        select: {
+          role: true,
+          animal: {
+            select: {
+              animalId: true,
+            },
+          },
+        },
+      },
+    },
+  },
+  litterAnimals: {
+    select: {
+      id: true,
+    },
+  },
+} satisfies Prisma.LitterSelect;
 
 const cageHealthNoteApiSelect = {
   id: true,
@@ -1959,6 +2044,42 @@ function formatBreedingSetupApiRecord(record: {
           progenyCount: record.litters[0].litterAnimals.length,
         }
       : null,
+  };
+}
+
+function formatLitterApiRecord(record: {
+  id: string;
+  birthDate: Date;
+  litterSizeBirth: number;
+  litterSizeWean: number | null;
+  notes: string | null;
+  breedingSetupId: string;
+  breedingSetup: {
+    targetGenotype: string;
+    status: string;
+    adults: Array<{
+      role: string;
+      animal: {
+        animalId: string;
+      };
+    }>;
+  };
+  litterAnimals: Array<{ id: string }>;
+}) {
+  return {
+    id: record.id,
+    breedingSetupId: record.breedingSetupId,
+    birthDate: record.birthDate.toISOString().slice(0, 10),
+    litterSizeBirth: record.litterSizeBirth,
+    litterSizeWean: record.litterSizeWean,
+    notes: record.notes,
+    targetGenotype: record.breedingSetup.targetGenotype,
+    breedingStatus: record.breedingSetup.status,
+    adults: record.breedingSetup.adults.map((adult) => ({
+      role: adult.role,
+      animalCode: adult.animal.animalId,
+    })),
+    progenyCount: record.litterAnimals.length,
   };
 }
 

@@ -600,6 +600,39 @@ test("admin can create a breeding setup through the integration API", async ({ p
   );
 });
 
+test("admin can record a litter through the integration API", async ({ page }) => {
+  await signInForApiRequests(page, "admin");
+
+  const response = await page.request.post("/api/v1/litters", {
+    data: {
+      breedingSetupId: "breeding-001",
+      birthDate: "2026-04-12",
+      litterSizeBirth: 6,
+      notes: "Created by the authenticated litter integration API smoke.",
+    },
+  });
+  const payload = {
+    status: response.status(),
+    body: await response.json(),
+  };
+
+  expect(payload.status).toBe(201);
+  expect(payload.body.meta.created).toBe(true);
+  expect(payload.body.meta.message).toContain("Litter recorded for breeding-001");
+  expect(payload.body.data).toMatchObject({
+    breedingSetupId: "breeding-001",
+    birthDate: "2026-04-12",
+    litterSizeBirth: 6,
+    targetGenotype: "Cre+/- ; tdTomato+/-",
+  });
+  expect(payload.body.data.adults).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ role: "sire", animalCode: "CM-24001" }),
+      expect.objectContaining({ role: "dam", animalCode: "CM-24002" }),
+    ]),
+  );
+});
+
 test("staff can review the notification inbox and jump into breeding follow-up", async ({ page }) => {
   await signInAs(page, "staff");
   await page.goto("/notifications");

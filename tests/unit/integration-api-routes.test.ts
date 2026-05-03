@@ -231,6 +231,10 @@ describe("integration API routes", () => {
       path: "/api/v1/breeding-setups",
       methods: ["POST"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "litters")).toMatchObject({
+      path: "/api/v1/litters",
+      methods: ["POST"],
+    });
     expect(payload.data.resources.find((resource) => resource.name === "cages")).toMatchObject({
       path: "/api/v1/cages",
       methods: ["GET", "PATCH"],
@@ -418,6 +422,97 @@ describe("integration API routes", () => {
     );
   });
 
+  it("records litters through the external litter route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/litters/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/litters", {
+        method: "POST",
+        body: JSON.stringify({
+          breedingSetupId: "breeding-001",
+          birthDate: "2026-04-12",
+          litterSizeBirth: 6,
+          notes: "Created by the authenticated litter integration route test.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        breedingSetupId: string;
+        birthDate: string;
+        litterSizeBirth: number;
+        targetGenotype: string;
+        adults: Array<{ role: string; animalCode: string }>;
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("Litter recorded for breeding-001");
+    expect(payload.data).toMatchObject({
+      breedingSetupId: "breeding-001",
+      birthDate: "2026-04-12",
+      litterSizeBirth: 6,
+      targetGenotype: "Cre+/- ; tdTomato+/-",
+    });
+    expect(payload.data.adults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "sire", animalCode: "CM-24001" }),
+        expect.objectContaining({ role: "dam", animalCode: "CM-24002" }),
+      ]),
+    );
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "litter",
+          action: "create",
+          newValue: {
+            path: ["litterSizeBirth"],
+            equals: 6,
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated litter intake as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/litters/route");
+    const requestBody = {
+      breedingSetupId: "breeding-001",
+      birthDate: "2026-04-12",
+      litterSizeBirth: 6,
+      notes: "Repeated by the litter integration route test.",
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/litters", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/litters", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { breedingSetupId: string; litterSizeBirth: number };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already matches the submitted litter record");
+    expect(payload.data.breedingSetupId).toBe("breeding-001");
+    expect(payload.data.litterSizeBirth).toBe(6);
+  });
+
   it("moves cages through the external cage route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -511,6 +606,25 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot create breeding setups." });
+  });
+
+  it("rejects read-only litter intake requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/litters/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/litters", {
+        method: "POST",
+        body: JSON.stringify({
+          breedingSetupId: "breeding-001",
+          birthDate: "2026-04-12",
+          litterSizeBirth: 6,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record litters." });
   });
 
   it("treats repeated cage welfare event ingestion as idempotent", async () => {
