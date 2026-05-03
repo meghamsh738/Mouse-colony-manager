@@ -466,6 +466,42 @@ test("researcher can query the authenticated integration API surface", async ({ 
   );
 });
 
+test("staff can create an animal through the integration API", async ({ page }) => {
+  await signInForApiRequests(page, "staff");
+
+  const response = await page.request.post("/api/v1/animals", {
+    data: {
+      animalCode: "CM-26099",
+      labId: "MC-2026-099",
+      sex: "female",
+      dob: "2026-03-10",
+      strainName: "C57BL/6J",
+      cageBarcode: "CM-A101-003",
+      projectCode: "PRJ-NEURO-07",
+      notes: "Created by the authenticated animal intake integration API smoke.",
+    },
+  });
+  const payload = {
+    status: response.status(),
+    body: await response.json(),
+  };
+
+  expect(payload.status).toBe(201);
+  expect(payload.body.meta.created).toBe(true);
+  expect(payload.body.meta.message).toContain("CM-26099 was added to the active colony");
+  expect(payload.body.data).toMatchObject({
+    animal: {
+      animalId: "CM-26099",
+      labId: "MC-2026-099",
+      status: "colony_holding",
+      outcomeStatus: "alive",
+    },
+    cageLabel: "A101 / R2 / 003",
+    strainName: "C57BL/6J",
+  });
+  expect(payload.body.data.projectCodes).toContain("PRJ-NEURO-07");
+});
+
 test("staff can ingest an external cage welfare event through the integration API", async ({ page }) => {
   await signInForApiRequests(page, "staff");
 

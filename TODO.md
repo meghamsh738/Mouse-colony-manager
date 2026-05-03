@@ -23,7 +23,7 @@ Current delivery level:
   - rules/settings and audit visibility
   - CSV exports
   - local attachment upload and viewing for genotype and welfare records
-  - authenticated `/api/v1` integration routes for animals, cages, breeding setup intake, litter intake, weaning sync, experiments, projects, samples, genotype intake, experiment assignment sync, cage welfare event intake, and export discovery, including audited external sample intake, sample lifecycle updates, genotype result intake, breeding setup intake, litter intake, weaning sync, planned-assignment intake, assignment promote/rollback status sync, and cage health-note ingestion
+  - authenticated `/api/v1` integration routes for animals, cages, breeding setup intake, litter intake, weaning sync, experiments, projects, samples, genotype intake, experiment assignment sync, cage welfare event intake, and export discovery, including audited external animal intake, sample intake, sample lifecycle updates, genotype result intake, breeding setup intake, litter intake, weaning sync, planned-assignment intake, assignment promote/rollback status sync, and cage health-note ingestion
   - in-app notification inbox with admin-editable delivery toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift
   - outbound notification digest preview and webhook delivery endpoint
   - quarantine and sentinel tracking workspace
@@ -79,6 +79,7 @@ Current delivery level:
 - [x] Add audited external sample lifecycle update API under `/api/v1/samples`
 - [x] Add audited external cryostorage intake and lifecycle update API under `/api/v1/cryostorage`
 - [x] Add audited external animal terminal lifecycle sync under `/api/v1/animals`
+- [x] Add audited external animal intake under `/api/v1/animals`
 - [x] Add audited external cage move sync under `/api/v1/cages`
 - [x] Add audited external cage welfare/equipment event intake under `/api/v1/cages/health-notes`
 - [x] Add audited external breeding setup intake under `/api/v1/breeding-setups`
@@ -95,7 +96,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external write integration after breeding setup intake, litter intake, weaning sync, animal lifecycle, cage moves, sample, cryostorage, genotype, attachment-aware cage welfare intake, and experiment assignment sync/status
+- [ ] Define the next external write integration after animal intake, breeding setup intake, litter intake, weaning sync, animal lifecycle, cage moves, sample, cryostorage, genotype, attachment-aware cage welfare intake, and experiment assignment sync/status
 
 ## Verification Snapshot
 
@@ -139,6 +140,7 @@ Notes:
 - On 2026-04-30, `/api/v1/samples` was added for external sample inventory integrations, with filtered sample reads, audited POST intake, idempotent duplicate handling for the same animal, and read-only role rejection.
 - On 2026-05-01, `/api/v1/samples` was extended with audited `PATCH` sample lifecycle updates for status, storage location, quantity, and notes, so external LIMS workflows can update downstream sample state.
 - On 2026-05-02, `/api/v1/animals` was extended with audited `PATCH` terminal lifecycle sync so external systems can mark euthanasia, death, transfer out, or archive states using the same transactional workflow as the app UI.
+- On 2026-05-03, `/api/v1/animals` was extended with audited `POST` animal intake so external colony intake workflows can create live colony records using `animalCode`, `labId`, cage ids or barcodes, strain resolution by `strainId` or `strainName`, and optional project attribution.
 - On 2026-05-03, `/api/v1/cages` was extended with audited `PATCH` cage move sync so external room-balancing or rack-tracking systems can relocate cages using the same transactional movement workflow as the app UI.
 - On 2026-05-03, `/api/v1/breeding-setups` was added for external breeding scheduler intake, with audited `POST` creation using `sireCode`/`sireId` plus `damCode`/`damId`, duplicate-safe repeated submission handling, and optional admin override support for duplicate-breeder safeguards.
 - On 2026-05-03, `/api/v1/litters` was added for external breeding-room litter intake, with audited `POST` creation on active breeding setups using `breedingSetupId` and duplicate-safe repeated submission handling.

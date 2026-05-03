@@ -50,6 +50,20 @@ export type MoveCageApiInput = {
   reason: string;
 };
 
+export type CreateAnimalApiInput = {
+  animalCode: string;
+  labId: string;
+  sex: "male" | "female" | "unknown";
+  dob: string;
+  strainId?: string;
+  strainName?: string;
+  cageId?: string;
+  cageBarcode?: string;
+  projectId?: string;
+  projectCode?: string;
+  notes?: string;
+};
+
 export type ExperimentApiFilters = {
   search: string;
   status: string;
@@ -259,6 +273,11 @@ export type ResolvedBreedingSetupApiInput = {
 export type ResolvedStrainApiReference = {
   strainId: string;
   strainName: string;
+};
+
+export type ResolvedProjectApiReference = {
+  projectId: string;
+  projectCode: string;
 };
 
 export type ResolvedExperimentApiReference = {
@@ -677,6 +696,50 @@ export async function getAnimalApiRecordById(animalId: string) {
   };
 }
 
+export async function getExistingAnimalApiRecord(input: {
+  animalCode: string;
+  labId: string;
+  cageId: string;
+  strainId: string;
+  projectId?: string;
+}) {
+  const animal = await prisma.animal.findFirst({
+    where: {
+      animalId: input.animalCode.trim(),
+      labId: input.labId.trim(),
+      currentCageId: input.cageId,
+      strainId: input.strainId,
+      projectAllocations: input.projectId
+        ? {
+            some: {
+              projectId: input.projectId,
+              endedAt: null,
+            },
+          }
+        : undefined,
+    },
+    select: {
+      id: true,
+      projectAllocations: {
+        where: { endedAt: null },
+        select: {
+          projectId: true,
+        },
+      },
+    },
+  });
+
+  if (!animal) {
+    return null;
+  }
+
+  if (!input.projectId && animal.projectAllocations.length > 0) {
+    return null;
+  }
+
+  return getAnimalApiRecordById(animal.id);
+}
+
 export async function getCageApiDetail(cageId: string) {
   return getCageDetailView(cageId);
 }
@@ -940,6 +1003,53 @@ export async function resolveStrainByApiReference(input: {
     value: {
       strainId: strain.id,
       strainName: strain.name,
+    },
+  };
+}
+
+export async function resolveProjectByApiReference(input: {
+  projectId?: string;
+  projectCode?: string;
+}): Promise<
+  | {
+      ok: true;
+      value: ResolvedProjectApiReference;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const projectRef = input.projectId?.trim();
+  const projectCode = input.projectCode?.trim();
+
+  if (!projectRef && !projectCode) {
+    return { ok: false, message: "Provide projectId or projectCode.", status: 400 };
+  }
+
+  const project = await prisma.project.findFirst({
+    where: {
+      OR: [
+        ...(projectRef ? [{ id: projectRef }, { projectCode: projectRef }] : []),
+        ...(projectCode ? [{ projectCode }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      projectCode: true,
+    },
+  });
+
+  if (!project) {
+    return { ok: false, message: "Project not found for the supplied projectId or projectCode.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      projectId: project.id,
+      projectCode: project.projectCode,
     },
   };
 }
@@ -1637,7 +1747,7 @@ const resourceCatalog = [
     path: "/api/v1/animals",
     detailPath: "/api/v1/animals/{animalId}",
     description: "Animal summaries and animal detail records.",
-    methods: ["GET", "PATCH"],
+    methods: ["GET", "POST", "PATCH"],
   },
   {
     name: "cages",

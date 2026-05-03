@@ -69,6 +69,69 @@ describe("integration API routes", () => {
     expect(payload.data.every((animal) => animal.sex === "male" && animal.availableForExperiment)).toBe(true);
   });
 
+  it("creates animal records through the external animal route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/animals/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "POST",
+        body: JSON.stringify({
+          animalCode: "CM-26099",
+          labId: "MC-2026-099",
+          sex: "female",
+          dob: "2026-03-10",
+          strainName: "C57BL/6J",
+          cageBarcode: "CM-A101-003",
+          projectCode: "PRJ-NEURO-07",
+          notes: "Created by the authenticated animal intake route test.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        animal: {
+          animalId: string;
+          labId: string;
+          status: string;
+          outcomeStatus: string;
+        };
+        cageLabel: string;
+        strainName: string;
+        projectCodes: string[];
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("CM-26099 was added to the active colony");
+    expect(payload.data).toMatchObject({
+      animal: {
+        animalId: "CM-26099",
+        labId: "MC-2026-099",
+        status: "colony_holding",
+        outcomeStatus: "alive",
+      },
+      cageLabel: "A101 / R2 / 003",
+      strainName: "C57BL/6J",
+      projectCodes: ["PRJ-NEURO-07"],
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "animal",
+          action: "create",
+          newValue: {
+            path: ["animalId"],
+            equals: "CM-26099",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
   it("updates animal lifecycle state through the external animal route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -156,6 +219,45 @@ describe("integration API routes", () => {
     expect(payload.data.animal.status).toBe("euthanized");
   });
 
+  it("treats repeated animal intake as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/animals/route");
+    const requestBody = {
+      animalCode: "CM-26099",
+      labId: "MC-2026-099",
+      sex: "female",
+      dob: "2026-03-10",
+      strainName: "C57BL/6J",
+      cageBarcode: "CM-A101-003",
+      projectCode: "PRJ-NEURO-07",
+      notes: "Repeated by the authenticated animal intake route test.",
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { animal: { animalId: string; status: string } };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already matches the submitted animal intake record");
+    expect(payload.data.animal.animalId).toBe("CM-26099");
+    expect(payload.data.animal.status).toBe("colony_holding");
+  });
+
   it("rejects read-only animal lifecycle sync requests", async () => {
     authMock.mockResolvedValue(readOnlySession());
 
@@ -175,6 +277,30 @@ describe("integration API routes", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
       error: "Your role cannot change terminal lifecycle states.",
+    });
+  });
+
+  it("rejects read-only animal intake requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/animals/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "POST",
+        body: JSON.stringify({
+          animalCode: "CM-26099",
+          labId: "MC-2026-099",
+          sex: "female",
+          dob: "2026-03-10",
+          strainName: "C57BL/6J",
+          cageBarcode: "CM-A101-003",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Your role cannot create new animal records.",
     });
   });
 
@@ -213,7 +339,7 @@ describe("integration API routes", () => {
     expect(response.status).toBe(200);
     expect(payload.data.resources.find((resource) => resource.name === "animals")).toMatchObject({
       path: "/api/v1/animals",
-      methods: ["GET", "PATCH"],
+      methods: ["GET", "POST", "PATCH"],
     });
     expect(payload.data.resources.find((resource) => resource.name === "samples")).toMatchObject({
       path: "/api/v1/samples",
