@@ -89,6 +89,7 @@ Current delivery level:
 - [x] Add multipart attachment/document handoff support to genotype and cage-welfare integration intake routes
 - [x] Add an audited external planned experiment assignment sync API under `/api/v1/experiments/assignments`
 - [x] Add audited external experiment assignment promote/rollback status sync under `/api/v1/experiments/assignments`
+- [x] Add audited external planned assignment detail maintenance under `/api/v1/experiments/assignments/{assignmentId}`
 - [x] Add audited external direct experiment reservation sync under `/api/v1/experiments/reservations`
 
 ## In Progress
@@ -97,7 +98,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external write integration after animal intake, breeding setup intake, litter intake, weaning sync, animal lifecycle, cage moves, sample, cryostorage, genotype, attachment-aware cage welfare intake, experiment assignment sync/status, and direct experiment reservation sync
+- [ ] Define the next external write integration after animal intake, breeding setup intake, litter intake, weaning sync, animal lifecycle, cage moves, sample, cryostorage, genotype, attachment-aware cage welfare intake, experiment assignment sync/status/detail maintenance, and direct experiment reservation sync
 
 ## Verification Snapshot
 
@@ -152,6 +153,7 @@ Notes:
 - On 2026-05-02, `/api/v1/genotypes` and `/api/v1/cages/health-notes` were extended to accept multipart attachment handoff so external vendors or monitoring systems can upload supporting documents into the same audited attachment flow the app UI already uses.
 - On 2026-05-01, `/api/v1/experiments/assignments` was added for external scheduling integrations, with audited planned-assignment sync, experiment/animal code resolution, duplicate handling for repeated scheduler submissions, and read-only role rejection.
 - On 2026-05-01, `/api/v1/experiments/assignments` was extended with `PATCH` promote/rollback actions for external assignment status sync using the same audited promotion and rollback workflow as the app UI.
+- On 2026-05-05, `/api/v1/experiments/assignments/{assignmentId}` was added for external planned-assignment maintenance, with authenticated `GET`, audited `PATCH` edit support, and audited `DELETE` removal support using the same planned-cohort editor workflow as the app UI.
 - On 2026-05-05, `/api/v1/experiments/reservations` was added for external direct reservation sync, with audited `POST` intake using `experimentCode`/`experimentId` plus `animalCode`/`animalId`, duplicate-safe repeated submission handling, and the same reservation workflow used by the app UI.
 - The latest notification delivery unit suite covers webhook delivery and HTTP email-provider delivery with a mocked provider endpoint.
 - The latest breeding and forecast smoke checks passed on both Playwright `chromium` and `mobile` projects after adding line-specific fertility models and configurable long-range runway forecasting.

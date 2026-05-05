@@ -375,7 +375,7 @@ describe("integration API routes", () => {
     });
     expect(payload.data.resources.find((resource) => resource.name === "experiment-assignments")).toMatchObject({
       path: "/api/v1/experiments/assignments",
-      methods: ["POST", "PATCH"],
+      methods: ["POST", "PATCH", "DELETE"],
     });
     expect(payload.data.resources.find((resource) => resource.name === "experiment-reservations")).toMatchObject({
       path: "/api/v1/experiments/reservations",
@@ -1810,6 +1810,108 @@ describe("integration API routes", () => {
     ).resolves.toBeTruthy();
   });
 
+  it("updates and removes planned experiment assignments through the external assignment detail route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/experiments/assignments/route");
+    const createResponse = await POST(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "POST",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          startDate: "2026-04-18",
+          notes: "Assignment detail maintenance setup.",
+          assignments: [{ animalCode: "CM-26005", treatmentGroup: "Arm A" }],
+        }),
+      }),
+    );
+    const created = (await createResponse.json()) as {
+      data: Array<{ id: string }>;
+    };
+    const assignmentId = created.data[0]?.id;
+
+    expect(createResponse.status).toBe(201);
+    expect(assignmentId).toBeTruthy();
+
+    const { DELETE, GET, PATCH } = await import("@/app/api/v1/experiments/assignments/[assignmentId]/route");
+
+    const getResponse = await GET(new Request(`http://localhost:3000/api/v1/experiments/assignments/${assignmentId}`), {
+      params: Promise.resolve({ assignmentId }),
+    });
+    const existing = (await getResponse.json()) as {
+      data: { id: string; animalCode: string; status: string; treatmentGroup: string };
+    };
+
+    expect(getResponse.status).toBe(200);
+    expect(existing.data).toMatchObject({
+      id: assignmentId,
+      animalCode: "CM-26005",
+      status: "planned",
+      treatmentGroup: "Arm A",
+    });
+
+    const updateResponse = await PATCH(
+      new Request(`http://localhost:3000/api/v1/experiments/assignments/${assignmentId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          startDate: "2026-04-21",
+          treatmentGroup: "Arm Z",
+          notes: "Adjusted through the external assignment detail route.",
+        }),
+      }),
+      { params: Promise.resolve({ assignmentId }) },
+    );
+    const updated = (await updateResponse.json()) as {
+      data: { id: string; treatmentGroup: string; startDate: string; notes: string | null };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(updateResponse.status).toBe(200);
+    expect(updated.meta.created).toBe(false);
+    expect(updated.meta.message).toContain("Updated planned assignment for CM-26005");
+    expect(updated.data).toMatchObject({
+      id: assignmentId,
+      treatmentGroup: "Arm Z",
+      startDate: "2026-04-21T00:00:00.000Z",
+      notes: "Adjusted through the external assignment detail route.",
+    });
+
+    const deleteResponse = await DELETE(
+      new Request(`http://localhost:3000/api/v1/experiments/assignments/${assignmentId}`, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ assignmentId }) },
+    );
+    const removed = (await deleteResponse.json()) as {
+      data: { id: string; treatmentGroup: string; status: string };
+      meta: { message: string };
+    };
+
+    expect(deleteResponse.status).toBe(200);
+    expect(removed.meta.message).toContain("Removed planned assignment for CM-26005");
+    expect(removed.data).toMatchObject({
+      id: assignmentId,
+      treatmentGroup: "Arm Z",
+      status: "planned",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "experiment_assignment",
+          action: "delete_plan",
+          entityId: assignmentId,
+        },
+      }),
+    ).resolves.toBeTruthy();
+
+    const missingResponse = await GET(new Request(`http://localhost:3000/api/v1/experiments/assignments/${assignmentId}`), {
+      params: Promise.resolve({ assignmentId }),
+    });
+
+    expect(missingResponse.status).toBe(404);
+  });
+
   it("syncs direct experiment reservations through the external reservation route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -1951,6 +2053,57 @@ describe("integration API routes", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
       error: "Your role cannot sync experiment reservations.",
+    });
+  });
+
+  it("rejects read-only planned assignment maintenance requests", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/experiments/assignments/route");
+    const createResponse = await POST(
+      new Request("http://localhost:3000/api/v1/experiments/assignments", {
+        method: "POST",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          startDate: "2026-04-18",
+          assignments: [{ animalCode: "CM-26005", treatmentGroup: "Arm A" }],
+        }),
+      }),
+    );
+    const created = (await createResponse.json()) as { data: Array<{ id: string }> };
+    const assignmentId = created.data[0]?.id;
+
+    expect(createResponse.status).toBe(201);
+    expect(assignmentId).toBeTruthy();
+
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { DELETE, PATCH } = await import("@/app/api/v1/experiments/assignments/[assignmentId]/route");
+    const updateResponse = await PATCH(
+      new Request(`http://localhost:3000/api/v1/experiments/assignments/${assignmentId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          startDate: "2026-04-21",
+        }),
+      }),
+      { params: Promise.resolve({ assignmentId }) },
+    );
+
+    expect(updateResponse.status).toBe(403);
+    await expect(updateResponse.json()).resolves.toMatchObject({
+      error: "Your role cannot edit planned cohorts.",
+    });
+
+    const deleteResponse = await DELETE(
+      new Request(`http://localhost:3000/api/v1/experiments/assignments/${assignmentId}`, {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ assignmentId }) },
+    );
+
+    expect(deleteResponse.status).toBe(403);
+    await expect(deleteResponse.json()).resolves.toMatchObject({
+      error: "Your role cannot remove planned cohorts.",
     });
   });
 });

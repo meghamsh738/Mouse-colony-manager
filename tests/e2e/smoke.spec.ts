@@ -464,6 +464,61 @@ test("researcher can query the authenticated integration API surface", async ({ 
       expect.objectContaining({ animalCode: "CM-26012", status: "reserved" }),
     ]),
   );
+
+  const plannedEditCreateResponse = await page.request.post("/api/v1/experiments/assignments", {
+    data: {
+      experimentCode: "EXP-LPS-005",
+      startDate: "2026-04-22",
+      notes: "Created for planned assignment maintenance coverage.",
+      assignments: [{ animalCode: "CM-26004", treatmentGroup: "Arm D" }],
+    },
+  });
+  const plannedEditCreate = {
+    status: plannedEditCreateResponse.status(),
+    body: await plannedEditCreateResponse.json(),
+  };
+
+  expect(plannedEditCreate.status).toBe(201);
+
+  const editableAssignmentId = plannedEditCreate.body.data[0]?.id as string;
+  expect(editableAssignmentId).toBeTruthy();
+
+  const assignmentUpdateResponse = await page.request.patch(`/api/v1/experiments/assignments/${editableAssignmentId}`, {
+    data: {
+      startDate: "2026-04-20",
+      treatmentGroup: "Arm Z",
+      notes: "Adjusted by the authenticated integration API smoke.",
+    },
+  });
+  const assignmentUpdate = {
+    status: assignmentUpdateResponse.status(),
+    body: await assignmentUpdateResponse.json(),
+  };
+
+  expect(assignmentUpdate.status).toBe(200);
+  expect(assignmentUpdate.body.meta.created).toBe(false);
+  expect(assignmentUpdate.body.data).toMatchObject({
+    id: editableAssignmentId,
+    animalCode: "CM-26004",
+    status: "planned",
+    treatmentGroup: "Arm Z",
+    startDate: "2026-04-20T00:00:00.000Z",
+  });
+
+  const assignmentDeleteResponse = await page.request.delete(`/api/v1/experiments/assignments/${editableAssignmentId}`);
+  const assignmentDelete = {
+    status: assignmentDeleteResponse.status(),
+    body: await assignmentDeleteResponse.json(),
+  };
+
+  expect(assignmentDelete.status).toBe(200);
+  expect(assignmentDelete.body.meta.created).toBe(false);
+  expect(assignmentDelete.body.data).toMatchObject({
+    id: editableAssignmentId,
+    animalCode: "CM-26004",
+    status: "planned",
+    treatmentGroup: "Arm Z",
+  });
 });
 
 test("staff can create an animal through the integration API", async ({ page }) => {

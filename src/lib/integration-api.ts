@@ -1620,6 +1620,15 @@ export async function getExistingExperimentReservationApiRecord(input: {
   return record ? formatExperimentAssignmentApiRecord(record) : null;
 }
 
+export async function getExperimentAssignmentApiRecordById(assignmentId: string) {
+  const record = await prisma.experimentAssignment.findUnique({
+    where: { id: assignmentId },
+    select: experimentAssignmentApiSelect,
+  });
+
+  return record ? formatExperimentAssignmentApiRecord(record) : null;
+}
+
 export async function getExperimentAssignmentApiRecordsForExperiment(input: {
   experimentId: string;
   statuses?: AssignmentStatus[];
@@ -1872,8 +1881,9 @@ const resourceCatalog = [
   {
     name: "experiment-assignments",
     path: "/api/v1/experiments/assignments",
+    detailPath: "/api/v1/experiments/assignments/{assignmentId}",
     description: "External planned experiment assignment sync with audit provenance.",
-    methods: ["POST", "PATCH"],
+    methods: ["POST", "PATCH", "DELETE"],
   },
   {
     name: "experiment-reservations",
