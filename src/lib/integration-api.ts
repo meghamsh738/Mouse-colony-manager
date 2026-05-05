@@ -5,6 +5,7 @@ import { getCageDetailView, getCageListView } from "@/lib/cages-read";
 import { getCryostorageInventoryView } from "@/lib/cryostorage-read";
 import { getExperimentOverviewView } from "@/lib/experiments-read";
 import { prisma } from "@/lib/prisma";
+import { getRuleSummaryView } from "@/lib/settings-read";
 import { getSampleInventoryView } from "@/lib/samples-read";
 import type {
   AlertSeverity,
@@ -90,6 +91,13 @@ export type CryostorageApiFilters = {
   status: string;
   strain: string;
   projectCode: string;
+  limit: number;
+};
+
+export type RuleApiFilters = {
+  search: string;
+  category: string;
+  criticalOnly: boolean;
   limit: number;
 };
 
@@ -218,6 +226,11 @@ export type ExperimentApiReferenceInput = {
   experimentCode?: string;
 };
 
+export type RuleApiReferenceInput = {
+  ruleId?: string;
+  ruleKey?: string;
+};
+
 export type ResolvedSampleApiInput = {
   animalCode: string;
   animalId: string;
@@ -302,6 +315,11 @@ export type ResolvedProjectApiReference = {
 export type ResolvedExperimentApiReference = {
   experimentCode: string;
   experimentId: string;
+};
+
+export type ResolvedRuleApiReference = {
+  ruleId: string;
+  ruleKey: string;
 };
 
 function normalizeText(value?: string | null) {
@@ -394,6 +412,15 @@ export function parseCryostorageApiFilters(searchParams: URLSearchParams): Cryos
     status: normalizeText(searchParams.get("status")) || "all",
     strain: normalizeText(searchParams.get("strain")),
     projectCode: normalizeText(searchParams.get("projectCode")),
+    limit: parseLimit(searchParams.get("limit")),
+  };
+}
+
+export function parseRuleApiFilters(searchParams: URLSearchParams): RuleApiFilters {
+  return {
+    search: normalizeText(searchParams.get("search")),
+    category: normalizeText(searchParams.get("category")),
+    criticalOnly: parseBoolean(searchParams.get("criticalOnly")),
     limit: parseLimit(searchParams.get("limit")),
   };
 }
@@ -628,6 +655,35 @@ export async function getCryostorageApiList(filters: CryostorageApiFilters) {
     const matchesProject = projectCode ? record.projectCode?.toLowerCase().includes(projectCode) : true;
 
     return matchesSearch && matchesStatus && matchesStrain && matchesProject;
+  });
+
+  return {
+    data: applyLimit(filtered, filters.limit),
+    total: filtered.length,
+  };
+}
+
+export async function getRuleApiList(filters: RuleApiFilters) {
+  const rules = await getRuleSummaryView();
+  const search = normalizeSearch(filters.search);
+  const category = normalizeSearch(filters.category);
+
+  const filtered = rules.filter((rule) => {
+    const matchesSearch = search
+      ? buildHaystack([
+          rule.key,
+          rule.label,
+          rule.description,
+          rule.category,
+          rule.valueType,
+          rule.displayValue,
+          rule.editorValue,
+        ]).includes(search)
+      : true;
+    const matchesCategory = category ? rule.category.toLowerCase().includes(category) : true;
+    const matchesCritical = filters.criticalOnly ? rule.criticalBlock : true;
+
+    return matchesSearch && matchesCategory && matchesCritical;
   });
 
   return {
@@ -1363,6 +1419,50 @@ export async function resolveExperimentApiReference(input: ExperimentApiReferenc
   };
 }
 
+export async function resolveRuleApiReference(input: RuleApiReferenceInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedRuleApiReference;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const ruleRef = input.ruleId?.trim();
+  const ruleKey = input.ruleKey?.trim();
+
+  if (!ruleRef && !ruleKey) {
+    return { ok: false, message: "Provide ruleId or ruleKey.", status: 400 };
+  }
+
+  const rule = await prisma.ruleConfig.findFirst({
+    where: {
+      OR: [
+        ...(ruleRef ? [{ id: ruleRef }, { key: ruleRef }] : []),
+        ...(ruleKey ? [{ key: ruleKey }] : []),
+      ],
+    },
+    select: {
+      id: true,
+      key: true,
+    },
+  });
+
+  if (!rule) {
+    return { ok: false, message: "Rule not found for the supplied ruleId or ruleKey.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      ruleId: rule.id,
+      ruleKey: rule.key,
+    },
+  };
+}
+
 export async function resolveBreedingSetupApiInput(input: CreateBreedingSetupApiInput): Promise<
   | {
       ok: true;
@@ -1810,6 +1910,12 @@ export function buildGenotypeApiFinalCall(input: { marker: string; status: Genot
   return `${input.marker} ${input.zygosity.trim()}`;
 }
 
+export async function getRuleApiRecordById(ruleId: string) {
+  const rules = await getRuleSummaryView();
+
+  return rules.find((rule) => rule.id === ruleId) ?? null;
+}
+
 const exportCatalog = [
   {
     entity: "animals",
@@ -1913,6 +2019,12 @@ const resourceCatalog = [
     path: "/api/v1/genotypes",
     description: "External genotype result intake with audited animal allele updates.",
     methods: ["POST"],
+  },
+  {
+    name: "rules",
+    path: "/api/v1/rules",
+    description: "Admin rule setting summaries plus audited rule config updates.",
+    methods: ["GET", "PATCH"],
   },
   {
     name: "exports",

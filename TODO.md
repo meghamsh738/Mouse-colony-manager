@@ -91,6 +91,7 @@ Current delivery level:
 - [x] Add audited external experiment assignment promote/rollback status sync under `/api/v1/experiments/assignments`
 - [x] Add audited external planned assignment detail maintenance under `/api/v1/experiments/assignments/{assignmentId}`
 - [x] Add audited external direct experiment reservation sync under `/api/v1/experiments/reservations`
+- [x] Add audited admin rule config sync under `/api/v1/rules`
 
 ## In Progress
 
@@ -98,7 +99,7 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external write integration after animal intake, breeding setup intake, litter intake, weaning sync, animal lifecycle, cage moves, sample, cryostorage, genotype, attachment-aware cage welfare intake, experiment assignment sync/status/detail maintenance, and direct experiment reservation sync
+- [ ] Define the next external write integration after animal intake, breeding setup intake, litter intake, weaning sync, animal lifecycle, cage moves, sample, cryostorage, genotype, attachment-aware cage welfare intake, experiment assignment sync/status/detail maintenance, direct experiment reservation sync, and admin rule config sync
 
 ## Verification Snapshot
 
@@ -155,6 +156,7 @@ Notes:
 - On 2026-05-01, `/api/v1/experiments/assignments` was extended with `PATCH` promote/rollback actions for external assignment status sync using the same audited promotion and rollback workflow as the app UI.
 - On 2026-05-05, `/api/v1/experiments/assignments/{assignmentId}` was added for external planned-assignment maintenance, with authenticated `GET`, audited `PATCH` edit support, and audited `DELETE` removal support using the same planned-cohort editor workflow as the app UI.
 - On 2026-05-05, `/api/v1/experiments/reservations` was added for external direct reservation sync, with audited `POST` intake using `experimentCode`/`experimentId` plus `animalCode`/`animalId`, duplicate-safe repeated submission handling, and the same reservation workflow used by the app UI.
+- On 2026-05-05, `/api/v1/rules` was added for external admin rule-config maintenance, with filtered `GET` summaries and audited `PATCH` updates using `ruleId`/`ruleKey` plus the same value parser and audit trail used by the settings UI.
 - The latest notification delivery unit suite covers webhook delivery and HTTP email-provider delivery with a mocked provider endpoint.
 - The latest breeding and forecast smoke checks passed on both Playwright `chromium` and `mobile` projects after adding line-specific fertility models and configurable long-range runway forecasting.
 - The latest targeted colony unit coverage checks breeding line-fertility output and long-range forecast summary fields.

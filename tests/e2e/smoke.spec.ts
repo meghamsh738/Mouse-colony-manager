@@ -584,6 +584,42 @@ test("researcher can reserve an animal through the integration API", async ({ pa
   });
 });
 
+test("admin can update a rule through the integration API", async ({ page }) => {
+  await signInForApiRequests(page, "admin");
+
+  const listResponse = await page.request.get("/api/v1/rules?category=capacity&criticalOnly=true&limit=10");
+  const listPayload = {
+    status: listResponse.status(),
+    body: await listResponse.json(),
+  };
+
+  expect(listPayload.status).toBe(200);
+  expect(listPayload.body.meta.filters).toMatchObject({ category: "capacity", criticalOnly: true, limit: 10 });
+  expect(listPayload.body.data.some((rule: { key: string }) => rule.key === "cage_max_occupancy")).toBe(true);
+
+  const updateResponse = await page.request.patch("/api/v1/rules", {
+    data: {
+      ruleKey: "cage_max_occupancy",
+      valueInput: "1",
+      criticalBlock: true,
+    },
+  });
+  const updatePayload = {
+    status: updateResponse.status(),
+    body: await updateResponse.json(),
+  };
+
+  expect(updatePayload.status).toBe(200);
+  expect(updatePayload.body.meta.created).toBe(false);
+  expect(updatePayload.body.data).toMatchObject({
+    id: "rule-006",
+    key: "cage_max_occupancy",
+    displayValue: "1",
+    editorValue: "1",
+    criticalBlock: true,
+  });
+});
+
 test("staff can ingest an external cage welfare event through the integration API", async ({ page }) => {
   await signInForApiRequests(page, "staff");
 

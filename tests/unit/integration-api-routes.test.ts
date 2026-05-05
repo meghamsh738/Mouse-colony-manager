@@ -373,6 +373,10 @@ describe("integration API routes", () => {
       path: "/api/v1/genotypes",
       methods: ["POST"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "rules")).toMatchObject({
+      path: "/api/v1/rules",
+      methods: ["GET", "PATCH"],
+    });
     expect(payload.data.resources.find((resource) => resource.name === "experiment-assignments")).toMatchObject({
       path: "/api/v1/experiments/assignments",
       methods: ["POST", "PATCH", "DELETE"],
@@ -1637,6 +1641,101 @@ describe("integration API routes", () => {
     await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record genotyping results." });
   });
 
+  it("returns filtered rule summaries and updates rule config through the external rules route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { GET, PATCH } = await import("@/app/api/v1/rules/route");
+    const listResponse = await GET(
+      new Request("http://localhost:3000/api/v1/rules?category=capacity&criticalOnly=true&limit=10"),
+    );
+    const listPayload = (await listResponse.json()) as {
+      data: Array<{ id: string; key: string; category: string; criticalBlock: boolean }>;
+      meta: { count: number; total: number; filters: Record<string, string | boolean | number> };
+    };
+
+    expect(listResponse.status).toBe(200);
+    expect(listPayload.meta.filters).toMatchObject({ category: "capacity", criticalOnly: true, limit: 10 });
+    expect(listPayload.data.length).toBeGreaterThan(0);
+    expect(listPayload.data.every((rule) => rule.category === "capacity" && rule.criticalBlock)).toBe(true);
+
+    const updateResponse = await PATCH(
+      new Request("http://localhost:3000/api/v1/rules", {
+        method: "PATCH",
+        body: JSON.stringify({
+          ruleId: "rule-006",
+          valueInput: "1",
+          criticalBlock: true,
+        }),
+      }),
+    );
+    const updated = (await updateResponse.json()) as {
+      data: { id: string; key: string; displayValue: string; editorValue: string; criticalBlock: boolean };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(updateResponse.status).toBe(200);
+    expect(updated.meta.created).toBe(false);
+    expect(updated.meta.message).toContain("Maximum cage occupancy updated");
+    expect(updated.data).toMatchObject({
+      id: "rule-006",
+      key: "cage_max_occupancy",
+      displayValue: "1",
+      editorValue: "1",
+      criticalBlock: true,
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "rule_config",
+          entityId: "rule-006",
+          action: "update",
+          newValue: {
+            path: ["value"],
+            equals: 1,
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated rule config updates as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { PATCH } = await import("@/app/api/v1/rules/route");
+    const requestBody = {
+      ruleKey: "cage_max_occupancy",
+      valueInput: "1",
+      criticalBlock: true,
+    };
+
+    await PATCH(
+      new Request("http://localhost:3000/api/v1/rules", {
+        method: "PATCH",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/rules", {
+        method: "PATCH",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { key: string; displayValue: string; criticalBlock: boolean };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already up to date");
+    expect(payload.data).toMatchObject({
+      key: "cage_max_occupancy",
+      displayValue: "1",
+      criticalBlock: true,
+    });
+  });
+
   it("syncs planned experiment assignments through the external assignment route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -2053,6 +2152,27 @@ describe("integration API routes", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
       error: "Your role cannot sync experiment reservations.",
+    });
+  });
+
+  it("rejects non-admin rule config update requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { PATCH } = await import("@/app/api/v1/rules/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/rules", {
+        method: "PATCH",
+        body: JSON.stringify({
+          ruleKey: "cage_max_occupancy",
+          valueInput: "1",
+          criticalBlock: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Only admins can update rule settings.",
     });
   });
 
