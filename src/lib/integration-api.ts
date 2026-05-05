@@ -4,6 +4,7 @@ import { getAnimalDetailView, getAnimalListView } from "@/lib/animals-read";
 import { getCageDetailView, getCageListView } from "@/lib/cages-read";
 import { getCryostorageInventoryView } from "@/lib/cryostorage-read";
 import { getExperimentOverviewView } from "@/lib/experiments-read";
+import { parseGenotypeImportCsv } from "@/lib/genotype-import";
 import { prisma } from "@/lib/prisma";
 import { getRuleSummaryView } from "@/lib/settings-read";
 import { getSampleInventoryView } from "@/lib/samples-read";
@@ -2021,6 +2022,12 @@ const resourceCatalog = [
     methods: ["POST"],
   },
   {
+    name: "genotype-import",
+    path: "/api/v1/genotypes/import",
+    description: "External bulk genotype CSV import with audited row-by-row genotype recording.",
+    methods: ["POST"],
+  },
+  {
     name: "rules",
     path: "/api/v1/rules",
     description: "Admin rule setting summaries plus audited rule config updates.",
@@ -2051,6 +2058,20 @@ export function getIntegrationExportCatalog(origin: string) {
     path: `/api/exports/${entry.entity}`,
     csvUrl: `${origin}/api/exports/${entry.entity}`,
   }));
+}
+
+export function buildGenotypeImportApiSummary(input: {
+  csvText: string;
+  fileName?: string;
+}) {
+  const parsed = parseGenotypeImportCsv(input.csvText);
+
+  return {
+    fileName: input.fileName ?? null,
+    parsedRowCount: parsed.rows.length,
+    preflightErrorCount: parsed.errors.length,
+    preflightErrors: parsed.errors.slice(0, 5),
+  };
 }
 
 const sampleApiSelect = {

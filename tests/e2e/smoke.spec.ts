@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -617,6 +618,36 @@ test("admin can update a rule through the integration API", async ({ page }) => 
     displayValue: "1",
     editorValue: "1",
     criticalBlock: true,
+  });
+});
+
+test("admin can import genotype rows through the integration API", async ({ page }) => {
+  const fixturePath = path.join(process.cwd(), "tests/fixtures/genotype-import.csv");
+  const fixtureBuffer = fs.readFileSync(fixturePath);
+
+  await signInForApiRequests(page, "admin");
+
+  const response = await page.request.post("/api/v1/genotypes/import", {
+    multipart: {
+      file: {
+        name: "genotype-import.csv",
+        mimeType: "text/csv",
+        buffer: fixtureBuffer,
+      },
+    },
+  });
+  const payload = {
+    status: response.status(),
+    body: await response.json(),
+  };
+
+  expect(payload.status).toBe(200);
+  expect(payload.body.meta.created).toBe(false);
+  expect(payload.body.meta.message).toContain("Processed 2 genotype rows from genotype-import.csv. 2 succeeded.");
+  expect(payload.body.data).toMatchObject({
+    fileName: "genotype-import.csv",
+    parsedRowCount: 2,
+    preflightErrorCount: 0,
   });
 });
 

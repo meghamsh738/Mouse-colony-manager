@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getAnimalDetailView } from "@/lib/animals-read";
 import { SEEDED_DEV_EMAILS } from "@/lib/seed-metadata";
 import { prisma } from "@/lib/prisma";
 import { seedDatabase } from "../../prisma/seed-database";
@@ -371,6 +372,10 @@ describe("integration API routes", () => {
     });
     expect(payload.data.resources.find((resource) => resource.name === "genotypes")).toMatchObject({
       path: "/api/v1/genotypes",
+      methods: ["POST"],
+    });
+    expect(payload.data.resources.find((resource) => resource.name === "genotype-import")).toMatchObject({
+      path: "/api/v1/genotypes/import",
       methods: ["POST"],
     });
     expect(payload.data.resources.find((resource) => resource.name === "rules")).toMatchObject({
@@ -1699,6 +1704,49 @@ describe("integration API routes", () => {
     ).resolves.toBeTruthy();
   });
 
+  it("imports genotype csv batches through the external genotype import route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/genotypes/import/route");
+    const csvText = [
+      "subject_id,marker,call,status,source,assay,sample_date,result_date,result_text,provider,confidence,sample_id",
+      "CM-25009,CreER,+/-,confirmed,manual PCR,gel PCR,2026-04-09,2026-04-09,Imported batch call for CM-25009,,high,PCR-25009-BATCH",
+      "MC-2026-011,CreER,negative,confirmed,external vendor,Transnetyx panel,2026-04-09,2026-04-09,Imported vendor negative call,Transnetyx,high,TX-26011",
+    ].join("\n");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/genotypes/import", {
+        method: "POST",
+        body: JSON.stringify({
+          csvText,
+          fileName: "vendor-genotypes.csv",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        fileName: string | null;
+        parsedRowCount: number;
+        preflightErrorCount: number;
+        preflightErrors: string[];
+      };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("Processed 2 genotype rows from vendor-genotypes.csv. 2 succeeded.");
+    expect(payload.data).toMatchObject({
+      fileName: "vendor-genotypes.csv",
+      parsedRowCount: 2,
+      preflightErrorCount: 0,
+    });
+
+    const [animal009, animal011] = await Promise.all([getAnimalDetailView("animal-009"), getAnimalDetailView("animal-011")]);
+
+    expect(animal009?.genotypeSummary).toContain("CreER +/-");
+    expect(animal011?.genotypeSummary).toContain("CreER WT/WT");
+  });
+
   it("treats repeated rule config updates as idempotent", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -2173,6 +2221,26 @@ describe("integration API routes", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
       error: "Only admins can update rule settings.",
+    });
+  });
+
+  it("rejects read-only genotype import requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/genotypes/import/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/genotypes/import", {
+        method: "POST",
+        body: JSON.stringify({
+          csvText: "subject_id,marker,call,sample_date,result_date\nCM-25009,CreER,+/-,2026-04-09,2026-04-09",
+          fileName: "readonly-import.csv",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Your role cannot import genotyping results.",
     });
   });
 
