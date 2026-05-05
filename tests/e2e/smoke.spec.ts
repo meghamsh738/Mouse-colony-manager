@@ -502,6 +502,33 @@ test("staff can create an animal through the integration API", async ({ page }) 
   expect(payload.body.data.projectCodes).toContain("PRJ-NEURO-07");
 });
 
+test("researcher can reserve an animal through the integration API", async ({ page }) => {
+  await signInForApiRequests(page, "researcher");
+
+  const response = await page.request.post("/api/v1/experiments/reservations", {
+    data: {
+      experimentCode: "EXP-LPS-005",
+      animalCode: "CM-26004",
+      startDate: "2026-04-18",
+      treatmentGroup: "Arm C",
+      notes: "Reserved by the authenticated integration API smoke.",
+    },
+  });
+  const payload = {
+    status: response.status(),
+    body: await response.json(),
+  };
+
+  expect(payload.status).toBe(201);
+  expect(payload.body.meta.created).toBe(true);
+  expect(payload.body.data).toMatchObject({
+    animalCode: "CM-26004",
+    experimentCode: "EXP-LPS-005",
+    status: "reserved",
+    treatmentGroup: "Arm C",
+  });
+});
+
 test("staff can ingest an external cage welfare event through the integration API", async ({ page }) => {
   await signInForApiRequests(page, "staff");
 

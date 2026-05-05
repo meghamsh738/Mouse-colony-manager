@@ -377,6 +377,10 @@ describe("integration API routes", () => {
       path: "/api/v1/experiments/assignments",
       methods: ["POST", "PATCH"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "experiment-reservations")).toMatchObject({
+      path: "/api/v1/experiments/reservations",
+      methods: ["POST"],
+    });
   });
 
   it("publishes the export discovery catalog", async () => {
@@ -1806,6 +1810,90 @@ describe("integration API routes", () => {
     ).resolves.toBeTruthy();
   });
 
+  it("syncs direct experiment reservations through the external reservation route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/experiments/reservations/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/experiments/reservations", {
+        method: "POST",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          animalCode: "CM-26004",
+          startDate: "2026-04-18",
+          treatmentGroup: "Arm C",
+          notes: "Reserved by an external integration test.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { animalCode: string; experimentCode: string; status: string; treatmentGroup: string };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("CM-26004 reserved for EXP-LPS-005");
+    expect(payload.data).toMatchObject({
+      animalCode: "CM-26004",
+      experimentCode: "EXP-LPS-005",
+      status: "reserved",
+      treatmentGroup: "Arm C",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "experiment_assignment",
+          action: "reserve",
+          newValue: {
+            path: ["experimentId"],
+            equals: "experiment-002",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated experiment reservation sync as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/experiments/reservations/route");
+    const requestBody = {
+      experimentCode: "EXP-LPS-005",
+      animalCode: "CM-26004",
+      startDate: "2026-04-18",
+      treatmentGroup: "Arm C",
+      notes: "Repeated reservation payload.",
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/experiments/reservations", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/experiments/reservations", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { animalCode: string; experimentCode: string; status: string };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already reserved for EXP-LPS-005");
+    expect(payload.data).toMatchObject({
+      animalCode: "CM-26004",
+      experimentCode: "EXP-LPS-005",
+      status: "reserved",
+    });
+  });
+
   it("rejects read-only experiment assignment sync requests", async () => {
     authMock.mockResolvedValue(readOnlySession());
 
@@ -1842,6 +1930,27 @@ describe("integration API routes", () => {
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
       error: "Your role cannot sync experiment assignment status.",
+    });
+  });
+
+  it("rejects read-only experiment reservation sync requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { POST } = await import("@/app/api/v1/experiments/reservations/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/experiments/reservations", {
+        method: "POST",
+        body: JSON.stringify({
+          experimentCode: "EXP-LPS-005",
+          animalCode: "CM-26004",
+          startDate: "2026-04-18",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Your role cannot sync experiment reservations.",
     });
   });
 });

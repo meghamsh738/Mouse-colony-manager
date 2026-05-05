@@ -171,6 +171,16 @@ export type CreateExperimentAssignmentApiInput = {
   }>;
 };
 
+export type CreateExperimentReservationApiInput = {
+  experimentId?: string;
+  experimentCode?: string;
+  animalId?: string;
+  animalCode?: string;
+  startDate: string;
+  treatmentGroup?: string;
+  notes?: string;
+};
+
 export type CreateBreedingSetupApiInput = {
   sireId?: string;
   sireCode?: string;
@@ -261,6 +271,15 @@ export type ResolvedExperimentAssignmentApiInput = {
     animalId: string;
     treatmentGroup: string;
   }>;
+};
+
+export type ResolvedExperimentReservationApiInput = {
+  animalCode: string;
+  animalId: string;
+  experimentCode: string;
+  experimentId: string;
+  treatmentGroup?: string;
+  notes?: string;
 };
 
 export type ResolvedBreedingSetupApiInput = {
@@ -1262,6 +1281,43 @@ export async function resolveExperimentAssignmentApiInput(input: CreateExperimen
   };
 }
 
+export async function resolveExperimentReservationApiInput(input: CreateExperimentReservationApiInput): Promise<
+  | {
+      ok: true;
+      value: ResolvedExperimentReservationApiInput;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const [experiment, animal] = await Promise.all([
+    resolveExperimentApiReference(input),
+    resolveAnimalByApiReference(input),
+  ]);
+
+  if (!experiment.ok) {
+    return experiment;
+  }
+
+  if (!animal.ok) {
+    return animal;
+  }
+
+  return {
+    ok: true,
+    value: {
+      animalCode: animal.value.animalCode,
+      animalId: animal.value.animalId,
+      experimentCode: experiment.value.experimentCode,
+      experimentId: experiment.value.experimentId,
+      treatmentGroup: input.treatmentGroup?.trim() || undefined,
+      notes: input.notes?.trim() || undefined,
+    },
+  };
+}
+
 export async function resolveExperimentApiReference(input: ExperimentApiReferenceInput): Promise<
   | {
       ok: true;
@@ -1537,6 +1593,33 @@ export async function getExperimentAssignmentApiRecords(input: {
   return records.map(formatExperimentAssignmentApiRecord);
 }
 
+export async function getExistingExperimentReservationApiRecord(input: {
+  experimentId: string;
+  animalId: string;
+  startDate: string;
+  treatmentGroup?: string;
+}) {
+  const startDate = new Date(input.startDate);
+
+  if (Number.isNaN(startDate.getTime())) {
+    return null;
+  }
+
+  const normalizedTreatmentGroup = input.treatmentGroup?.trim() || null;
+  const record = await prisma.experimentAssignment.findFirst({
+    where: {
+      experimentId: input.experimentId,
+      animalId: input.animalId,
+      status: "reserved",
+      startDate,
+      treatmentGroup: normalizedTreatmentGroup,
+    },
+    select: experimentAssignmentApiSelect,
+  });
+
+  return record ? formatExperimentAssignmentApiRecord(record) : null;
+}
+
 export async function getExperimentAssignmentApiRecordsForExperiment(input: {
   experimentId: string;
   statuses?: AssignmentStatus[];
@@ -1791,6 +1874,12 @@ const resourceCatalog = [
     path: "/api/v1/experiments/assignments",
     description: "External planned experiment assignment sync with audit provenance.",
     methods: ["POST", "PATCH"],
+  },
+  {
+    name: "experiment-reservations",
+    path: "/api/v1/experiments/reservations",
+    description: "External direct experiment reservation intake with audit provenance.",
+    methods: ["POST"],
   },
   {
     name: "projects",
