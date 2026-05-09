@@ -148,18 +148,19 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
 
   return (
     <div className="space-y-5" data-testid="cryostorage-table">
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+      <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search cryostorage label, strain, project, location, or notes"
+            className="min-w-0"
             data-testid="cryostorage-search"
           />
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-            className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
+            className="h-11 w-full min-w-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)] md:w-auto"
           >
             <option value="all">All statuses</option>
             <option value="stored">Stored</option>
@@ -171,7 +172,7 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
           <select
             value={strainFilter}
             onChange={(event) => setStrainFilter(event.target.value)}
-            className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
+            className="h-11 w-full min-w-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)] md:w-auto"
           >
             <option value="all">All strains</option>
             {strainNames.map((strainName) => (
@@ -196,8 +197,50 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
           </span>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-[24px] border border-[var(--line)]">
-        <table className="min-w-full border-collapse text-left">
+      <div className="grid gap-3 md:hidden">
+        {table.getRowModel().rows.map((row) => {
+          const record = row.original;
+
+          return (
+            <article key={record.id} className="rounded-[24px] border border-[var(--line)] bg-white/70 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-[var(--ink)]">{record.sampleLabel}</p>
+                  <p className="mt-1 text-sm text-[var(--muted)]">{record.materialType}</p>
+                  {record.quantityLabel ? (
+                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{record.quantityLabel}</p>
+                  ) : null}
+                </div>
+                <Badge variant={statusVariant(record.status)}>{record.status}</Badge>
+              </div>
+              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Stored</dt>
+                  <dd className="mt-1 text-[var(--ink)]">{formatDate(record.storedAt)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Project</dt>
+                  <dd className="mt-1 text-[var(--ink)]">{record.projectCode ?? "None"}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Strain</dt>
+                  <dd className="mt-1 text-[var(--ink)]">{record.strainName}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Location</dt>
+                  <dd className="mt-1 text-[var(--muted)]">{record.storageLocation ?? "Pending"}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Recovery</dt>
+                  <dd className="mt-1 text-[var(--muted)]">{record.recoveryNotes ?? "None"}</dd>
+                </div>
+              </dl>
+            </article>
+          );
+        })}
+      </div>
+      <div className="hidden overflow-x-auto rounded-[24px] border border-[var(--line)] md:block">
+        <table className="min-w-[980px] border-collapse text-left">
           <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>

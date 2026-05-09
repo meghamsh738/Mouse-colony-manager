@@ -3,8 +3,21 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import type { CageListItem } from "@/lib/types";
+
+function statusVariant(status: CageListItem["status"]) {
+  if (status === "quarantine") {
+    return "danger";
+  }
+
+  if (status === "breeding" || status === "experiment") {
+    return "warning";
+  }
+
+  return "neutral";
+}
 
 export function CageTable({ data }: { data: CageListItem[] }) {
   const [search, setSearch] = useState("");
@@ -106,8 +119,41 @@ export function CageTable({ data }: { data: CageListItem[] }) {
           </div>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-[24px] border border-[var(--line)]">
-        <table className="min-w-full border-collapse">
+      <div className="grid gap-3 md:hidden">
+        {filteredData.map((cage) => (
+          <article key={cage.id} className="rounded-[24px] border border-[var(--line)] bg-white/70 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <Link className="font-semibold hover:text-[var(--accent)]" href={`/cages/${cage.id}`}>
+                  {cage.roomNumber} / {cage.rackNumber} / {cage.cageNumber}
+                </Link>
+                <p className="mt-1 font-mono text-xs uppercase tracking-[0.1em] text-[var(--muted)]">{cage.barcode}</p>
+              </div>
+              <Badge variant={statusVariant(cage.status)}>{cage.status}</Badge>
+            </div>
+            <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Occupants</dt>
+                <dd className="mt-1 font-semibold text-[var(--ink)]">{cage.occupantCount}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Sex mix</dt>
+                <dd className="mt-1 font-semibold text-[var(--ink)]">{cage.sexComposition}</dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Strain summary</dt>
+                <dd className="mt-1 text-[var(--muted)]">{cage.strainSummary}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Warnings</dt>
+                <dd className="mt-1 font-semibold text-[var(--ink)]">{cage.warningCount}</dd>
+              </div>
+            </dl>
+          </article>
+        ))}
+      </div>
+      <div className="hidden overflow-x-auto rounded-[24px] border border-[var(--line)] md:block">
+        <table className="min-w-[900px] border-collapse">
           <thead className="bg-[var(--surface-2)] text-left text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
             <tr>
               {["Cage", "Barcode", "Status", "Occupants", "Sex mix", "Strain summary", "Warnings"].map((header) => (

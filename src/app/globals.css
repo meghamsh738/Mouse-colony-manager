@@ -1,20 +1,26 @@
 @import "tailwindcss";
 
 :root {
-  --page: #eef3fb;
-  --nav: rgba(233, 240, 251, 0.9);
-  --surface: rgba(255, 255, 255, 0.74);
-  --surface-2: rgba(240, 245, 252, 0.9);
-  --surface-3: rgba(224, 233, 247, 0.95);
-  --ink: #10233f;
-  --muted: #5d6f8c;
-  --line: rgba(16, 35, 63, 0.1);
-  --line-strong: rgba(16, 35, 63, 0.18);
-  --accent: #285fb8;
-  --accent-strong: #1b4892;
-  --focus: rgba(40, 95, 184, 0.24);
-  --hero: #102746;
-  --hero-ink: #edf4ff;
+  --page: #f4efe5;
+  --page-soft: #fbf8f1;
+  --nav: #053f32;
+  --nav-2: #002f26;
+  --surface: rgba(255, 252, 245, 0.9);
+  --surface-2: rgba(247, 241, 230, 0.92);
+  --surface-3: rgba(236, 226, 209, 0.96);
+  --ink: #142620;
+  --muted: #68736d;
+  --line: rgba(32, 48, 42, 0.12);
+  --line-strong: rgba(32, 48, 42, 0.24);
+  --accent: #075c49;
+  --accent-strong: #003f32;
+  --accent-soft: rgba(7, 92, 73, 0.1);
+  --warning: #a96410;
+  --danger: #b83b36;
+  --info: #2f6597;
+  --focus: rgba(7, 92, 73, 0.22);
+  --hero: #053f32;
+  --hero-ink: #fff8ea;
 }
 
 @theme inline {
@@ -31,14 +37,17 @@
 
 html {
   background:
-    radial-gradient(circle at top left, rgba(40, 95, 184, 0.12), transparent 28%),
-    radial-gradient(circle at top right, rgba(17, 116, 92, 0.08), transparent 22%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.38), transparent 18%),
+    radial-gradient(circle at 12% 0%, rgba(199, 135, 44, 0.16), transparent 30%),
+    radial-gradient(circle at 88% 6%, rgba(7, 92, 73, 0.13), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), transparent 28%),
     var(--page);
 }
 
 body {
-  background: transparent;
+  background:
+    linear-gradient(rgba(20, 38, 32, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 38, 32, 0.025) 1px, transparent 1px);
+  background-size: 28px 28px;
   color: var(--ink);
   font-family: var(--font-space-grotesk), sans-serif;
   text-rendering: optimizeLegibility;
@@ -67,7 +76,11 @@ textarea {
 }
 
 ::selection {
-  background: rgba(40, 95, 184, 0.18);
+  background: rgba(7, 92, 73, 0.18);
+}
+
+:focus-visible {
+  outline-color: var(--accent);
 }
 
 .font-display {

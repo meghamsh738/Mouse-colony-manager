@@ -1,6 +1,6 @@
 # Colony Maintenance Tracker
 
-Last updated: 2026-05-05
+Last updated: 2026-05-09
 
 ## Overall Status
 
@@ -24,6 +24,7 @@ Current delivery level:
   - CSV exports
   - local attachment upload and viewing for genotype and welfare records
   - authenticated `/api/v1` integration routes for animals, cages, breeding setup intake, litter intake, weaning sync, experiments, projects, samples, genotype intake, experiment assignment sync, cage welfare event intake, and export discovery, including audited external animal intake, sample intake, sample lifecycle updates, genotype result intake, breeding setup intake, litter intake, weaning sync, planned-assignment intake, assignment promote/rollback status sync, and cage health-note ingestion
+  - cohesive production UI redesign across dashboard, animals, cages, scan, breeding, experiments, forecast, samples, cryostorage, quarantine, notifications, and settings
   - in-app notification inbox with admin-editable delivery toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift
   - outbound notification digest preview and webhook delivery endpoint
   - quarantine and sentinel tracking workspace
@@ -41,6 +42,7 @@ Current delivery level:
 - Working, but still rough:
   - e2e reliability now depends on per-test reseeding, which is correct but slow; repeated local runs can now reuse an already-started e2e server to avoid rebuilding each time
   - Prisma local dev DB remains the main source of flaky local verification if `prisma dev` drops; `npm run db:doctor` now fails fast with endpoint and PostgreSQL startup-protocol status, and local e2e prep uses the direct database URL
+  - repeated local Playwright reseeds against a reused production server can still close the app server's Prisma connection; if an error boundary appears after several seeded tests, rerun `npm run db:doctor` and restart only the app server before retrying the failed smoke
   - attachment persistence is local-disk backed under `public/uploads` for MVP, not object storage
   - outbound email uses a generic HTTP provider contract; production deployment still needs real provider URL and token configuration
 
@@ -93,6 +95,7 @@ Current delivery level:
 - [x] Add audited external direct experiment reservation sync under `/api/v1/experiments/reservations`
 - [x] Add audited admin rule config sync under `/api/v1/rules`
 - [x] Add audited bulk genotype CSV import under `/api/v1/genotypes/import`
+- [x] Redesign the app UI from GPT image-inspired direction into one cohesive desktop/mobile visual system with responsive table cards and route-level screenshot audits
 
 ## In Progress
 
@@ -106,6 +109,17 @@ Current delivery level:
 
 Most recently verified in this branch:
 
+- `npm run prisma:validate`
+- `npm run typecheck`
+- `git diff --check`
+- `npm run build`
+- `npm run db:prepare:local`
+- `npm run db:doctor`
+- GPT image inspiration artifact: `output/playwright/ui-inspiration/13-generated-ui-inspiration-board.png`
+- Desktop/mobile visual route audit screenshots and report: `output/playwright/ui-final-audit/route-audit-report.json`
+- Role-based browser audit report for admin, staff, researcher, and read-only users: `output/playwright/ui-final-audit/role-audit-report.json`
+- `npm run verify:e2e:reuse:wsl -- --grep 'seeded user can log in and reach the dashboard' --project=chromium`
+- `npm run verify:e2e:reuse:wsl -- --grep 'researcher can review the forecast workspace' --project=chromium`
 - `npm run prisma:validate`
 - `npm run typecheck`
 - `npx vitest run tests/unit/db-doctor.test.ts --reporter=verbose`
@@ -137,6 +151,10 @@ Most recently verified in this branch:
 
 Notes:
 
+- On 2026-05-09, the app UI was redesigned around a warmer lab-notebook visual system with an evergreen navigation rail, elevated page headers, redesigned primitive controls, mobile table-card layouts for animal/cage/sample/cryostorage workspaces, and a hidden Next dev indicator so it does not overlap mobile QA screenshots.
+- On 2026-05-09, desktop/mobile route screenshots across all major modules passed a custom Playwright route audit with zero body overflow and one page heading per route.
+- On 2026-05-09, role-based browser audits passed for admin, staff, researcher, and read-only users, including safe search/filter/navigation interactions and read-only form hiding on sample and cryostorage pages.
+- On 2026-05-09, a compact maintained e2e slice passed four staff/researcher module tests before the local Prisma dev DB closed the app server connection during repeated per-test reseeding; after `db:doctor` passed and the app server was restarted, the failed forecast smoke passed individually.
 - On 2026-04-26, `localhost:51214` initially had no listener and `npx prisma dev -d -n colony-maintenance` stalled in this WSL/mounted-workspace session; the listener later recovered and the targeted DB-backed unit and e2e checks above passed.
 - On 2026-04-30, reusable Playwright verification was added through `E2E_REUSE_EXISTING_SERVER=1`; keep `npm run e2e:server` running in another shell for repeated local checks.
 - On 2026-04-30, `npm run db:doctor` was added as a read-only preflight for `DATABASE_URL` and `DIRECT_DATABASE_URL`; it reports the configured host, port, database, TCP reachability, and PostgreSQL startup-protocol status before expensive verification starts.

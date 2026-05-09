@@ -20,9 +20,9 @@ export default async function CryostoragePage() {
           title="Track frozen backup material and archived recovery lines."
           description="This workspace keeps frozen sperm, embryos, and reserve material tied to strains and projects so line recovery planning stays visible alongside the active colony."
         />
-        <div className={canRecordCryostorage ? "grid gap-6 xl:grid-cols-[0.8fr_1.2fr]" : ""}>
+        <div className={canRecordCryostorage ? "grid min-w-0 gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]" : ""}>
           {canRecordCryostorage ? (
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
               <Surface className="space-y-4">
                 <div className="space-y-2">
                   <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">New cryostorage record</p>
@@ -41,7 +41,7 @@ export default async function CryostoragePage() {
               </Surface>
             </div>
           ) : null}
-          <Surface>
+          <Surface className="min-w-0">
             <CryostorageTable data={records} />
           </Surface>
         </div>

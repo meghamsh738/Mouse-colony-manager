@@ -22,9 +22,9 @@ export default async function AnimalsPage() {
           title="Search and filter the active colony."
           description="This workspace is optimized for daily lookup, experiment selection, and welfare review. Archived animals stay searchable through their detail pages and audit history, but stay out of the default active table."
         />
-        <div className={showOperations ? "grid gap-6 xl:grid-cols-[0.76fr_1.24fr]" : ""}>
+        <div className={showOperations ? "grid min-w-0 gap-6 xl:grid-cols-[minmax(0,0.76fr)_minmax(0,1.24fr)]" : ""}>
           {showOperations ? (
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
               {canCreateAnimal ? (
                 <Surface className="space-y-4">
                   <div className="space-y-2">
@@ -59,7 +59,7 @@ export default async function AnimalsPage() {
               ) : null}
             </div>
           ) : null}
-          <Surface>
+          <Surface className="min-w-0">
             <ColonyTable data={animals} />
           </Surface>
         </div>

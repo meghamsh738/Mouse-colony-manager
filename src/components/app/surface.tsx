@@ -10,7 +10,7 @@ export function Surface({ as = "section", className, ...props }: SurfaceProps) {
   return (
     <Component
       className={cn(
-        "rounded-[28px] border border-[var(--line)] bg-[var(--surface)] p-5 shadow-[0_12px_28px_rgba(18,24,38,0.04)] md:p-6",
+        "min-w-0 rounded-[28px] border border-[var(--line)] bg-[var(--surface)] p-5 shadow-[0_18px_50px_rgba(34,31,22,0.08)] ring-1 ring-white/45 backdrop-blur md:p-6",
         className,
       )}
       {...props}

@@ -186,8 +186,53 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
           </div>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-[24px] border border-[var(--line)]">
-        <table className="min-w-full border-collapse text-left">
+      <div className="grid gap-3 md:hidden">
+        {table.getRowModel().rows.map((row) => {
+          const animal = row.original;
+
+          return (
+            <article key={animal.id} className="rounded-[24px] border border-[var(--line)] bg-white/70 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <Link href={`/animals/${animal.id}`} className="font-semibold hover:text-[var(--accent)]">
+                    {animal.animalId}
+                  </Link>
+                  <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{animal.labId}</p>
+                </div>
+                <Badge variant={statusVariant(animal.status)}>{animal.status.replaceAll("_", " ")}</Badge>
+              </div>
+              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Sex</dt>
+                  <dd className="mt-1 capitalize text-[var(--ink)]">{animal.sex}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Age</dt>
+                  <dd className="mt-1 text-[var(--ink)]">{animal.ageLabel}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Line</dt>
+                  <dd className="mt-1 text-[var(--muted)]">{animal.strain}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Genotype</dt>
+                  <dd className="mt-1 font-mono text-xs text-[var(--muted)]">{animal.genotypeSummary}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Cage</dt>
+                  <dd className="mt-1 text-[var(--ink)]">{animal.cageLabel}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Warning</dt>
+                  <dd className="mt-1 text-amber-900">{animal.warnings[0] ?? "None"}</dd>
+                </div>
+              </dl>
+            </article>
+          );
+        })}
+      </div>
+      <div className="hidden overflow-x-auto rounded-[24px] border border-[var(--line)] md:block">
+        <table className="min-w-[980px] border-collapse text-left">
           <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>

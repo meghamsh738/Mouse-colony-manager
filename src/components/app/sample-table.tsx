@@ -161,18 +161,19 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
 
   return (
     <div className="space-y-5" data-testid="sample-table">
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+      <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Search sample label, animal ID, project, storage, or notes"
+            className="min-w-0"
             data-testid="sample-search"
           />
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-            className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
+            className="h-11 w-full min-w-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)] md:w-auto"
           >
             <option value="all">All statuses</option>
             <option value="stored">Stored</option>
@@ -184,7 +185,7 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
           <select
             value={typeFilter}
             onChange={(event) => setTypeFilter(event.target.value)}
-            className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
+            className="h-11 w-full min-w-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)] md:w-auto"
           >
             <option value="all">All sample types</option>
             {sampleTypes.map((sampleType) => (
@@ -209,8 +210,55 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
           </span>
         </div>
       </div>
-      <div className="overflow-x-auto rounded-[24px] border border-[var(--line)]">
-        <table className="min-w-full border-collapse text-left">
+      <div className="grid gap-3 md:hidden">
+        {table.getRowModel().rows.map((row) => {
+          const sample = row.original;
+
+          return (
+            <article key={sample.id} className="rounded-[24px] border border-[var(--line)] bg-white/70 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-[var(--ink)]">{sample.sampleLabel}</p>
+                  <p className="mt-1 text-sm text-[var(--muted)]">{sample.sampleType}</p>
+                  {sample.quantityLabel ? (
+                    <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{sample.quantityLabel}</p>
+                  ) : null}
+                </div>
+                <Badge variant={statusVariant(sample.status)}>{sample.status}</Badge>
+              </div>
+              <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Collected</dt>
+                  <dd className="mt-1 text-[var(--ink)]">{formatDate(sample.collectedAt)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Project</dt>
+                  <dd className="mt-1 text-[var(--ink)]">{sample.projectCode ?? "None"}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Animal</dt>
+                  <dd className="mt-1">
+                    <Link href={`/animals/${sample.animalId}`} className="font-medium hover:text-[var(--accent)]">
+                      {sample.animalCode}
+                    </Link>
+                    <span className="ml-2 text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{sample.labId}</span>
+                  </dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Storage</dt>
+                  <dd className="mt-1 text-[var(--muted)]">{sample.storageLocation ?? "Pending"}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Notes</dt>
+                  <dd className="mt-1 text-[var(--muted)]">{sample.notes ?? "None"}</dd>
+                </div>
+              </dl>
+            </article>
+          );
+        })}
+      </div>
+      <div className="hidden overflow-x-auto rounded-[24px] border border-[var(--line)] md:block">
+        <table className="min-w-[960px] border-collapse text-left">
           <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
