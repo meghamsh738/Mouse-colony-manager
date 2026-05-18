@@ -79,6 +79,11 @@ export type ProjectApiFilters = {
   limit: number;
 };
 
+export type ProjectOwnerApiReferenceInput = {
+  ownerId?: string;
+  ownerEmail?: string;
+};
+
 export type SampleApiFilters = {
   search: string;
   status: string;
@@ -313,6 +318,12 @@ export type ResolvedProjectApiReference = {
   projectCode: string;
 };
 
+export type ResolvedProjectOwnerApiReference = {
+  ownerEmail: string;
+  ownerId: string;
+  ownerName: string;
+};
+
 export type ResolvedExperimentApiReference = {
   experimentCode: string;
   experimentId: string;
@@ -530,51 +541,80 @@ export async function getExperimentApiList(filters: ExperimentApiFilters) {
   };
 }
 
+const projectApiSelect = {
+  id: true,
+  projectCode: true,
+  title: true,
+  notes: true,
+  ownerId: true,
+  owner: {
+    select: {
+      id: true,
+      name: true,
+      email: true,
+    },
+  },
+  animalAllocations: {
+    where: {
+      endedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  },
+  experiments: {
+    select: {
+      id: true,
+      status: true,
+    },
+  },
+} satisfies Prisma.ProjectSelect;
+
+type ProjectApiRecordSource = Prisma.ProjectGetPayload<{ select: typeof projectApiSelect }>;
+
+function buildProjectApiRecord(project: ProjectApiRecordSource) {
+  return {
+    id: project.id,
+    projectCode: project.projectCode,
+    title: project.title,
+    notes: project.notes,
+    ownerId: project.ownerId,
+    ownerName: project.owner.name ?? project.owner.email,
+    ownerEmail: project.owner.email,
+    activeAnimalAllocations: project.animalAllocations.length,
+    experimentCount: project.experiments.length,
+    activeExperimentCount: project.experiments.filter((experiment) => experiment.status === "active").length,
+  };
+}
+
+export async function getProjectApiRecordById(projectId: string) {
+  const project = await prisma.project.findUnique({
+    where: { id: projectId },
+    select: projectApiSelect,
+  });
+
+  return project ? buildProjectApiRecord(project) : null;
+}
+
+export async function getProjectApiRecordByCode(projectCode: string) {
+  const project = await prisma.project.findUnique({
+    where: { projectCode },
+    select: projectApiSelect,
+  });
+
+  return project ? buildProjectApiRecord(project) : null;
+}
+
 export async function getProjectApiList(filters: ProjectApiFilters) {
   const projects = await prisma.project.findMany({
     orderBy: { projectCode: "asc" },
-    select: {
-      id: true,
-      projectCode: true,
-      title: true,
-      notes: true,
-      owner: {
-        select: {
-          name: true,
-          email: true,
-        },
-      },
-      animalAllocations: {
-        where: {
-          endedAt: null,
-        },
-        select: {
-          id: true,
-        },
-      },
-      experiments: {
-        select: {
-          id: true,
-          status: true,
-        },
-      },
-    },
+    select: projectApiSelect,
   });
   const search = normalizeSearch(filters.search);
   const owner = normalizeSearch(filters.owner);
 
   const filtered = projects
-    .map((project) => ({
-      id: project.id,
-      projectCode: project.projectCode,
-      title: project.title,
-      notes: project.notes,
-      ownerName: project.owner.name ?? project.owner.email,
-      ownerEmail: project.owner.email,
-      activeAnimalAllocations: project.animalAllocations.length,
-      experimentCount: project.experiments.length,
-      activeExperimentCount: project.experiments.filter((experiment) => experiment.status === "active").length,
-    }))
+    .map((project) => buildProjectApiRecord(project))
     .filter((project) => {
       const matchesSearch = search
         ? buildHaystack([
@@ -1126,6 +1166,54 @@ export async function resolveProjectByApiReference(input: {
     value: {
       projectId: project.id,
       projectCode: project.projectCode,
+    },
+  };
+}
+
+export async function resolveProjectOwnerByApiReference(
+  input: ProjectOwnerApiReferenceInput,
+  fallbackOwnerId: string,
+): Promise<
+  | {
+      ok: true;
+      value: ResolvedProjectOwnerApiReference;
+    }
+  | {
+      ok: false;
+      message: string;
+      status: number;
+    }
+> {
+  const ownerId = input.ownerId?.trim();
+  const ownerEmail = input.ownerEmail?.trim();
+  const suppliedOwnerReference = ownerId || ownerEmail;
+
+  const owner = await prisma.user.findFirst({
+    where: suppliedOwnerReference
+      ? {
+          OR: [
+            ...(ownerId ? [{ id: ownerId }] : []),
+            ...(ownerEmail ? [{ email: ownerEmail }] : []),
+          ],
+        }
+      : { id: fallbackOwnerId },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+    },
+  });
+
+  if (!owner) {
+    return { ok: false, message: "Project owner not found for the supplied ownerId or ownerEmail.", status: 404 };
+  }
+
+  return {
+    ok: true,
+    value: {
+      ownerEmail: owner.email,
+      ownerId: owner.id,
+      ownerName: owner.name ?? owner.email,
     },
   };
 }
@@ -2001,7 +2089,8 @@ const resourceCatalog = [
   {
     name: "projects",
     path: "/api/v1/projects",
-    description: "Project ownership and allocation summaries.",
+    description: "Project ownership and allocation summaries plus external project catalog sync.",
+    methods: ["GET", "POST", "PATCH"],
   },
   {
     name: "samples",

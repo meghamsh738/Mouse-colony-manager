@@ -23,7 +23,7 @@ Current delivery level:
   - rules/settings and audit visibility
   - CSV exports
   - local attachment upload and viewing for genotype and welfare records
-  - authenticated `/api/v1` integration routes for animals, cages, breeding setup intake, litter intake, weaning sync, experiments, projects, samples, genotype intake, experiment assignment sync, cage welfare event intake, and export discovery, including audited external animal intake, sample intake, sample lifecycle updates, genotype result intake, breeding setup intake, litter intake, weaning sync, planned-assignment intake, assignment promote/rollback status sync, and cage health-note ingestion
+  - authenticated `/api/v1` integration routes for animals, cages, breeding setup intake, litter intake, weaning sync, experiments, projects, samples, genotype intake, experiment assignment sync, cage welfare event intake, and export discovery, including audited external animal intake, project catalog sync, sample intake, sample lifecycle updates, genotype result intake, breeding setup intake, litter intake, weaning sync, planned-assignment intake, assignment promote/rollback status sync, and cage health-note ingestion
   - cohesive production UI redesign across dashboard, animals, cages, scan, breeding, experiments, forecast, samples, cryostorage, quarantine, notifications, and settings
   - in-app notification inbox with admin-editable delivery toggles for overdue genotypes, weaning, breeder age, welfare follow-up, and reservation drift
   - outbound notification digest preview and webhook delivery endpoint
@@ -47,7 +47,7 @@ Current delivery level:
   - outbound email uses a generic HTTP provider contract; production deployment still needs real provider URL and token configuration
 
 - Still missing relative to the original blueprint:
-  - broader external integration API beyond current sample/genotype/experiment-assignment/cage-welfare intake and status sync, read-mostly `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
+  - broader external integration API beyond current project/sample/genotype/experiment-assignment/cage-welfare intake and status sync, read-mostly `/api/v1`, CSV export endpoints, and notification delivery preview/webhook surface
 
 ## Done
 
@@ -95,6 +95,7 @@ Current delivery level:
 - [x] Add audited external direct experiment reservation sync under `/api/v1/experiments/reservations`
 - [x] Add audited admin rule config sync under `/api/v1/rules`
 - [x] Add audited bulk genotype CSV import under `/api/v1/genotypes/import`
+- [x] Add audited external project catalog sync under `/api/v1/projects`
 - [x] Redesign the app UI from GPT image-inspired direction into one cohesive desktop/mobile visual system with responsive table cards and route-level screenshot audits
 - [x] Simplify the app shell and inventory/breeding workspaces with compact navigation, table-first layouts, consistent badges, readable rule values, and desktop/mobile overflow audits
 - [x] Extend the desktop navigation rail to a fixed full-height panel and switch app typography to IBM Plex Sans for a more professional product feel
@@ -109,12 +110,13 @@ Current delivery level:
 
 ## Next
 
-- [ ] Define the next external write integration after animal intake, breeding setup intake, litter intake, weaning sync, animal lifecycle, cage moves, sample, cryostorage, genotype single-result intake, genotype CSV import, attachment-aware cage welfare intake, experiment assignment sync/status/detail maintenance, direct experiment reservation sync, and admin rule config sync
+- [ ] Define the next external write integration after project catalog sync, animal intake, breeding setup intake, litter intake, weaning sync, animal lifecycle, cage moves, sample, cryostorage, genotype single-result intake, genotype CSV import, attachment-aware cage welfare intake, experiment assignment sync/status/detail maintenance, direct experiment reservation sync, and admin rule config sync
 
 ## Verification Snapshot
 
 Most recently verified in this branch:
 
+- 2026-05-18 project catalog API slice: `npm run db:doctor`, `npm run db:prepare:local`, `npx vitest run tests/unit/integration-api-routes.test.ts -t "integration index|project" --reporter=verbose`, `npm run prisma:validate`, `npm run typecheck`, `git diff --check`, `npm run build`, and `E2E_BASE_URL=http://localhost:3005 npm run verify:e2e:reuse:wsl -- --grep 'researcher can query the authenticated integration API surface' --project=chromium`
 - 2026-05-18 current batch landing gate: `npm run prisma:validate`, `npm run typecheck`, `git diff --check`, `npm run db:doctor`, `npm run build`, `npx vitest run tests/unit/rule-config.test.ts --reporter=verbose`, and `npx vitest run tests/unit/scan-lookup-route.test.ts --reporter=verbose`
 - 2026-05-18 Playwright browser confidence audit against `http://localhost:3005`: desktop route sweep across dashboard, animals, cages, breeding, experiments, samples, cryostorage, forecast, notifications, quarantine, scan, and settings at `1440x1000`; focused mobile checks for dashboard navigation, forecast, and scan at `390x844`; screenshots/report under `output/playwright/current-batch-audit`; confirmed zero horizontal overflow, zero unexpected overlap detections, and no clipped mobile nav links
 - `npm run prisma:validate`
@@ -188,6 +190,7 @@ Most recently verified in this branch:
 
 Notes:
 
+- On 2026-05-18, `/api/v1/projects` was extended from read-only summaries to audited external project catalog sync with `POST` intake, duplicate-safe repeated submissions, `PATCH` updates for title/owner/notes, admin/colony-manager write access, read-only rejection, and catalog methods `["GET", "POST", "PATCH"]`.
 - On 2026-05-10, a 1,000-animal local stress dataset exposed two local-test findings: Prisma dev on `localhost:51214` can remain TCP-open while timing out PostgreSQL probes under stress, and `/scan/lookup` could redirect browser automation to `0.0.0.0`; the scan redirect is now normalized to `localhost`, while DB recovery still depends on `npm run db:doctor` and restarting `npx prisma dev -d -n colony-maintenance` if probes fail.
 - On 2026-05-10, high-volume navigation was optimized after regenerating a `FAST510` dataset with `1014` animals, `85` cages, `303` sample records, `154` health notes, `13` breeding setups, and `251` open alerts; the app shell now uses a lightweight alert count instead of recalculating dashboard rule metrics on every route, and heavy list views render in batches with explicit "show more" controls.
 - On 2026-05-10, browser stress screenshots were written under `output/playwright/`, including `stress-route-sweep-final.png`, `stress-experiments-0K9OV3.png`, `stress-admin-cryostorage-and-audit-0K9OV3.png`, `stress-readonly-animals-0K9OV3.png`, and `stress-staff-direct-scan-0K9OV3B.png`.

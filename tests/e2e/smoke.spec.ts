@@ -265,6 +265,33 @@ test("researcher can query the authenticated integration API surface", async ({ 
   expect(exportCatalog.status).toBe(200);
   expect(exportCatalog.body.data.some((entry: { entity: string }) => entry.entity === "animals")).toBe(true);
 
+  const apiIndexResponse = await page.request.get("/api/v1");
+  const apiIndex = {
+    status: apiIndexResponse.status(),
+    body: await apiIndexResponse.json(),
+  };
+
+  expect(apiIndex.status).toBe(200);
+  expect(
+    apiIndex.body.data.resources.find((resource: { name: string }) => resource.name === "projects"),
+  ).toMatchObject({
+    path: "/api/v1/projects",
+    methods: ["GET", "POST", "PATCH"],
+  });
+
+  const projectListResponse = await page.request.get("/api/v1/projects?search=PRJ-NEURO-07&limit=1");
+  const projectList = {
+    status: projectListResponse.status(),
+    body: await projectListResponse.json(),
+  };
+
+  expect(projectList.status).toBe(200);
+  expect(projectList.body.data).toHaveLength(1);
+  expect(projectList.body.data[0]).toMatchObject({
+    projectCode: "PRJ-NEURO-07",
+    title: "Neuroimmune response pilot",
+  });
+
   const sampleIntakeResponse = await page.request.post("/api/v1/samples", {
     data: {
       animalCode: "CM-26003",

@@ -382,6 +382,10 @@ describe("integration API routes", () => {
       path: "/api/v1/rules",
       methods: ["GET", "PATCH"],
     });
+    expect(payload.data.resources.find((resource) => resource.name === "projects")).toMatchObject({
+      path: "/api/v1/projects",
+      methods: ["GET", "POST", "PATCH"],
+    });
     expect(payload.data.resources.find((resource) => resource.name === "experiment-assignments")).toMatchObject({
       path: "/api/v1/experiments/assignments",
       methods: ["POST", "PATCH", "DELETE"],
@@ -389,6 +393,183 @@ describe("integration API routes", () => {
     expect(payload.data.resources.find((resource) => resource.name === "experiment-reservations")).toMatchObject({
       path: "/api/v1/experiments/reservations",
       methods: ["POST"],
+    });
+  });
+
+  it("creates project records through the external project route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/projects/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/projects", {
+        method: "POST",
+        body: JSON.stringify({
+          projectCode: "PRJ-EXT-88",
+          title: "External viral-vector validation",
+          ownerEmail: SEEDED_DEV_EMAILS.researcher,
+          notes: "Synced from an external protocol registry.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { projectCode: string; title: string; ownerEmail: string; notes: string | null };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(201);
+    expect(payload.meta.created).toBe(true);
+    expect(payload.meta.message).toContain("PRJ-EXT-88 was synced into the project catalog");
+    expect(payload.data).toMatchObject({
+      projectCode: "PRJ-EXT-88",
+      title: "External viral-vector validation",
+      ownerEmail: SEEDED_DEV_EMAILS.researcher,
+      notes: "Synced from an external protocol registry.",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "project",
+          action: "create",
+          newValue: {
+            path: ["projectCode"],
+            equals: "PRJ-EXT-88",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("treats repeated project intake as idempotent", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/projects/route");
+    const requestBody = {
+      projectCode: "PRJ-EXT-88",
+      title: "External viral-vector validation",
+      ownerEmail: SEEDED_DEV_EMAILS.researcher,
+      notes: "Synced from an external protocol registry.",
+    };
+
+    await POST(
+      new Request("http://localhost:3000/api/v1/projects", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/projects", {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { projectCode: string; title: string };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("already matches the submitted project record");
+    expect(payload.data).toMatchObject({
+      projectCode: "PRJ-EXT-88",
+      title: "External viral-vector validation",
+    });
+  });
+
+  it("updates project records through the external project route", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { PATCH } = await import("@/app/api/v1/projects/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/projects", {
+        method: "PATCH",
+        body: JSON.stringify({
+          projectCode: "PRJ-NEURO-07",
+          title: "Neuroimmune response pilot extension",
+          ownerEmail: SEEDED_DEV_EMAILS.admin,
+          notes: "Updated from the external protocol registry.",
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: { projectCode: string; title: string; ownerEmail: string; notes: string | null };
+      meta: { created: boolean; message: string };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.meta.created).toBe(false);
+    expect(payload.meta.message).toContain("PRJ-NEURO-07 was updated");
+    expect(payload.data).toMatchObject({
+      projectCode: "PRJ-NEURO-07",
+      title: "Neuroimmune response pilot extension",
+      ownerEmail: SEEDED_DEV_EMAILS.admin,
+      notes: "Updated from the external protocol registry.",
+    });
+
+    await expect(
+      prisma.auditLog.findFirst({
+        where: {
+          entityType: "project",
+          action: "update",
+          entityId: "project-neuro",
+          newValue: {
+            path: ["title"],
+            equals: "Neuroimmune response pilot extension",
+          },
+        },
+      }),
+    ).resolves.toBeTruthy();
+  });
+
+  it("rejects invalid project sync payloads", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+
+    const { POST } = await import("@/app/api/v1/projects/route");
+    const response = await POST(
+      new Request("http://localhost:3000/api/v1/projects", {
+        method: "POST",
+        body: JSON.stringify({
+          projectCode: "PX",
+          title: "",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: "Invalid project payload." });
+  });
+
+  it("rejects read-only project sync requests", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { PATCH, POST } = await import("@/app/api/v1/projects/route");
+    const createResponse = await POST(
+      new Request("http://localhost:3000/api/v1/projects", {
+        method: "POST",
+        body: JSON.stringify({
+          projectCode: "PRJ-EXT-88",
+          title: "External viral-vector validation",
+        }),
+      }),
+    );
+    const updateResponse = await PATCH(
+      new Request("http://localhost:3000/api/v1/projects", {
+        method: "PATCH",
+        body: JSON.stringify({
+          projectCode: "PRJ-NEURO-07",
+          title: "Readonly update should fail",
+        }),
+      }),
+    );
+
+    expect(createResponse.status).toBe(403);
+    await expect(createResponse.json()).resolves.toMatchObject({
+      error: "Your role cannot sync project records.",
+    });
+    expect(updateResponse.status).toBe(403);
+    await expect(updateResponse.json()).resolves.toMatchObject({
+      error: "Your role cannot sync project records.",
     });
   });
 

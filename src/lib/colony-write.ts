@@ -176,6 +176,20 @@ type UpdateRuleConfigInput = {
   criticalBlock: boolean;
 };
 
+type CreateProjectRecordInput = {
+  projectCode: string;
+  title: string;
+  ownerId: string;
+  notes?: string;
+};
+
+type UpdateProjectRecordInput = {
+  projectId: string;
+  title?: string;
+  ownerId?: string;
+  notes?: string | null;
+};
+
 type UploadedAttachmentInput = {
   file: File;
   label?: string;
@@ -231,6 +245,10 @@ function canUpdateAnimalLifecycle(role: UserRole) {
 
 function canUpdateRuleConfig(role: UserRole) {
   return role === "admin";
+}
+
+function canSyncProject(role: UserRole) {
+  return role === "admin" || role === "colony_manager";
 }
 
 function getReferenceDate() {
@@ -383,6 +401,148 @@ function getLifecycleExperimentalStatus(targetStatus: UpdateAnimalLifecycleInput
 
 function buildLocationLabel(location: { roomNumber: string; rackNumber: string; cageNumber: string }) {
   return `${location.roomNumber} / ${location.rackNumber} / ${location.cageNumber}`;
+}
+
+export async function createProjectRecord(
+  input: CreateProjectRecordInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canSyncProject(actor.role)) {
+    return { ok: false, message: "Your role cannot sync project records." };
+  }
+
+  const [existingProject, owner] = await prisma.$transaction([
+    prisma.project.findUnique({
+      where: { projectCode: input.projectCode },
+      select: { id: true },
+    }),
+    prisma.user.findUnique({
+      where: { id: input.ownerId },
+      select: { id: true },
+    }),
+  ]);
+
+  if (existingProject) {
+    return { ok: false, message: "Project code already exists." };
+  }
+
+  if (!owner) {
+    return { ok: false, message: "Choose a valid project owner." };
+  }
+
+  const timestamp = new Date();
+  const projectId = createId("project");
+  const notes = input.notes?.trim() || null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.project.create({
+      data: {
+        id: projectId,
+        projectCode: input.projectCode.trim(),
+        title: input.title.trim(),
+        ownerId: input.ownerId,
+        notes,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "project",
+        entityId: projectId,
+        action: "create",
+        newValue: {
+          projectCode: input.projectCode.trim(),
+          title: input.title.trim(),
+          ownerId: input.ownerId,
+          notes,
+        },
+        timestamp,
+      },
+    });
+  });
+
+  return {
+    ok: true,
+    message: `Project ${input.projectCode.trim()} was synced into the project catalog.`,
+    entityId: projectId,
+  };
+}
+
+export async function updateProjectRecord(
+  input: UpdateProjectRecordInput,
+  actor: { id: string; role: UserRole },
+): Promise<MutationResult> {
+  if (!canSyncProject(actor.role)) {
+    return { ok: false, message: "Your role cannot sync project records." };
+  }
+
+  const existingProject = await prisma.project.findUnique({
+    where: { id: input.projectId },
+    select: {
+      id: true,
+      projectCode: true,
+      title: true,
+      ownerId: true,
+      notes: true,
+    },
+  });
+  const owner = input.ownerId
+    ? await prisma.user.findUnique({
+        where: { id: input.ownerId },
+        select: { id: true },
+      })
+    : null;
+
+  if (!existingProject) {
+    return { ok: false, message: "Project not found." };
+  }
+
+  if (input.ownerId && !owner) {
+    return { ok: false, message: "Choose a valid project owner." };
+  }
+
+  const timestamp = new Date();
+  const nextValue = {
+    title: input.title?.trim() ?? existingProject.title,
+    ownerId: input.ownerId ?? existingProject.ownerId,
+    notes: input.notes === undefined ? existingProject.notes : input.notes?.trim() || null,
+  };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.project.update({
+      where: { id: input.projectId },
+      data: nextValue,
+    });
+
+    await tx.auditLog.create({
+      data: {
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "project",
+        entityId: input.projectId,
+        action: "update",
+        previousValue: {
+          projectCode: existingProject.projectCode,
+          title: existingProject.title,
+          ownerId: existingProject.ownerId,
+          notes: existingProject.notes,
+        },
+        newValue: {
+          projectCode: existingProject.projectCode,
+          ...nextValue,
+        },
+        timestamp,
+      },
+    });
+  });
+
+  return {
+    ok: true,
+    message: `Project ${existingProject.projectCode} was updated.`,
+    entityId: input.projectId,
+  };
 }
 
 export async function createAnimalRecord(
