@@ -7,9 +7,7 @@ import { StatStrip } from "@/components/app/stat-strip";
 import { Surface } from "@/components/app/surface";
 import {
   getBreedingSuggestionSummaryView,
-  getColonyCompositionView,
-  getDashboardHighlightsView,
-  getDashboardMetricsView,
+  getDashboardOverviewView,
 } from "@/lib/dashboard-read";
 import { SEED_REFERENCE_DATE } from "@/lib/seed-metadata";
 import { requireUser } from "@/lib/session";
@@ -17,10 +15,8 @@ import { formatDate } from "@/lib/utils";
 
 export default async function DashboardPage() {
   const user = await requireUser();
-  const [metrics, composition, highlights, suggestions] = await Promise.all([
-    getDashboardMetricsView(),
-    getColonyCompositionView(),
-    getDashboardHighlightsView(),
+  const [{ metrics, composition, highlights }, suggestions] = await Promise.all([
+    getDashboardOverviewView(),
     getBreedingSuggestionSummaryView(),
   ]);
 

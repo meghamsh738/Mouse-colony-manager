@@ -1,6 +1,5 @@
 import { compareDesc, differenceInDays, format } from "date-fns";
 
-import { getAnimalListView } from "@/lib/animals-read";
 import { getBreedingSuggestionSummaryView } from "@/lib/breeding-read";
 import { prisma } from "@/lib/prisma";
 import type { Alert } from "@/lib/types";
@@ -125,6 +124,14 @@ async function getDashboardData() {
         },
         projectAllocations: {
           where: { endedAt: null },
+          select: {
+            id: true,
+          },
+        },
+        experimentAssignments: {
+          where: {
+            status: "active",
+          },
           select: {
             id: true,
           },
@@ -384,9 +391,22 @@ async function getDashboardData() {
   };
 }
 
-export async function getDashboardMetricsView() {
-  const { rules, animals, alerts } = await getDashboardData();
-  const availableForExperiment = (await getAnimalListView()).filter((animal) => animal.availableForExperiment).length;
+type DashboardData = Awaited<ReturnType<typeof getDashboardData>>;
+
+function buildDashboardMetricsView({ rules, animals, alerts }: DashboardData) {
+  const criticalAnimalIds = new Set(
+    alerts
+      .filter((alert) => alert.entityType === "animal" && alert.status === "open" && alert.severity === "critical")
+      .map((alert) => alert.entityId),
+  );
+  const availableForExperiment = animals.filter(
+    (animal) =>
+      animal.status === "colony_holding" &&
+      animal.alleles.length > 0 &&
+      animal.alleles.every((allele) => allele.callStatus === "confirmed") &&
+      animal.experimentAssignments.length === 0 &&
+      !criticalAnimalIds.has(animal.id),
+  ).length;
 
   return {
     activeAnimals: animals.length,
@@ -400,9 +420,7 @@ export async function getDashboardMetricsView() {
   };
 }
 
-export async function getColonyCompositionView() {
-  const { animals } = await getDashboardData();
-
+function buildColonyCompositionView({ animals }: DashboardData) {
   return {
     males: animals.filter((animal) => animal.sex === "male").length,
     females: animals.filter((animal) => animal.sex === "female").length,
@@ -411,9 +429,7 @@ export async function getColonyCompositionView() {
   };
 }
 
-export async function getDashboardHighlightsView() {
-  const { rules, animals, litters, alerts } = await getDashboardData();
-
+function buildDashboardHighlightsView({ rules, animals, litters, alerts }: DashboardData) {
   return {
     upcomingWean: litters.map((litter) => ({
       litterId: litter.id,
@@ -429,6 +445,28 @@ export async function getDashboardHighlightsView() {
       })),
     alerts: alerts.slice(0, 6),
   };
+}
+
+export async function getDashboardOverviewView() {
+  const data = await getDashboardData();
+
+  return {
+    metrics: buildDashboardMetricsView(data),
+    composition: buildColonyCompositionView(data),
+    highlights: buildDashboardHighlightsView(data),
+  };
+}
+
+export async function getDashboardMetricsView() {
+  return buildDashboardMetricsView(await getDashboardData());
+}
+
+export async function getColonyCompositionView() {
+  return buildColonyCompositionView(await getDashboardData());
+}
+
+export async function getDashboardHighlightsView() {
+  return buildDashboardHighlightsView(await getDashboardData());
 }
 
 export async function getDashboardAlertsView() {

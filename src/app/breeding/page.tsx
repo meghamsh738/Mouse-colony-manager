@@ -44,26 +44,7 @@ export default async function BreedingPage() {
           title="Active breeding setups and suggested crosses."
           description="Use this area to review active pairs, overdue breedings, litter status, and ranked cross suggestions for the next cohort."
         />
-        <div className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
-          <Surface className="space-y-4">
-            <div className="space-y-2">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Create setup</p>
-              <p className="text-sm leading-6 text-[var(--muted)]">
-                Start a new sire and dam pairing from live colony animals. Duplicate breeder safeguards stay on unless an admin explicitly overrides them.
-              </p>
-            </div>
-            {canCreateBreeding ? (
-              <BreedingSetupForm
-                sireOptions={options.sireOptions}
-                damOptions={options.damOptions}
-                allowOverride={canOverride}
-              />
-            ) : (
-              <p className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--muted)]">
-                Read-only users can review breeding state here, but cannot create new setups.
-              </p>
-            )}
-          </Surface>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(18rem,0.92fr)]">
           <Surface className="space-y-4">
             <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Active breeding dashboard</p>
             <div className="space-y-3">
@@ -131,45 +112,147 @@ export default async function BreedingPage() {
               ))}
             </div>
           </Surface>
+          <Surface className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Create setup</p>
+              <p className="text-sm leading-6 text-[var(--muted)]">
+                Start a new sire and dam pairing from live colony animals. Duplicate breeder safeguards stay on unless an admin explicitly overrides them.
+              </p>
+            </div>
+            {canCreateBreeding ? (
+              <BreedingSetupForm
+                sireOptions={options.sireOptions}
+                damOptions={options.damOptions}
+                allowOverride={canOverride}
+              />
+            ) : (
+              <p className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--muted)]">
+                Read-only users can review breeding state here, but cannot create new setups.
+              </p>
+            )}
+          </Surface>
         </div>
         <Surface className="space-y-4" data-testid="breeding-suggestions">
-          <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Generator suggestions</p>
-          <div className="space-y-3">
-            {suggestions.map((suggestion) => (
-              <article key={suggestion.id} className="rounded-2xl border border-[var(--line)] p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-medium">{suggestion.sireLabel}</p>
-                    <p className="text-sm text-[var(--muted)]">{suggestion.damLabel}</p>
-                  </div>
-                  <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{suggestion.probabilityLabel}</p>
-                </div>
-                <p className="mt-3 text-sm text-[var(--muted)]">
-                  Expected litter {suggestion.expectedLitterSize} pups · usable {suggestion.expectedUsablePups} · surplus risk{" "}
-                  {suggestion.estimatedSurplusPups}
-                </p>
-                <p className="mt-2 text-sm text-[var(--muted)]">Estimated pups needed {suggestion.estimatedPupsNeeded}</p>
-                <p className="mt-2 text-sm text-[var(--muted)]">{suggestion.fertilitySummary}</p>
-                <p className="mt-2 text-sm text-[var(--muted)]">{suggestion.lineFertilitySummary}</p>
-                <p className="mt-2 text-sm text-[var(--muted)]">{suggestion.workloadSummary}</p>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
-                  <Badge variant={suggestion.estimatedSurplusPups >= 4 ? "warning" : "success"}>
-                    {suggestion.estimatedSurplusPups >= 4 ? "Surplus review" : "Surplus controlled"}
-                  </Badge>
-                  <span>Uses actual litter history where available before default assumptions.</span>
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--muted)]">
-                  <Badge variant={getRuleBadgeVariant(suggestion.ruleSeverity)}>
-                    {suggestion.ruleSeverity === "ok" ? "Rule clear" : "Rule risk"}
-                  </Badge>
-                  <span>{suggestion.ruleSummary}</span>
-                </div>
-                {suggestion.warnings.length ? (
-                  <p className="mt-2 text-sm text-amber-900">{suggestion.warnings.join(" · ")}</p>
-                ) : null}
-              </article>
-            ))}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Generator suggestions</p>
+              <h2 className="mt-2 font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
+                Ranked crosses in a scan-first table.
+              </h2>
+            </div>
+            <p className="max-w-xl text-sm leading-6 text-[var(--muted)]">
+              Compare target probability, expected output, fertility model, and rule risks without opening separate cards. Uses actual
+              litter history where available before default assumptions.
+            </p>
           </div>
+          {suggestions.length ? (
+            <>
+              <div className="data-table-wrap hidden lg:block">
+                <table className="data-table min-w-[980px]">
+                  <thead>
+                    <tr>
+                      <th>Ranked cross</th>
+                      <th>Target chance</th>
+                      <th>Expected output</th>
+                      <th>Fertility model</th>
+                      <th>Rules</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suggestions.map((suggestion) => (
+                      <tr key={suggestion.id}>
+                        <td>
+                          <div className="font-medium text-[var(--ink)]">{suggestion.sireLabel}</div>
+                          <div className="mt-1 text-sm text-[var(--muted)]">{suggestion.damLabel}</div>
+                        </td>
+                        <td>
+                          <div className="font-display text-2xl font-semibold tracking-[-0.05em] text-[var(--ink)]">
+                            {suggestion.probabilityLabel}
+                          </div>
+                          <div className="mt-1 text-xs text-[var(--muted)]">{suggestion.estimatedPupsNeeded} pups needed</div>
+                        </td>
+                        <td>
+                          <div className="text-sm text-[var(--ink)]">
+                            {suggestion.expectedLitterSize} litter · {suggestion.expectedUsablePups} usable
+                          </div>
+                          <div className="mt-2">
+                            <Badge variant={suggestion.estimatedSurplusPups >= 4 ? "warning" : "success"}>
+                              surplus risk {suggestion.estimatedSurplusPups}
+                            </Badge>
+                          </div>
+                        </td>
+                        <td className="max-w-[22rem]">
+                          <p className="text-sm text-[var(--muted)]">{suggestion.fertilitySummary}</p>
+                          <p className="mt-1 text-sm text-[var(--muted)]">{suggestion.lineFertilitySummary}</p>
+                          <p className="mt-1 text-sm text-[var(--muted)]">{suggestion.workloadSummary}</p>
+                        </td>
+                        <td className="max-w-[20rem]">
+                          <Badge variant={getRuleBadgeVariant(suggestion.ruleSeverity)}>
+                            {suggestion.ruleSeverity === "ok" ? "Rule clear" : "Rule risk"}
+                          </Badge>
+                          <p className="mt-2 text-sm text-[var(--muted)]">{suggestion.ruleSummary}</p>
+                          {suggestion.warnings.length ? (
+                            <p className="mt-1 text-sm text-amber-900">{suggestion.warnings.join(" · ")}</p>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="grid gap-3 lg:hidden">
+                {suggestions.map((suggestion) => (
+                  <article key={suggestion.id} className="mobile-record">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-[var(--ink)]">{suggestion.sireLabel}</p>
+                        <p className="text-sm text-[var(--muted)]">{suggestion.damLabel}</p>
+                      </div>
+                      <p className="font-display text-2xl font-semibold tracking-[-0.05em] text-[var(--ink)]">
+                        {suggestion.probabilityLabel}
+                      </p>
+                    </div>
+                    <dl className="mt-3 grid gap-3 text-sm text-[var(--muted)] sm:grid-cols-2">
+                      <div>
+                        <dt className="text-xs uppercase tracking-[0.14em]">Output</dt>
+                        <dd className="mt-1 text-[var(--ink)]">
+                          {suggestion.expectedLitterSize} litter · {suggestion.expectedUsablePups} usable · surplus risk{" "}
+                          {suggestion.estimatedSurplusPups}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs uppercase tracking-[0.14em]">Needed</dt>
+                        <dd className="mt-1 text-[var(--ink)]">{suggestion.estimatedPupsNeeded} pups</dd>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <dt className="text-xs uppercase tracking-[0.14em]">Model</dt>
+                        <dd className="mt-1">{suggestion.lineFertilitySummary}</dd>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <dt className="text-xs uppercase tracking-[0.14em]">Rule check</dt>
+                        <dd className="mt-1">{suggestion.ruleSummary}</dd>
+                      </div>
+                    </dl>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Badge variant={suggestion.estimatedSurplusPups >= 4 ? "warning" : "success"}>
+                        surplus risk {suggestion.estimatedSurplusPups}
+                      </Badge>
+                      <Badge variant={getRuleBadgeVariant(suggestion.ruleSeverity)}>
+                        {suggestion.ruleSeverity === "ok" ? "Rule clear" : "Rule risk"}
+                      </Badge>
+                    </div>
+                    {suggestion.warnings.length ? (
+                      <p className="mt-2 text-sm text-amber-900">{suggestion.warnings.join(" · ")}</p>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--muted)]">
+              No valid cross suggestions are available for the current rule set.
+            </p>
+          )}
         </Surface>
       </div>
     </AppShell>

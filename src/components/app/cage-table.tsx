@@ -1,10 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  INITIAL_VISIBLE_RECORDS,
+  VISIBLE_RECORD_BATCH,
+  VisibleRecordControls,
+} from "@/components/app/visible-record-controls";
 import type { CageListItem } from "@/lib/types";
 
 function statusVariant(status: CageListItem["status"]) {
@@ -23,6 +28,8 @@ export function CageTable({ data }: { data: CageListItem[] }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CageListItem["status"]>("all");
   const [warningsOnly, setWarningsOnly] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_RECORDS);
+  const deferredSearch = useDeferredValue(search);
 
   const filteredData = useMemo(
     () =>
@@ -37,14 +44,20 @@ export function CageTable({ data }: { data: CageListItem[] }) {
         ]
           .join(" ")
           .toLowerCase();
-        const matchesSearch = haystack.includes(search.toLowerCase());
+        const matchesSearch = haystack.includes(deferredSearch.toLowerCase());
         const matchesStatus = statusFilter === "all" ? true : cage.status === statusFilter;
         const matchesWarnings = warningsOnly ? cage.warningCount > 0 : true;
 
         return matchesSearch && matchesStatus && matchesWarnings;
       }),
-    [data, search, statusFilter, warningsOnly],
+    [data, deferredSearch, statusFilter, warningsOnly],
   );
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_RECORDS);
+  }, [data.length, deferredSearch, statusFilter, warningsOnly]);
+
+  const visibleData = useMemo(() => filteredData.slice(0, visibleCount), [filteredData, visibleCount]);
 
   const currentViewExportHref = useMemo(() => {
     const params = new URLSearchParams();
@@ -68,8 +81,8 @@ export function CageTable({ data }: { data: CageListItem[] }) {
 
   return (
     <div className="space-y-5" data-testid="cage-table">
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+      <div className="space-y-3">
+        <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto]">
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -79,7 +92,7 @@ export function CageTable({ data }: { data: CageListItem[] }) {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-            className="h-11 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)]"
+            className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
           >
             <option value="all">All statuses</option>
             <option value="active">Active</option>
@@ -89,21 +102,27 @@ export function CageTable({ data }: { data: CageListItem[] }) {
             <option value="retired">Retired</option>
             <option value="closed">Closed</option>
           </select>
-          <label className="flex items-center gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
+          <label className="flex min-w-0 items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--muted)]">
             <input checked={warningsOnly} onChange={(event) => setWarningsOnly(event.target.checked)} type="checkbox" />
-            Warnings only
+            <span className="truncate">Warnings only</span>
           </label>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[24px] border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3">
+        <div className="count-strip justify-between">
           <p className="text-sm text-[var(--muted)]">
-            Showing <span className="font-medium text-[var(--ink)]">{filteredData.length}</span> of{" "}
-            <span className="font-medium text-[var(--ink)]">{data.length}</span> cages
+            Showing <span className="font-medium text-[var(--ink)]">{visibleData.length}</span> of{" "}
+            <span className="font-medium text-[var(--ink)]">{filteredData.length}</span> matching cages
+            {filteredData.length === data.length ? "" : (
+              <>
+                {" "}
+                from <span className="font-medium text-[var(--ink)]">{data.length}</span> total cages
+              </>
+            )}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Link
               href={currentViewExportHref}
               prefetch={false}
-              className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--accent)] px-4 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
               data-testid="cage-export-current"
             >
               Export current view
@@ -111,7 +130,7 @@ export function CageTable({ data }: { data: CageListItem[] }) {
             <Link
               href="/api/exports/cages"
               prefetch={false}
-              className="inline-flex h-10 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--surface)] px-4 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
               data-testid="cage-export-all"
             >
               Export all cages
@@ -119,9 +138,19 @@ export function CageTable({ data }: { data: CageListItem[] }) {
           </div>
         </div>
       </div>
+      <VisibleRecordControls
+        matchingCount={filteredData.length}
+        noun="cages"
+        onShowAll={() => setVisibleCount(filteredData.length)}
+        onShowMore={() =>
+          setVisibleCount((current) => Math.min(current + VISIBLE_RECORD_BATCH, filteredData.length))
+        }
+        totalCount={data.length}
+        visibleCount={visibleData.length}
+      />
       <div className="grid gap-3 md:hidden">
-        {filteredData.map((cage) => (
-          <article key={cage.id} className="rounded-[24px] border border-[var(--line)] bg-white/70 p-4">
+        {visibleData.map((cage) => (
+          <article key={cage.id} className="mobile-record">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <Link className="font-semibold hover:text-[var(--accent)]" href={`/cages/${cage.id}`}>
@@ -152,40 +181,40 @@ export function CageTable({ data }: { data: CageListItem[] }) {
           </article>
         ))}
       </div>
-      <div className="hidden overflow-x-auto rounded-[24px] border border-[var(--line)] md:block">
-        <table className="min-w-[900px] border-collapse">
-          <thead className="bg-[var(--surface-2)] text-left text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+      <div className="data-table-wrap hidden md:block">
+        <table className="data-table min-w-[900px]">
+          <thead>
             <tr>
               {["Cage", "Barcode", "Status", "Occupants", "Sex mix", "Strain summary", "Warnings"].map((header) => (
-                <th key={header} className="px-5 py-4 font-medium">
+                <th key={header}>
                   {header}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-[var(--line)] bg-white/70">
-            {filteredData.map((cage) => (
+          <tbody>
+            {visibleData.map((cage) => (
               <tr key={cage.id} data-testid="cage-row">
-                <td className="px-5 py-4">
+                <td>
                   <Link className="font-medium hover:text-[var(--accent)]" href={`/cages/${cage.id}`}>
                     {cage.roomNumber} / {cage.rackNumber} / {cage.cageNumber}
                   </Link>
                 </td>
-                <td className="px-5 py-4 font-mono text-sm text-[var(--muted)]" data-testid="cage-row-barcode">
+                <td className="font-mono text-sm text-[var(--muted)]" data-testid="cage-row-barcode">
                   {cage.barcode}
                 </td>
-                <td className="px-5 py-4 capitalize">{cage.status}</td>
-                <td className="px-5 py-4">{cage.occupantCount}</td>
-                <td className="px-5 py-4">{cage.sexComposition}</td>
-                <td className="px-5 py-4 text-sm text-[var(--muted)]">{cage.strainSummary}</td>
-                <td className="px-5 py-4">{cage.warningCount}</td>
+                <td className="capitalize">{cage.status}</td>
+                <td>{cage.occupantCount}</td>
+                <td>{cage.sexComposition}</td>
+                <td className="text-sm text-[var(--muted)]">{cage.strainSummary}</td>
+                <td>{cage.warningCount}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       {filteredData.length ? null : (
-        <div className="rounded-[24px] border border-dashed border-[var(--line)] bg-[var(--surface-2)] px-4 py-6 text-center text-sm text-[var(--muted)]">
+        <div className="rounded-2xl border border-dashed border-[var(--line)] bg-[var(--surface-2)] px-4 py-6 text-center text-sm text-[var(--muted)]">
           No cages match the current filters. Clear the search, widen the status filter, or export the full cage list
           instead.
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   createColumnHelper,
   flexRender,
@@ -13,6 +13,11 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  INITIAL_VISIBLE_RECORDS,
+  VISIBLE_RECORD_BATCH,
+  VisibleRecordControls,
+} from "@/components/app/visible-record-controls";
 import type { SampleInventoryItem } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -42,6 +47,8 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | SampleInventoryItem["status"]>("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_RECORDS);
+  const deferredSearch = useDeferredValue(search);
 
   const sampleTypes = useMemo(
     () => Array.from(new Set(data.map((record) => record.sampleType))).sort((left, right) => left.localeCompare(right)),
@@ -64,14 +71,20 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
           .join(" ")
           .toLowerCase();
 
-        const matchesSearch = haystack.includes(search.toLowerCase());
+        const matchesSearch = haystack.includes(deferredSearch.toLowerCase());
         const matchesStatus = statusFilter === "all" ? true : record.status === statusFilter;
         const matchesType = typeFilter === "all" ? true : record.sampleType === typeFilter;
 
         return matchesSearch && matchesStatus && matchesType;
       }),
-    [data, search, statusFilter, typeFilter],
+    [data, deferredSearch, statusFilter, typeFilter],
   );
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_RECORDS);
+  }, [data.length, deferredSearch, statusFilter, typeFilter]);
+
+  const visibleData = useMemo(() => filteredData.slice(0, visibleCount), [filteredData, visibleCount]);
 
   const counts = useMemo(
     () =>
@@ -152,7 +165,7 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
   // React Compiler compatibility warning is appropriate for this boundary.
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: filteredData,
+    data: visibleData,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -161,8 +174,8 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
 
   return (
     <div className="space-y-5" data-testid="sample-table">
-      <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
+      <div className="space-y-3">
+        <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto]">
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -173,7 +186,7 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-            className="h-11 w-full min-w-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)] md:w-auto"
+            className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
           >
             <option value="all">All statuses</option>
             <option value="stored">Stored</option>
@@ -185,7 +198,7 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
           <select
             value={typeFilter}
             onChange={(event) => setTypeFilter(event.target.value)}
-            className="h-11 w-full min-w-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)] md:w-auto"
+            className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
           >
             <option value="all">All sample types</option>
             {sampleTypes.map((sampleType) => (
@@ -195,9 +208,10 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
             ))}
           </select>
         </div>
-        <div className="flex flex-wrap items-center gap-3 rounded-[24px] border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--muted)]">
+        <div className="count-strip">
           <span>
-            Showing <span className="font-medium text-[var(--ink)]">{counts.total}</span> records
+            Showing <span className="font-medium text-[var(--ink)]">{visibleData.length}</span> of{" "}
+            <span className="font-medium text-[var(--ink)]">{counts.total}</span> matching records
           </span>
           <span>
             <span className="font-medium text-[var(--ink)]">{counts.stored}</span> stored
@@ -210,12 +224,22 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
           </span>
         </div>
       </div>
+      <VisibleRecordControls
+        matchingCount={filteredData.length}
+        noun="samples"
+        onShowAll={() => setVisibleCount(filteredData.length)}
+        onShowMore={() =>
+          setVisibleCount((current) => Math.min(current + VISIBLE_RECORD_BATCH, filteredData.length))
+        }
+        totalCount={data.length}
+        visibleCount={visibleData.length}
+      />
       <div className="grid gap-3 md:hidden">
         {table.getRowModel().rows.map((row) => {
           const sample = row.original;
 
           return (
-            <article key={sample.id} className="rounded-[24px] border border-[var(--line)] bg-white/70 p-4">
+            <article key={sample.id} className="mobile-record">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="font-semibold text-[var(--ink)]">{sample.sampleLabel}</p>
@@ -257,24 +281,24 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
           );
         })}
       </div>
-      <div className="hidden overflow-x-auto rounded-[24px] border border-[var(--line)] md:block">
-        <table className="min-w-[960px] border-collapse text-left">
-          <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+      <div className="data-table-wrap hidden md:block">
+        <table className="data-table min-w-[960px]">
+          <thead>
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <th key={header.id} className="px-4 py-3 font-medium">
+                  <th key={header.id}>
                     {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
                 ))}
               </tr>
             ))}
           </thead>
-          <tbody className="divide-y divide-[var(--line)] bg-white/70">
+          <tbody>
             {table.getRowModel().rows.map((row) => (
               <tr key={row.id} className="align-top">
                 {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-4 py-4 text-sm text-[var(--ink)]">
+                  <td key={cell.id} className="text-sm text-[var(--ink)]">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}
@@ -284,7 +308,7 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
         </table>
       </div>
       {table.getRowModel().rows.length ? null : (
-        <div className="rounded-[24px] border border-dashed border-[var(--line)] bg-[var(--surface-2)] px-4 py-6 text-center text-sm text-[var(--muted)]">
+        <div className="rounded-2xl border border-dashed border-[var(--line)] bg-[var(--surface-2)] px-4 py-6 text-center text-sm text-[var(--muted)]">
           No samples match the current filters. Clear the search or widen the status and type filters to review the full inventory.
         </div>
       )}

@@ -20,7 +20,10 @@ export default async function SamplesPage() {
           title="Track tissues, DNA, and stored aliquots against real animals."
           description="This inventory stays tied to the colony record so stored material remains searchable by mouse, project, location, and lifecycle outcome."
         />
-        <div className={canRecordSample ? "grid min-w-0 gap-6 xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)]" : ""}>
+        <div className={canRecordSample ? "grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(18rem,0.7fr)]" : ""}>
+          <Surface className="min-w-0">
+            <SampleTable data={samples} />
+          </Surface>
           {canRecordSample ? (
             <div className="min-w-0 space-y-6">
               <Surface className="space-y-4">
@@ -42,9 +45,6 @@ export default async function SamplesPage() {
               </Surface>
             </div>
           ) : null}
-          <Surface className="min-w-0">
-            <SampleTable data={samples} />
-          </Surface>
         </div>
       </div>
     </AppShell>

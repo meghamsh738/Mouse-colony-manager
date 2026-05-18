@@ -54,6 +54,8 @@ type BreedingSuggestionSummary = BreedingSuggestion & {
   probabilityLabel: string;
 };
 
+const BREEDING_SUGGESTION_CANDIDATES_PER_SEX = 40;
+
 type BreederHistory = {
   activeBreedings: number;
   totalBreedings: number;
@@ -401,8 +403,31 @@ export async function getBreedingSuggestionsView(
     },
   });
 
-  const males = animals.filter((animal) => animal.sex === "male");
-  const females = animals.filter((animal) => animal.sex === "female");
+  const rankSuggestionCandidate = (animal: (typeof animals)[number]) => {
+    const ageDays = getAgeDays(animal.dob, rules.today);
+    const genotypeSummary = buildGenotypeSummary(animal.alleles);
+    const history = buildBreederHistory(animal.breedingAdults);
+    const ageFit =
+      ageDays >= rules.breederMinAgeDays && ageDays <= rules.breederMaxAgeDays
+        ? 30
+        : ageDays < rules.breederMinAgeDays
+          ? -40
+          : -12;
+    const lifecycleFit = animal.status === "colony_holding" ? 30 : animal.status === "breeding" ? 12 : -20;
+
+    return lifecycleFit + ageFit + pairScore(genotypeSummary, desiredGenotype) * 100 - history.activeBreedings * 12;
+  };
+
+  const topCandidatesBySex = (sex: "male" | "female") =>
+    animals
+      .filter((animal) => animal.sex === sex)
+      .map((animal) => ({ animal, score: rankSuggestionCandidate(animal) }))
+      .sort((left, right) => right.score - left.score || left.animal.animalId.localeCompare(right.animal.animalId))
+      .slice(0, BREEDING_SUGGESTION_CANDIDATES_PER_SEX)
+      .map((entry) => entry.animal);
+
+  const males = topCandidatesBySex("male");
+  const females = topCandidatesBySex("female");
 
   const suggestions = males
     .flatMap((sire) => {

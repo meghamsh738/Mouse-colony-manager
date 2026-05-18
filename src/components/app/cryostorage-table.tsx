@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   createColumnHelper,
   flexRender,
@@ -12,6 +12,11 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import {
+  INITIAL_VISIBLE_RECORDS,
+  VISIBLE_RECORD_BATCH,
+  VisibleRecordControls,
+} from "@/components/app/visible-record-controls";
 import type { CryostorageInventoryItem } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -37,6 +42,8 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CryostorageInventoryItem["status"]>("all");
   const [strainFilter, setStrainFilter] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_RECORDS);
+  const deferredSearch = useDeferredValue(search);
 
   const strainNames = useMemo(
     () => Array.from(new Set(data.map((record) => record.strainName))).sort((left, right) => left.localeCompare(right)),
@@ -59,14 +66,20 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
           .join(" ")
           .toLowerCase();
 
-        const matchesSearch = haystack.includes(search.toLowerCase());
+        const matchesSearch = haystack.includes(deferredSearch.toLowerCase());
         const matchesStatus = statusFilter === "all" ? true : record.status === statusFilter;
         const matchesStrain = strainFilter === "all" ? true : record.strainName === strainFilter;
 
         return matchesSearch && matchesStatus && matchesStrain;
       }),
-    [data, search, statusFilter, strainFilter],
+    [data, deferredSearch, statusFilter, strainFilter],
   );
+
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_RECORDS);
+  }, [data.length, deferredSearch, statusFilter, strainFilter]);
+
+  const visibleData = useMemo(() => filteredData.slice(0, visibleCount), [filteredData, visibleCount]);
 
   const summary = useMemo(
     () =>
@@ -139,7 +152,7 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
   // React Compiler compatibility warning is appropriate for this boundary.
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: filteredData,
+    data: visibleData,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -148,8 +161,8 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
 
   return (
     <div className="space-y-5" data-testid="cryostorage-table">
-      <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-        <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center">
+      <div className="space-y-3">
+        <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto]">
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -160,7 +173,7 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-            className="h-11 w-full min-w-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)] md:w-auto"
+            className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
           >
             <option value="all">All statuses</option>
             <option value="stored">Stored</option>
@@ -172,7 +185,7 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
           <select
             value={strainFilter}
             onChange={(event) => setStrainFilter(event.target.value)}
-            className="h-11 w-full min-w-0 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-sm text-[var(--ink)] md:w-auto"
+            className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
           >
             <option value="all">All strains</option>
             {strainNames.map((strainName) => (
@@ -182,9 +195,10 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
             ))}
           </select>
         </div>
-        <div className="flex flex-wrap items-center gap-3 rounded-[24px] border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--muted)]">
+        <div className="count-strip">
           <span>
-            <span className="font-medium text-[var(--ink)]">{summary.total}</span> records
+            Showing <span className="font-medium text-[var(--ink)]">{visibleData.length}</span> of{" "}
+            <span className="font-medium text-[var(--ink)]">{summary.total}</span> matching records
           </span>
           <span>
             <span className="font-medium text-[var(--ink)]">{summary.stored}</span> stored
@@ -197,12 +211,22 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
           </span>
         </div>
       </div>
+      <VisibleRecordControls
+        matchingCount={filteredData.length}
+        noun="cryostorage records"
+        onShowAll={() => setVisibleCount(filteredData.length)}
+        onShowMore={() =>
+          setVisibleCount((current) => Math.min(current + VISIBLE_RECORD_BATCH, filteredData.length))
+        }
+        totalCount={data.length}
+        visibleCount={visibleData.length}
+      />
       <div className="grid gap-3 md:hidden">
         {table.getRowModel().rows.map((row) => {
           const record = row.original;
 
           return (
-            <article key={record.id} className="rounded-[24px] border border-[var(--line)] bg-white/70 p-4">
+            <article key={record.id} className="mobile-record">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="font-semibold text-[var(--ink)]">{record.sampleLabel}</p>
@@ -239,24 +263,24 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
           );
         })}
       </div>
-      <div className="hidden overflow-x-auto rounded-[24px] border border-[var(--line)] md:block">
-        <table className="min-w-[980px] border-collapse text-left">
-          <thead className="bg-[var(--surface-2)] text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+      <div className="data-table-wrap hidden md:block">
+        <table className="data-table min-w-[980px]">
+          <thead>
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <th key={header.id} className="px-4 py-3 font-medium">
+                  <th key={header.id}>
                     {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
                   </th>
                 ))}
               </tr>
             ))}
           </thead>
-          <tbody className="divide-y divide-[var(--line)] bg-white/70">
+          <tbody>
             {table.getRowModel().rows.map((row) => (
               <tr key={row.id} className="align-top">
                 {row.getVisibleCells().map((cell) => (
-                  <td key={cell.id} className="px-4 py-4 text-sm text-[var(--ink)]">
+                  <td key={cell.id} className="text-sm text-[var(--ink)]">
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
                 ))}
@@ -266,7 +290,7 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
         </table>
       </div>
       {table.getRowModel().rows.length ? null : (
-        <div className="rounded-[24px] border border-dashed border-[var(--line)] bg-[var(--surface-2)] px-4 py-6 text-center text-sm text-[var(--muted)]">
+        <div className="rounded-2xl border border-dashed border-[var(--line)] bg-[var(--surface-2)] px-4 py-6 text-center text-sm text-[var(--muted)]">
           No cryostorage records match the current filters. Clear the search or widen the status and strain filters to review the full backup inventory.
         </div>
       )}

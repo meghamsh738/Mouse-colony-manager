@@ -1,10 +1,14 @@
 export function formatRuleDisplayValue(value: unknown) {
   if (Array.isArray(value)) {
-    return value.map((entry) => String(entry)).join("; ");
+    return value.map((entry) => formatRuleDisplayEntry(entry)).join("; ");
   }
 
   if (value === null || value === undefined) {
     return "Not set";
+  }
+
+  if (typeof value === "object") {
+    return formatRuleDisplayEntry(value);
   }
 
   return String(value);
@@ -14,7 +18,11 @@ export function formatRuleEditorValue(valueType: string, value: unknown) {
   switch (valueType) {
     case "json":
       if (Array.isArray(value)) {
-        return value.map((entry) => String(entry)).join("\n");
+        const isSimpleList = value.every(
+          (entry) => entry === null || ["string", "number", "boolean"].includes(typeof entry),
+        );
+
+        return isSimpleList ? value.map((entry) => String(entry)).join("\n") : JSON.stringify(value, null, 2);
       }
 
       return value === null || value === undefined ? "" : JSON.stringify(value, null, 2);
@@ -23,6 +31,43 @@ export function formatRuleEditorValue(valueType: string, value: unknown) {
     default:
       return value === null || value === undefined ? "" : String(value);
   }
+}
+
+function formatRuleDisplayEntry(entry: unknown) {
+  if (entry === null || entry === undefined) {
+    return "Not set";
+  }
+
+  if (typeof entry !== "object") {
+    return String(entry);
+  }
+
+  const record = entry as Record<string, unknown>;
+  const label = getStringValue(record.label) ?? getStringValue(record.name) ?? getStringValue(record.strainId);
+  const multipliers = [
+    getNumberValue(record.litterSizeMultiplier) !== undefined ? `litter x${record.litterSizeMultiplier}` : null,
+    getNumberValue(record.probabilityMultiplier) !== undefined ? `genotype x${record.probabilityMultiplier}` : null,
+    getNumberValue(record.surplusPenaltyMultiplier) !== undefined ? `surplus x${record.surplusPenaltyMultiplier}` : null,
+  ].filter(Boolean);
+
+  if (label && multipliers.length) {
+    return `${label} (${multipliers.join(", ")})`;
+  }
+
+  const scalarEntries = Object.entries(record)
+    .filter(([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value))
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${String(value)}`);
+
+  return scalarEntries.length ? scalarEntries.join(", ") : JSON.stringify(record);
+}
+
+function getStringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function getNumberValue(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 export function parseRuleInputValue(valueType: string, valueInput: string): { ok: true; value: unknown } | { ok: false; message: string } {

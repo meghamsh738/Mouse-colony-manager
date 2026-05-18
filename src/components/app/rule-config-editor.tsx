@@ -44,17 +44,17 @@ function RuleEditorCard({
   return (
     <form
       action={formAction}
-      className="space-y-4 rounded-[24px] border border-[var(--line)] bg-white/70 p-5"
+      className="space-y-3 rounded-2xl border border-[var(--line)] bg-white/70 p-4"
       data-testid={`rule-form-${rule.key}`}
       onSubmit={handleSubmit}
     >
       <input name="ruleId" type="hidden" value={rule.id} />
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
+        <div className="min-w-0 flex-1 space-y-1">
           <p className="font-medium text-[var(--ink)]">{rule.label}</p>
           <p className="text-sm leading-6 text-[var(--muted)]">{rule.description}</p>
         </div>
-        <div className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+        <div className="max-w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs leading-5 text-[var(--muted)] md:max-w-[22rem]">
           {rule.displayValue}
         </div>
       </div>
@@ -63,7 +63,7 @@ function RuleEditorCard({
           <span className="text-[var(--muted)]">Value</span>
           {rule.valueType === "boolean" ? (
             <select
-              className="h-11 w-full rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-base text-[var(--ink)] md:text-sm"
+              className="h-11 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-base text-[var(--ink)] md:text-sm"
               data-testid={`rule-value-${rule.key}`}
               defaultValue={rule.editorValue}
               name="valueInput"
@@ -73,7 +73,7 @@ function RuleEditorCard({
             </select>
           ) : rule.valueType === "json" ? (
             <textarea
-              className="min-h-28 w-full rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-base text-[var(--ink)] outline-none transition focus:border-[var(--line-strong)] focus:ring-2 focus:ring-[var(--focus)] md:text-sm"
+              className="min-h-36 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-3 font-mono text-base text-[var(--ink)] outline-none transition focus:border-[var(--line-strong)] focus:ring-2 focus:ring-[var(--focus)] md:text-sm"
               data-testid={`rule-value-${rule.key}`}
               defaultValue={rule.editorValue}
               name="valueInput"
@@ -88,7 +88,7 @@ function RuleEditorCard({
           )}
           <p className="text-xs leading-5 text-[var(--muted)]">{getRuleEditorHint(rule.valueType)}</p>
         </label>
-        <label className="flex items-center gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--muted)]">
+        <label className="flex items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--muted)]">
           <input
             data-testid={`rule-critical-${rule.key}`}
             defaultChecked={rule.criticalBlock}
@@ -99,7 +99,7 @@ function RuleEditorCard({
         </label>
       </div>
       <FormFeedback state={state} />
-      <div className="border-t border-[var(--line)] pt-4">
+      <div className="border-t border-[var(--line)] pt-3">
         <Button className="relative z-10 w-full sm:w-auto" data-testid={`rule-save-${rule.key}`} disabled={pending} type="submit">
           {pending ? "Saving rule..." : "Save rule"}
         </Button>
@@ -117,13 +117,13 @@ export function RuleConfigEditor({ rules }: RuleConfigEditorProps) {
   }, {});
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {Object.entries(groupedRules).map(([category, categoryRules]) => (
-        <section key={category} className="space-y-4">
+        <section key={category} className="space-y-3">
           <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[var(--line)] pb-3">
             <div>
               <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">{categoryLabels[category] ?? category}</p>
-              <h2 className="mt-1 font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
+              <h2 className="mt-1 font-display text-xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
                 {categoryRules.length} {categoryRules.length === 1 ? "rule" : "rules"}
               </h2>
             </div>
@@ -131,7 +131,7 @@ export function RuleConfigEditor({ rules }: RuleConfigEditorProps) {
               Save each rule independently so high-impact threshold changes stay traceable in the audit log.
             </p>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-3">
             {categoryRules.map((rule) => (
               <RuleEditorCard key={`${rule.id}-${rule.editorValue}-${rule.criticalBlock}`} rule={rule} />
             ))}

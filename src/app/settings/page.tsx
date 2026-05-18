@@ -38,27 +38,27 @@ export default async function SettingsPage() {
               <RuleConfigEditor rules={rules} />
             </Surface>
           ) : (
-            <Surface className="overflow-x-auto p-0">
-              <table className="min-w-full border-collapse">
-                <thead className="bg-[var(--surface-2)] text-left text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+            <Surface className="data-table-wrap p-0">
+              <table className="data-table min-w-[760px]">
+                <thead>
                   <tr>
                     {["Rule", "Category", "Value", "Blocks"].map((header) => (
-                      <th key={header} className="px-5 py-4 font-medium">
+                      <th key={header}>
                         {header}
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[var(--line)] bg-white/70">
+                <tbody>
                   {rules.map((rule) => (
                     <tr key={rule.id}>
-                      <td className="px-5 py-4">
+                      <td>
                         <p className="font-medium">{rule.label}</p>
                         <p className="mt-1 text-sm text-[var(--muted)]">{rule.description}</p>
                       </td>
-                      <td className="px-5 py-4 capitalize">{rule.category}</td>
-                      <td className="px-5 py-4 font-mono text-sm">{rule.displayValue}</td>
-                      <td className="px-5 py-4">{rule.criticalBlock ? "Yes" : "No"}</td>
+                      <td className="capitalize">{rule.category}</td>
+                      <td className="max-w-[24rem] font-mono text-xs leading-5">{rule.displayValue}</td>
+                      <td>{rule.criticalBlock ? "Yes" : "No"}</td>
                     </tr>
                   ))}
                 </tbody>

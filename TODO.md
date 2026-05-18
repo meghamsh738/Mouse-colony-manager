@@ -1,6 +1,6 @@
 # Colony Maintenance Tracker
 
-Last updated: 2026-05-09
+Last updated: 2026-05-18
 
 ## Overall Status
 
@@ -96,6 +96,12 @@ Current delivery level:
 - [x] Add audited admin rule config sync under `/api/v1/rules`
 - [x] Add audited bulk genotype CSV import under `/api/v1/genotypes/import`
 - [x] Redesign the app UI from GPT image-inspired direction into one cohesive desktop/mobile visual system with responsive table cards and route-level screenshot audits
+- [x] Simplify the app shell and inventory/breeding workspaces with compact navigation, table-first layouts, consistent badges, readable rule values, and desktop/mobile overflow audits
+- [x] Extend the desktop navigation rail to a fixed full-height panel and switch app typography to IBM Plex Sans for a more professional product feel
+- [x] Stress-test the redesigned app with 1,000 generated animals plus browser-driven planner, scan, sample, breeding, cryostorage, audit, and read-only flows; fix wildcard-host scan lookup redirects exposed by the run
+- [x] Optimize high-volume navigation by replacing full dashboard recomputation in the shared shell, rendering heavy list workspaces in bounded batches, deferring table search filtering, and capping breeding suggestion pair scoring
+- [x] Add contextual question-mark help to every desktop and mobile navigation tab
+- [x] Tighten module space usage with adaptive stat strips and a split scan workspace instead of an empty camera panel
 
 ## In Progress
 
@@ -109,12 +115,43 @@ Current delivery level:
 
 Most recently verified in this branch:
 
+- 2026-05-18 current batch landing gate: `npm run prisma:validate`, `npm run typecheck`, `git diff --check`, `npm run db:doctor`, `npm run build`, `npx vitest run tests/unit/rule-config.test.ts --reporter=verbose`, and `npx vitest run tests/unit/scan-lookup-route.test.ts --reporter=verbose`
+- 2026-05-18 Playwright browser confidence audit against `http://localhost:3005`: desktop route sweep across dashboard, animals, cages, breeding, experiments, samples, cryostorage, forecast, notifications, quarantine, scan, and settings at `1440x1000`; focused mobile checks for dashboard navigation, forecast, and scan at `390x844`; screenshots/report under `output/playwright/current-batch-audit`; confirmed zero horizontal overflow, zero unexpected overlap detections, and no clipped mobile nav links
+- `npm run prisma:validate`
+- `npm run typecheck`
+- `git diff --check`
+- `npm run db:doctor`
+- `npm run build`
+- `npx vitest run tests/unit/colony.test.ts -t 'ranks breeding suggestions|builds experiment overview and candidate reads|builds a live colony forecast' --reporter=verbose`
+- Playwright CLI high-volume navigation audit with dataset token `FAST510`: dashboard `7567ms`, colony `3212ms`, cages `1670ms`, breeding `3707ms`, experiments `2078ms`, samples `1732ms`, cryostorage `553ms`, forecast `3607ms`, settings `562ms`, with zero horizontal overflow and list routes initially rendering `80` rows/cards instead of the full high-volume dataset
+- `npx vitest run tests/unit/scan-lookup-route.test.ts --reporter=verbose`
+- `npm run build`
+- `curl -sI -H 'Host: 0.0.0.0:3005' 'http://127.0.0.1:3005/scan/lookup?barcode=CM-A101-003'` confirmed the rebuilt server redirects to `http://localhost:3005/scan/CM-A101-003`
+- Playwright CLI stress run with dataset token `SOZVLFZD`: route sweep across `/`, `/animals`, `/cages`, `/breeding`, `/experiments`, `/samples`, `/cryostorage`, `/forecast`, `/notifications`, `/quarantine`, `/scan`, and `/settings`; user-like admin/researcher/staff/read-only flows for animal creation, breeding setup, cage note, sample record, planner save, cryostorage creation, audit review, and large-table search
+- Sequential DB validation after the stress run: `1015` animals, `85` cages, `304` sample records, `156` health notes, `14` breeding setups, `4` cryostorage records, and `15` experiment assignments
+- `npm run typecheck`
+- `npm run build`
+- Playwright CLI sidebar/font audit confirming the desktop rail is `position: fixed`, spans the full viewport before and after page scroll, has zero visible scrollbar width, and uses IBM Plex Sans
+- `npx vitest run tests/unit/rule-config.test.ts --reporter=verbose`
+- `git diff --check`
+- `E2E_BASE_URL=http://localhost:3005 npm run verify:e2e:reuse:wsl -- --grep 'admin can review breeding overview and generator suggestions|researcher can review the forecast workspace' --project=chromium`
+- Playwright CLI desktop/mobile route-wide visual audit across `/`, `/animals`, `/cages`, `/breeding`, `/experiments`, `/samples`, `/cryostorage`, `/forecast`, `/notifications`, `/quarantine`, `/scan`, and `/settings` with zero horizontal overflow, zero detected overlaps, and no clipped mobile nav links
 - `npm run prisma:validate`
 - `npm run typecheck`
 - `git diff --check`
 - `npm run build`
 - `npm run db:prepare:local`
 - `npm run db:doctor`
+- `npm run typecheck`
+- `git diff --check`
+- `npm run build`
+- Playwright CLI navigation-help audit against `http://127.0.0.1:3005`: confirmed `12` desktop and `12` mobile question-mark help triggers, readable desktop/mobile tooltips, minimum mobile tooltip width, and no tooltip viewport overflow; screenshots saved under `output/playwright/nav-help-desktop.png` and `output/playwright/nav-help-mobile.png`
+- Playwright CLI before-screenshot sweep across dashboard, animals, cages, breeding, experiments, samples, cryostorage, forecast, notifications, quarantine, scan, and settings under `output/playwright/space-audit-before`
+- `npm run typecheck`
+- `git diff --check`
+- `npm run build`
+- Playwright CLI final space audit under `output/playwright/space-audit-final`: checked dashboard, forecast, scan, animals, and settings at `1440x1000`, `1920x1080`, and `390x844`; confirmed zero horizontal overflow, full content width except normal page padding, forecast stat strip stays one row at desktop widths, and scan exposes manual lookup, high-attention cage shortcuts, and camera-preview guidance instead of an empty panel
+- Playwright CLI final all-module desktop audit under `output/playwright/space-audit-final-all`: captured dashboard, animals, cages, breeding, experiments, samples, cryostorage, forecast, notifications, quarantine, scan, and settings at `1440x1000` and `1920x1080`; confirmed zero horizontal overflow, full content width except normal page padding, and one-row desktop stat strips where stat strips are present
 - GPT image inspiration artifact: `output/playwright/ui-inspiration/13-generated-ui-inspiration-board.png`
 - Desktop/mobile visual route audit screenshots and report: `output/playwright/ui-final-audit/route-audit-report.json`
 - Role-based browser audit report for admin, staff, researcher, and read-only users: `output/playwright/ui-final-audit/role-audit-report.json`
@@ -151,6 +188,9 @@ Most recently verified in this branch:
 
 Notes:
 
+- On 2026-05-10, a 1,000-animal local stress dataset exposed two local-test findings: Prisma dev on `localhost:51214` can remain TCP-open while timing out PostgreSQL probes under stress, and `/scan/lookup` could redirect browser automation to `0.0.0.0`; the scan redirect is now normalized to `localhost`, while DB recovery still depends on `npm run db:doctor` and restarting `npx prisma dev -d -n colony-maintenance` if probes fail.
+- On 2026-05-10, high-volume navigation was optimized after regenerating a `FAST510` dataset with `1014` animals, `85` cages, `303` sample records, `154` health notes, `13` breeding setups, and `251` open alerts; the app shell now uses a lightweight alert count instead of recalculating dashboard rule metrics on every route, and heavy list views render in batches with explicit "show more" controls.
+- On 2026-05-10, browser stress screenshots were written under `output/playwright/`, including `stress-route-sweep-final.png`, `stress-experiments-0K9OV3.png`, `stress-admin-cryostorage-and-audit-0K9OV3.png`, `stress-readonly-animals-0K9OV3.png`, and `stress-staff-direct-scan-0K9OV3B.png`.
 - On 2026-05-09, the app UI was redesigned around a warmer lab-notebook visual system with an evergreen navigation rail, elevated page headers, redesigned primitive controls, mobile table-card layouts for animal/cage/sample/cryostorage workspaces, and a hidden Next dev indicator so it does not overlap mobile QA screenshots.
 - On 2026-05-09, desktop/mobile route screenshots across all major modules passed a custom Playwright route audit with zero body overflow and one page heading per route.
 - On 2026-05-09, role-based browser audits passed for admin, staff, researcher, and read-only users, including safe search/filter/navigation interactions and read-only form hiding on sample and cryostorage pages.
