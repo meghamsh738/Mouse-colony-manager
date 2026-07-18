@@ -36,6 +36,29 @@ DIRECT_DATABASE_URL='postgresql://postgres:postgres@localhost:51214/colony_maint
     expect(targets[0].redactedUrl).not.toContain("secret");
   });
 
+  it("extracts and redacts prisma+postgres database targets", () => {
+    const apiKey = Buffer.from(
+      JSON.stringify({
+        databaseUrl: "postgres://postgres:secret@localhost:51214/template1?sslmode=disable",
+        name: "colony-maintenance",
+      }),
+    ).toString("base64url");
+    const { issues, targets } = buildDatabaseTargets({
+      DATABASE_URL: `prisma+postgres://localhost:51213/?api_key=${apiKey}`,
+      DIRECT_DATABASE_URL: "postgresql://postgres:secret@localhost:51214/template1?schema=public",
+    });
+
+    expect(issues).toEqual([]);
+    expect(targets[0]).toMatchObject({
+      database: "template1",
+      envKey: "DATABASE_URL",
+      host: "localhost",
+      port: 51214,
+    });
+    expect(targets[0].redactedUrl).toContain("api_key=REDACTED");
+    expect(targets[0].redactedUrl).not.toContain(apiKey);
+  });
+
   it("reports missing or invalid database URL configuration", () => {
     const { issues, targets } = buildDatabaseTargets({
       DATABASE_URL: "file:./dev.db",
@@ -43,7 +66,7 @@ DIRECT_DATABASE_URL='postgresql://postgres:postgres@localhost:51214/colony_maint
 
     expect(targets).toEqual([]);
     expect(issues).toEqual([
-      { envKey: "DATABASE_URL", message: "DATABASE_URL must use a postgres:// or postgresql:// URL." },
+      { envKey: "DATABASE_URL", message: "DATABASE_URL must use a postgres://, postgresql://, or prisma+postgres:// URL." },
       { envKey: "DIRECT_DATABASE_URL", message: "DIRECT_DATABASE_URL is not set." },
     ]);
   });

@@ -48,14 +48,14 @@ function normalizeOptionalText(value?: string | null) {
 }
 
 export async function GET(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("experiments:full");
 
   if ("response" in auth) {
     return auth.response;
   }
 
   const filters = parseProjectApiFilters(new URL(request.url).searchParams);
-  const result = await getProjectApiList(filters);
+  const result = await getProjectApiList(filters, auth.user);
 
   return buildCollectionResponse(result.data, {
     total: result.total,
@@ -68,7 +68,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("experiments:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -85,13 +85,13 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Invalid project payload.", 400, parsed.error.flatten().fieldErrors);
   }
 
-  const owner = await resolveProjectOwnerByApiReference(parsed.data, auth.user.id);
+  const owner = await resolveProjectOwnerByApiReference(parsed.data, auth.user.id, auth.user);
 
   if (!owner.ok) {
     return buildApiErrorResponse(owner.message, owner.status);
   }
 
-  const existingProject = await getProjectApiRecordByCode(parsed.data.projectCode);
+  const existingProject = await getProjectApiRecordByCode(parsed.data.projectCode, auth.user);
   const notes = normalizeOptionalText(parsed.data.notes) ?? null;
 
   if (existingProject) {
@@ -117,7 +117,7 @@ export async function POST(request: Request) {
       ownerId: owner.value.ownerId,
       notes: parsed.data.notes,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok || !result.entityId) {
@@ -126,7 +126,7 @@ export async function POST(request: Request) {
     return buildApiErrorResponse(result.message, status);
   }
 
-  const project = await getProjectApiRecordById(result.entityId);
+  const project = await getProjectApiRecordById(result.entityId, auth.user);
 
   if (!project) {
     return buildApiErrorResponse("Project was created but could not be read back.", 500);
@@ -140,7 +140,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("experiments:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -167,7 +167,7 @@ export async function PATCH(request: Request) {
     return buildApiErrorResponse("Provide at least one project field to update.", 400);
   }
 
-  const resolved = await resolveProjectByApiReference(parsed.data);
+  const resolved = await resolveProjectByApiReference(parsed.data, auth.user);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
@@ -175,7 +175,7 @@ export async function PATCH(request: Request) {
 
   const owner =
     parsed.data.ownerId || parsed.data.ownerEmail
-      ? await resolveProjectOwnerByApiReference(parsed.data, auth.user.id)
+      ? await resolveProjectOwnerByApiReference(parsed.data, auth.user.id, auth.user)
       : null;
 
   if (owner && !owner.ok) {
@@ -190,7 +190,7 @@ export async function PATCH(request: Request) {
       ownerId,
       notes: normalizeOptionalText(parsed.data.notes),
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok || !result.entityId) {
@@ -203,7 +203,7 @@ export async function PATCH(request: Request) {
     return buildApiErrorResponse(result.message, status);
   }
 
-  const project = await getProjectApiRecordById(result.entityId);
+  const project = await getProjectApiRecordById(result.entityId, auth.user);
 
   if (!project) {
     return buildApiErrorResponse("Project was updated but could not be read back.", 500);

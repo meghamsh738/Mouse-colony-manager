@@ -5,14 +5,14 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ animalId: string }> },
 ) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("animals:read");
 
   if ("response" in auth) {
     return auth.response;
   }
 
   const { animalId } = await params;
-  const animal = await getAnimalApiDetail(animalId);
+  const animal = await getAnimalApiDetail(animalId, auth.user);
 
   if (!animal) {
     return buildNotFoundResponse("Animal", animalId);

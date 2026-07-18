@@ -3,38 +3,168 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import {
-  demoteReservedExperimentAssignments,
-  deletePlannedExperimentAssignment,
-  planExperimentCohortAssignments,
-  promotePlannedExperimentAssignments,
-  updatePlannedExperimentAssignment,
-} from "@/lib/colony-write";
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
-import { getExperimentPlannerView, parseExperimentPlannerFilters } from "@/lib/experiments-read";
+import {
+  executeDeletePlannedExperimentAssignmentCommand,
+  executeDemoteExperimentAssignmentsCommand,
+  executePlanExperimentAssignmentsCommand,
+  executePromoteExperimentAssignmentsCommand,
+  executeUpdatePlannedExperimentAssignmentCommand,
+} from "@/lib/experiment-assignment-write";
+import {
+  executeCreateExperimentCommand,
+  executeTransitionExperimentCommand,
+  executeUpdateExperimentCommand,
+} from "@/lib/experiments-write";
 import { requireUser } from "@/lib/session";
+
+const experimentDetailsSchema = z.object({
+  labId: z.string().trim().optional(),
+  projectId: z.string().trim().min(1),
+  experimentCode: z.string().trim().min(2).max(40),
+  title: z.string().trim().min(3).max(160),
+  plannedStartAt: z.string().trim().optional(),
+  plannedEndAt: z.string().trim().optional(),
+  operationalContact: z.string().trim().max(160).optional(),
+  procedureSummary: z.string().trim().max(2_000).optional(),
+  treatmentSummary: z.string().trim().max(2_000).optional(),
+  welfareRisks: z.string().trim().max(2_000).optional(),
+  scheduleNotes: z.string().trim().max(2_000).optional(),
+  operationalNotes: z.string().trim().max(2_000).optional(),
+  notes: z.string().trim().max(4_000).optional(),
+  resultSummary: z.string().trim().max(4_000).optional(),
+  idempotencyKey: z.string().trim().min(1),
+  requestId: z.string().trim().min(1),
+});
+
+function experimentDetailsFromForm(formData: FormData) {
+  return {
+    labId: formData.get("labId") || undefined,
+    projectId: formData.get("projectId"),
+    experimentCode: formData.get("experimentCode"),
+    title: formData.get("title"),
+    plannedStartAt: formData.get("plannedStartAt") || undefined,
+    plannedEndAt: formData.get("plannedEndAt") || undefined,
+    operationalContact: formData.get("operationalContact") || undefined,
+    procedureSummary: formData.get("procedureSummary") || undefined,
+    treatmentSummary: formData.get("treatmentSummary") || undefined,
+    welfareRisks: formData.get("welfareRisks") || undefined,
+    scheduleNotes: formData.get("scheduleNotes") || undefined,
+    operationalNotes: formData.get("operationalNotes") || undefined,
+    notes: formData.get("notes") || undefined,
+    resultSummary: formData.get("resultSummary") || undefined,
+    idempotencyKey: formData.get("idempotencyKey"),
+    requestId: formData.get("requestId"),
+  };
+}
+
+function revalidateExperiments() {
+  revalidatePath("/");
+  revalidatePath("/experiments");
+}
+
+function commandMessage(result: { result?: unknown; message?: string }, fallback: string) {
+  if (result.result && typeof result.result === "object" && !Array.isArray(result.result)) {
+    const message = (result.result as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  return result.message ?? fallback;
+}
+
+function parseJsonField(value: FormDataEntryValue | null) {
+  if (typeof value !== "string") return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+export async function createExperimentAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser({ capability: "experiments:manage" });
+  const parsed = experimentDetailsSchema.safeParse(experimentDetailsFromForm(formData));
+  if (!parsed.success) {
+    return { status: "error", message: "Enter a lab, project, experiment code, title, and valid worksheet details." };
+  }
+  const { idempotencyKey, requestId, ...command } = parsed.data;
+  const result = await executeCreateExperimentCommand({ actor: user, command, idempotencyKey, requestId });
+  if (!result.ok) return { status: "error", message: result.message };
+  revalidateExperiments();
+  return { status: "success", message: "Experiment created in planned status." };
+}
+
+const updateExperimentSchema = experimentDetailsSchema.extend({
+  experimentId: z.string().trim().min(1),
+  expectedVersion: z.string().trim().regex(/^\d+$/).transform(Number),
+});
+
+export async function updateExperimentAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser({ capability: "experiments:manage" });
+  const parsed = updateExperimentSchema.safeParse({
+    ...experimentDetailsFromForm(formData),
+    experimentId: formData.get("experimentId"),
+    expectedVersion: formData.get("expectedVersion"),
+  });
+  if (!parsed.success) {
+    return { status: "error", message: "Refresh the experiment and check every worksheet field before saving." };
+  }
+  const { idempotencyKey, requestId, expectedVersion, ...command } = parsed.data;
+  const result = await executeUpdateExperimentCommand({ actor: user, command, expectedVersion, idempotencyKey, requestId });
+  if (!result.ok) return { status: "error", message: result.message };
+  revalidateExperiments();
+  return { status: "success", message: "Experiment worksheet updated." };
+}
+
+const transitionExperimentSchema = z.object({
+  experimentId: z.string().trim().min(1),
+  labId: z.string().trim().optional(),
+  status: z.enum(["active", "completed", "cancelled"]),
+  expectedVersion: z.string().trim().regex(/^\d+$/).transform(Number),
+  idempotencyKey: z.string().trim().min(1),
+  requestId: z.string().trim().min(1),
+});
+
+export async function transitionExperimentStatusAction(
+  previousState: FormActionState = initialFormActionState,
+  formData: FormData,
+): Promise<FormActionState> {
+  void previousState;
+  const user = await requireUser({ capability: "experiments:manage" });
+  const parsed = transitionExperimentSchema.safeParse({
+    experimentId: formData.get("experimentId"),
+    labId: formData.get("labId") || undefined,
+    status: formData.get("status"),
+    expectedVersion: formData.get("expectedVersion"),
+    idempotencyKey: formData.get("idempotencyKey"),
+    requestId: formData.get("requestId"),
+  });
+  if (!parsed.success) return { status: "error", message: "Refresh the experiment and choose a valid next status." };
+  const { idempotencyKey, requestId, expectedVersion, ...command } = parsed.data;
+  const result = await executeTransitionExperimentCommand({ actor: user, command, expectedVersion, idempotencyKey, requestId });
+  if (!result.ok) return { status: "error", message: result.message };
+  revalidateExperiments();
+  return { status: "success", message: `Experiment moved to ${command.status}.` };
+}
 
 const planExperimentCohortSchema = z.object({
   experimentId: z.string().trim().min(1),
   startDate: z.string().trim().min(1),
   notes: z.string().trim().max(400).optional(),
-  desiredNumber: z.string().trim().min(1),
-  sex: z.string().trim().optional(),
-  minAgeDays: z.string().trim().min(1),
-  maxAgeDays: z.string().trim().min(1),
-  genotypeKeyword: z.string().trim().optional(),
-  strainId: z.string().trim().optional(),
-  projectId: z.string().trim().optional(),
-  includeReserved: z.string().trim().optional(),
-  allowOverlap: z.string().trim().optional(),
-  balanceByCage: z.string().trim().optional(),
-  avoidSiblingClustering: z.string().trim().optional(),
-  groupCount: z.string().trim().min(1),
-  randomSeed: z.string().trim().optional(),
-  blockBySex: z.string().trim().optional(),
-  blockBySiblingGroup: z.string().trim().optional(),
-  balanceByAge: z.string().trim().optional(),
-  maxSameCagePerGroup: z.string().trim().optional(),
+  expectedExperimentVersion: z.coerce.number().int().positive(),
+  assignments: z.array(z.object({
+    animalId: z.string().trim().min(1),
+    treatmentGroup: z.string().trim().min(1).max(80),
+  })).min(1).max(100),
+  idempotencyKey: z.string().trim().min(1),
+  requestId: z.string().trim().min(1),
 });
 
 export async function planExperimentCohortAction(
@@ -42,28 +172,15 @@ export async function planExperimentCohortAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "experiments:manage" });
   const parsed = planExperimentCohortSchema.safeParse({
     experimentId: formData.get("experimentId"),
     startDate: formData.get("startDate"),
     notes: formData.get("notes") || undefined,
-    desiredNumber: formData.get("desiredNumber"),
-    sex: formData.get("sex") || undefined,
-    minAgeDays: formData.get("minAgeDays"),
-    maxAgeDays: formData.get("maxAgeDays"),
-    genotypeKeyword: formData.get("genotypeKeyword") || undefined,
-    strainId: formData.get("strainId") || undefined,
-    projectId: formData.get("projectId") || undefined,
-    includeReserved: formData.get("includeReserved") || undefined,
-    allowOverlap: formData.get("allowOverlap") || undefined,
-    balanceByCage: formData.get("balanceByCage") || undefined,
-    avoidSiblingClustering: formData.get("avoidSiblingClustering") || undefined,
-    groupCount: formData.get("groupCount"),
-    randomSeed: formData.get("randomSeed") || undefined,
-    blockBySex: formData.get("blockBySex") || undefined,
-    blockBySiblingGroup: formData.get("blockBySiblingGroup") || undefined,
-    balanceByAge: formData.get("balanceByAge") || undefined,
-    maxSameCagePerGroup: formData.get("maxSameCagePerGroup") || undefined,
+    expectedExperimentVersion: formData.get("expectedExperimentVersion"),
+    assignments: parseJsonField(formData.get("assignmentsJson")),
+    idempotencyKey: formData.get("idempotencyKey"),
+    requestId: formData.get("requestId"),
   });
 
   if (!parsed.success) {
@@ -73,43 +190,18 @@ export async function planExperimentCohortAction(
     };
   }
 
-  const filters = parseExperimentPlannerFilters({
-    desiredNumber: parsed.data.desiredNumber,
-    sex: parsed.data.sex,
-    minAgeDays: parsed.data.minAgeDays,
-    maxAgeDays: parsed.data.maxAgeDays,
-    genotypeKeyword: parsed.data.genotypeKeyword,
-    strainId: parsed.data.strainId,
-    projectId: parsed.data.projectId,
-    includeReserved: parsed.data.includeReserved,
-    allowOverlap: parsed.data.allowOverlap,
-    balanceByCage: parsed.data.balanceByCage,
-    avoidSiblingClustering: parsed.data.avoidSiblingClustering,
-    groupCount: parsed.data.groupCount,
-    randomSeed: parsed.data.randomSeed,
-    blockBySex: parsed.data.blockBySex,
-    blockBySiblingGroup: parsed.data.blockBySiblingGroup,
-    balanceByAge: parsed.data.balanceByAge,
-    maxSameCagePerGroup: parsed.data.maxSameCagePerGroup,
-  });
-
-  const planner = await getExperimentPlannerView(filters);
-  const selectedAnimals = planner.randomization.groups.flatMap((group) =>
-    group.members.map((member) => ({
-      animalId: member.animalId,
-      treatmentGroup: group.name,
-    })),
-  );
-
-  const result = await planExperimentCohortAssignments(
-    {
+  const result = await executePlanExperimentAssignmentsCommand({
+    actor: user,
+    command: {
       experimentId: parsed.data.experimentId,
       startDate: parsed.data.startDate,
       notes: parsed.data.notes,
-      selectedAnimals,
+      assignments: parsed.data.assignments,
     },
-    { id: user.id, role: user.role },
-  );
+    expectedExperimentVersion: parsed.data.expectedExperimentVersion,
+    idempotencyKey: parsed.data.idempotencyKey,
+    requestId: parsed.data.requestId,
+  });
 
   if (!result.ok) {
     return {
@@ -124,12 +216,19 @@ export async function planExperimentCohortAction(
 
   return {
     status: "success",
-    message: result.message,
+    message: commandMessage(result, "Cohort plan saved."),
   };
 }
 
 const promotePlannedCohortSchema = z.object({
   experimentId: z.string().trim().min(1),
+  expectedExperimentVersion: z.coerce.number().int().positive(),
+  assignments: z.array(z.object({
+    assignmentId: z.string().trim().min(1),
+    expectedVersion: z.number().int().positive(),
+  })).min(1).max(100),
+  idempotencyKey: z.string().trim().min(1),
+  requestId: z.string().trim().min(1),
 });
 
 export async function promotePlannedCohortAction(
@@ -137,9 +236,13 @@ export async function promotePlannedCohortAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "experiments:manage" });
   const parsed = promotePlannedCohortSchema.safeParse({
     experimentId: formData.get("experimentId"),
+    expectedExperimentVersion: formData.get("expectedExperimentVersion"),
+    assignments: parseJsonField(formData.get("assignmentsJson")),
+    idempotencyKey: formData.get("idempotencyKey"),
+    requestId: formData.get("requestId"),
   });
 
   if (!parsed.success) {
@@ -149,7 +252,13 @@ export async function promotePlannedCohortAction(
     };
   }
 
-  const result = await promotePlannedExperimentAssignments(parsed.data, { id: user.id, role: user.role });
+  const result = await executePromoteExperimentAssignmentsCommand({
+    actor: user,
+    command: { experimentId: parsed.data.experimentId, assignments: parsed.data.assignments },
+    expectedExperimentVersion: parsed.data.expectedExperimentVersion,
+    idempotencyKey: parsed.data.idempotencyKey,
+    requestId: parsed.data.requestId,
+  });
 
   if (!result.ok) {
     return {
@@ -164,7 +273,7 @@ export async function promotePlannedCohortAction(
 
   return {
     status: "success",
-    message: result.message,
+    message: commandMessage(result, "Planned cohort promoted."),
   };
 }
 
@@ -173,9 +282,13 @@ export async function demoteReservedCohortAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "experiments:manage" });
   const parsed = promotePlannedCohortSchema.safeParse({
     experimentId: formData.get("experimentId"),
+    expectedExperimentVersion: formData.get("expectedExperimentVersion"),
+    assignments: parseJsonField(formData.get("assignmentsJson")),
+    idempotencyKey: formData.get("idempotencyKey"),
+    requestId: formData.get("requestId"),
   });
 
   if (!parsed.success) {
@@ -185,7 +298,13 @@ export async function demoteReservedCohortAction(
     };
   }
 
-  const result = await demoteReservedExperimentAssignments(parsed.data, { id: user.id, role: user.role });
+  const result = await executeDemoteExperimentAssignmentsCommand({
+    actor: user,
+    command: { experimentId: parsed.data.experimentId, assignments: parsed.data.assignments },
+    expectedExperimentVersion: parsed.data.expectedExperimentVersion,
+    idempotencyKey: parsed.data.idempotencyKey,
+    requestId: parsed.data.requestId,
+  });
 
   if (!result.ok) {
     return {
@@ -200,15 +319,20 @@ export async function demoteReservedCohortAction(
 
   return {
     status: "success",
-    message: result.message,
+    message: commandMessage(result, "Reserved cohort returned to planned."),
   };
 }
 
 const updatePlannedAssignmentSchema = z.object({
+  experimentId: z.string().trim().min(1),
   assignmentId: z.string().trim().min(1),
   startDate: z.string().trim().min(1),
-  treatmentGroup: z.string().trim().max(200).optional(),
+  treatmentGroup: z.string().trim().max(80).optional(),
   notes: z.string().trim().max(400).optional(),
+  expectedExperimentVersion: z.coerce.number().int().positive(),
+  expectedAssignmentVersion: z.coerce.number().int().positive(),
+  idempotencyKey: z.string().trim().min(1),
+  requestId: z.string().trim().min(1),
 });
 
 export async function updatePlannedAssignmentAction(
@@ -216,12 +340,17 @@ export async function updatePlannedAssignmentAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "experiments:manage" });
   const parsed = updatePlannedAssignmentSchema.safeParse({
+    experimentId: formData.get("experimentId"),
     assignmentId: formData.get("assignmentId"),
     startDate: formData.get("startDate"),
     treatmentGroup: formData.get("treatmentGroup") || undefined,
     notes: formData.get("notes") || undefined,
+    expectedExperimentVersion: formData.get("expectedExperimentVersion"),
+    expectedAssignmentVersion: formData.get("expectedAssignmentVersion"),
+    idempotencyKey: formData.get("idempotencyKey"),
+    requestId: formData.get("requestId"),
   });
 
   if (!parsed.success) {
@@ -231,7 +360,20 @@ export async function updatePlannedAssignmentAction(
     };
   }
 
-  const result = await updatePlannedExperimentAssignment(parsed.data, { id: user.id, role: user.role });
+  const result = await executeUpdatePlannedExperimentAssignmentCommand({
+    actor: user,
+    command: {
+      experimentId: parsed.data.experimentId,
+      assignmentId: parsed.data.assignmentId,
+      startDate: parsed.data.startDate,
+      treatmentGroup: parsed.data.treatmentGroup,
+      notes: parsed.data.notes,
+    },
+    expectedExperimentVersion: parsed.data.expectedExperimentVersion,
+    expectedAssignmentVersion: parsed.data.expectedAssignmentVersion,
+    idempotencyKey: parsed.data.idempotencyKey,
+    requestId: parsed.data.requestId,
+  });
 
   if (!result.ok) {
     return {
@@ -246,12 +388,17 @@ export async function updatePlannedAssignmentAction(
 
   return {
     status: "success",
-    message: result.message,
+    message: commandMessage(result, "Planned assignment updated."),
   };
 }
 
 const deletePlannedAssignmentSchema = z.object({
+  experimentId: z.string().trim().min(1),
   assignmentId: z.string().trim().min(1),
+  expectedExperimentVersion: z.coerce.number().int().positive(),
+  expectedAssignmentVersion: z.coerce.number().int().positive(),
+  idempotencyKey: z.string().trim().min(1),
+  requestId: z.string().trim().min(1),
 });
 
 export async function deletePlannedAssignmentAction(
@@ -259,9 +406,14 @@ export async function deletePlannedAssignmentAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "experiments:manage" });
   const parsed = deletePlannedAssignmentSchema.safeParse({
+    experimentId: formData.get("experimentId"),
     assignmentId: formData.get("assignmentId"),
+    expectedExperimentVersion: formData.get("expectedExperimentVersion"),
+    expectedAssignmentVersion: formData.get("expectedAssignmentVersion"),
+    idempotencyKey: formData.get("idempotencyKey"),
+    requestId: formData.get("requestId"),
   });
 
   if (!parsed.success) {
@@ -271,7 +423,14 @@ export async function deletePlannedAssignmentAction(
     };
   }
 
-  const result = await deletePlannedExperimentAssignment(parsed.data, { id: user.id, role: user.role });
+  const result = await executeDeletePlannedExperimentAssignmentCommand({
+    actor: user,
+    command: { experimentId: parsed.data.experimentId, assignmentId: parsed.data.assignmentId },
+    expectedExperimentVersion: parsed.data.expectedExperimentVersion,
+    expectedAssignmentVersion: parsed.data.expectedAssignmentVersion,
+    idempotencyKey: parsed.data.idempotencyKey,
+    requestId: parsed.data.requestId,
+  });
 
   if (!result.ok) {
     return {
@@ -286,6 +445,6 @@ export async function deletePlannedAssignmentAction(
 
   return {
     status: "success",
-    message: result.message,
+    message: commandMessage(result, "Planned assignment removed."),
   };
 }

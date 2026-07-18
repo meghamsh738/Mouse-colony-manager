@@ -1,6 +1,8 @@
 import { differenceInDays } from "date-fns";
 
+import { normalizeUserRole } from "@/lib/capabilities";
 import { prisma } from "@/lib/prisma";
+import { getActorLabAccess, labScopedWhere, type LabActor } from "@/lib/lab-access";
 import type {
   ExperimentCandidate,
   ExperimentExclusionSummary,
@@ -10,19 +12,43 @@ import type {
 } from "@/lib/types";
 import { formatAgeLabel } from "@/lib/utils";
 
-type ExperimentOverviewItem = {
+export type ExperimentOverviewItem = {
   id: string;
+  labId: string;
+  labCode: string;
   experimentCode: string;
   title: string;
   status: string;
   projectCode: string;
+  projectId: string;
+  version: number;
+  visibility: "full" | "operational";
+  ownerContact: string;
+  plannedStartAt: string | null;
+  plannedEndAt: string | null;
+  operationalContact: string | null;
+  procedureSummary: string | null;
+  treatmentSummary: string | null;
+  welfareRisks: string | null;
+  scheduleNotes: string | null;
+  operationalNotes: string | null;
+  researchNotes?: string | null;
+  resultSummary?: string | null;
   assignments: Array<{
     id: string;
     animalId: string;
+    animalRecordId: string;
+    sex: string;
+    strain: string;
+    genotype: string;
+    cageBarcode: string | null;
+    cageLocation: string | null;
     status: string;
     startDate: string;
+    endDate: string | null;
     treatmentGroup: string | null;
-    notes: string | null;
+    notes?: string | null;
+    version: number;
     provenance: {
       action: string;
       timestamp: string;
@@ -36,6 +62,18 @@ function isExperimentAssignmentAction(action: string) {
 }
 
 type PlannerSearchParams = Record<string, string | string[] | undefined>;
+const GLOBAL_READ_ACTOR: LabActor = { id: "internal-global-read", role: "facility_admin" };
+
+function canReadFullExperimentDetails(actor: LabActor) {
+  const role = normalizeUserRole(actor.role);
+  return role === "facility_admin" || role === "lab_user";
+}
+
+function assertFullExperimentAccess(actor: LabActor) {
+  if (!canReadFullExperimentDetails(actor)) {
+    throw new Error("Research planning details are not available in the operational experiment view.");
+  }
+}
 
 function getReferenceDate() {
   return process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString();
@@ -413,27 +451,163 @@ function buildRandomizationPlan(
   };
 }
 
-export async function getExperimentOverviewView(): Promise<ExperimentOverviewItem[]> {
-  const experiments = await prisma.experiment.findMany({
-    orderBy: [{ status: "asc" }, { experimentCode: "asc" }],
-    include: {
-      project: {
+type ExperimentOverviewProjection = {
+  id: string;
+  labId: string;
+  experimentCode: string;
+  title: string;
+  status: string;
+  version: number;
+  plannedStartAt: Date | null;
+  plannedEndAt: Date | null;
+  operationalContact: string | null;
+  procedureSummary: string | null;
+  treatmentSummary: string | null;
+  welfareRisks: string | null;
+  scheduleNotes: string | null;
+  operationalNotes: string | null;
+  notes?: string | null;
+  resultSummary?: string | null;
+  lab: { code: string };
+  project: { id: string; projectCode: string };
+  owner: { name: string | null; email: string };
+  assignments: Array<{
+    id: string;
+    status: string;
+    startDate: Date;
+    endDate: Date | null;
+    treatmentGroup: string | null;
+    notes?: string | null;
+    version: number;
+    animal: {
+      id: string;
+      animalId: string;
+      sex: string;
+      strain: { name: string };
+      alleles: Array<{ zygosity: string; allele: { name: string } }>;
+      currentCage: {
+        barcode: string;
+        cageNumber: string;
+        room: { roomNumber: string };
+        rack: { rackNumber: string };
+      } | null;
+    };
+  }>;
+};
+
+export async function getExperimentOverviewView(actor: LabActor = GLOBAL_READ_ACTOR): Promise<ExperimentOverviewItem[]> {
+  const access = await getActorLabAccess(actor);
+  const full = canReadFullExperimentDetails(actor);
+  const where = labScopedWhere(access);
+  const assignmentWhere = access.canViewAll ? {} : { animal: { owningLabId: { in: access.memberLabIds } } };
+  const experiments: ExperimentOverviewProjection[] = full
+    ? await prisma.experiment.findMany({
+        where,
+        orderBy: [{ status: "asc" }, { experimentCode: "asc" }],
         select: {
-          projectCode: true,
-        },
-      },
-      assignments: {
-        orderBy: [{ startDate: "asc" }, { id: "asc" }],
-        include: {
-          animal: {
+          id: true,
+          labId: true,
+          experimentCode: true,
+          title: true,
+          status: true,
+          version: true,
+          plannedStartAt: true,
+          plannedEndAt: true,
+          operationalContact: true,
+          procedureSummary: true,
+          treatmentSummary: true,
+          welfareRisks: true,
+          scheduleNotes: true,
+          operationalNotes: true,
+          notes: true,
+          resultSummary: true,
+          lab: { select: { code: true } },
+          project: { select: { id: true, projectCode: true } },
+          owner: { select: { name: true, email: true } },
+          assignments: {
+            where: assignmentWhere,
+            orderBy: [{ startDate: "asc" }, { id: "asc" }],
             select: {
-              animalId: true,
+              id: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+              treatmentGroup: true,
+              notes: true,
+              version: true,
+              animal: {
+                select: {
+                  id: true,
+                  animalId: true,
+                  sex: true,
+                  strain: { select: { name: true } },
+                  alleles: { include: { allele: { select: { name: true } } } },
+                  currentCage: {
+                    select: {
+                      barcode: true,
+                      cageNumber: true,
+                      room: { select: { roomNumber: true } },
+                      rack: { select: { rackNumber: true } },
+                    },
+                  },
+                },
+              },
             },
           },
         },
-      },
-    },
-  });
+      })
+    : await prisma.experiment.findMany({
+        where,
+        orderBy: [{ status: "asc" }, { experimentCode: "asc" }],
+        select: {
+          id: true,
+          labId: true,
+          experimentCode: true,
+          title: true,
+          status: true,
+          version: true,
+          plannedStartAt: true,
+          plannedEndAt: true,
+          operationalContact: true,
+          procedureSummary: true,
+          treatmentSummary: true,
+          welfareRisks: true,
+          scheduleNotes: true,
+          operationalNotes: true,
+          lab: { select: { code: true } },
+          project: { select: { id: true, projectCode: true } },
+          owner: { select: { name: true, email: true } },
+          assignments: {
+            where: assignmentWhere,
+            orderBy: [{ startDate: "asc" }, { id: "asc" }],
+            select: {
+              id: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+              treatmentGroup: true,
+              version: true,
+              animal: {
+                select: {
+                  id: true,
+                  animalId: true,
+                  sex: true,
+                  strain: { select: { name: true } },
+                  alleles: { include: { allele: { select: { name: true } } } },
+                  currentCage: {
+                    select: {
+                      barcode: true,
+                      cageNumber: true,
+                      room: { select: { roomNumber: true } },
+                      rack: { select: { rackNumber: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
 
   const assignmentIds = experiments.flatMap((experiment) => experiment.assignments.map((assignment) => assignment.id));
   const latestAuditEntries = assignmentIds.length
@@ -480,41 +654,81 @@ export async function getExperimentOverviewView(): Promise<ExperimentOverviewIte
 
   return experiments.map((experiment) => ({
     id: experiment.id,
+    labId: experiment.labId,
+    labCode: experiment.lab.code,
     experimentCode: experiment.experimentCode,
     title: experiment.title,
     status: experiment.status,
     projectCode: experiment.project.projectCode,
+    projectId: experiment.project.id,
+    version: experiment.version,
+    visibility: full ? "full" : "operational",
+    ownerContact: experiment.owner.name ?? experiment.owner.email,
+    plannedStartAt: experiment.plannedStartAt?.toISOString() ?? null,
+    plannedEndAt: experiment.plannedEndAt?.toISOString() ?? null,
+    operationalContact: experiment.operationalContact,
+    procedureSummary: experiment.procedureSummary,
+    treatmentSummary: experiment.treatmentSummary,
+    welfareRisks: experiment.welfareRisks,
+    scheduleNotes: experiment.scheduleNotes,
+    operationalNotes: experiment.operationalNotes,
+    ...(full
+      ? {
+          researchNotes: experiment.notes ?? null,
+          resultSummary: experiment.resultSummary ?? null,
+        }
+      : {}),
     assignments: experiment.assignments.map((assignment) => ({
       id: assignment.id,
       animalId: assignment.animal.animalId,
+      animalRecordId: assignment.animal.id,
+      sex: assignment.animal.sex,
+      strain: assignment.animal.strain.name,
+      genotype: assignment.animal.alleles.length
+        ? assignment.animal.alleles.map(({ allele, zygosity }) => `${allele.name} ${zygosity}`).join(" ; ")
+        : "Genotype not recorded",
+      cageBarcode: assignment.animal.currentCage?.barcode ?? null,
+      cageLocation: assignment.animal.currentCage
+        ? `${assignment.animal.currentCage.room.roomNumber} / ${assignment.animal.currentCage.rack.rackNumber} / ${assignment.animal.currentCage.cageNumber}`
+        : null,
       status: assignment.status,
       startDate: assignment.startDate.toISOString(),
+      endDate: assignment.endDate?.toISOString() ?? null,
       treatmentGroup: assignment.treatmentGroup ?? null,
-      notes: assignment.notes ?? null,
+      ...(full ? { notes: assignment.notes ?? null } : {}),
+      version: assignment.version,
       provenance: latestAuditByAssignmentId.get(assignment.id) ?? null,
     })),
   }));
 }
 
-export async function getExperimentPlannerOptions() {
+export async function getExperimentPlannerOptions(actor: LabActor = GLOBAL_READ_ACTOR) {
+  assertFullExperimentAccess(actor);
+  const access = await getActorLabAccess(actor);
   const [projects, strains, experiments] = await prisma.$transaction([
     prisma.project.findMany({
+      where: labScopedWhere(access),
       orderBy: { projectCode: "asc" },
       select: { id: true, projectCode: true, title: true },
     }),
     prisma.strain.findMany({
+      where: access.canViewAll
+        ? {}
+        : { animals: { some: { owningLabId: { in: access.memberLabIds } } } },
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
     prisma.experiment.findMany({
       where: {
         status: { in: ["planned", "active"] },
+        ...labScopedWhere(access),
       },
       orderBy: [{ status: "asc" }, { experimentCode: "asc" }],
       select: {
         id: true,
         experimentCode: true,
         title: true,
+        version: true,
       },
     }),
   ]);
@@ -531,15 +745,22 @@ export async function getExperimentPlannerOptions() {
     experimentOptions: experiments.map((experiment) => ({
       id: experiment.id,
       label: `${experiment.experimentCode} · ${experiment.title}`,
+      version: experiment.version,
     })),
   };
 }
 
-export async function getExperimentPlannerView(filters: ExperimentPlannerFilters): Promise<ExperimentPlannerView> {
+export async function getExperimentPlannerView(
+  actor: LabActor,
+  filters: ExperimentPlannerFilters,
+): Promise<ExperimentPlannerView> {
+  assertFullExperimentAccess(actor);
+  const access = await getActorLabAccess(actor);
   const referenceDate = getReferenceDate();
   const animals = await prisma.animal.findMany({
     where: {
       outcomeStatus: "alive",
+      ...labScopedWhere(access, "owningLabId"),
     },
     orderBy: { animalId: "asc" },
     include: {
@@ -558,6 +779,7 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
       projectAllocations: {
         where: {
           endedAt: null,
+          ...(access.canViewAll ? {} : { project: { labId: { in: access.memberLabIds } } }),
         },
         include: {
           project: { select: { id: true, projectCode: true } },
@@ -566,6 +788,7 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
       experimentAssignments: {
         where: {
           status: { in: ["planned", "reserved", "active"] },
+          ...(access.canViewAll ? {} : { experiment: { labId: { in: access.memberLabIds } } }),
         },
         include: {
           experiment: {
@@ -580,6 +803,7 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
         where: {
           resolved: false,
           followupRequired: true,
+          ...labScopedWhere(access),
         },
         select: {
           noteType: true,
@@ -716,13 +940,14 @@ export async function getExperimentPlannerView(filters: ExperimentPlannerFilters
 }
 
 export async function getExperimentCandidateView(
+  actor: LabActor = GLOBAL_READ_ACTOR,
   desiredNumber = 4,
   desiredSex: "male" | "female" | "either" = "female",
   minAgeDays = 28,
   maxAgeDays = 140,
   genotypeKeyword = "Cre",
 ): Promise<ExperimentCandidate[]> {
-  const view = await getExperimentPlannerView({
+  const view = await getExperimentPlannerView(actor, {
     desiredNumber,
     desiredSex,
     minAgeDays,

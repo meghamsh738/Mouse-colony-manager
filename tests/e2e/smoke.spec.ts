@@ -4,6 +4,8 @@ import path from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { SEEDED_DEV_EMAILS, SEEDED_DEV_PASSWORD } from "../../src/lib/seed-metadata";
 import { seedDatabase } from "../../prisma/seed-database";
+import { createCageWithAssignments } from "../../src/lib/cage-intake-write";
+import { prisma } from "../../src/lib/prisma";
 
 test.describe.configure({ timeout: 90_000 });
 
@@ -88,6 +90,31 @@ test("seeded user can log in and reach the dashboard", async ({ page }) => {
   await signInAs(page, "admin");
 });
 
+test("admin can browse the read-only workbook and return to app view", async ({ page }, testInfo) => {
+  await signInAs(page, "admin");
+
+  if (testInfo.project.name === "mobile") {
+    await page.locator("summary").filter({ hasText: "More" }).click();
+  }
+  await page.getByRole("link", { name: "Workbook" }).click();
+  await expect(page).toHaveURL(/\/workbook/);
+  await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+
+  await page.getByLabel("Workbook sections").getByRole("link", { name: "Rooms" }).click();
+  await page.getByLabel("Rooms sheets").getByRole("link", { name: "Room A101" }).click();
+  await page.getByRole("button", { name: "Expand all" }).click();
+  await expect(page.locator('.workbook-canvas a[href="/animals/animal-001"]:visible').first()).toBeVisible();
+  await expect(page.locator(".workbook-canvas")).toContainText("CM-24001");
+
+  if (testInfo.project.name === "mobile") {
+    const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    expect(pageOverflow).toBeLessThanOrEqual(2);
+  }
+
+  await page.getByRole("link", { name: "App view" }).click();
+  await expect(page).toHaveURL(/\/cages$/);
+});
+
 test("admin can add a new animal record from the colony table", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
   const animalId = `CM-${seed.suffix}21`;
@@ -147,6 +174,89 @@ test("animal staff can browse cage list and open cage detail", async ({ page }) 
   await expect(page.getByRole("link", { name: "Open mobile scan view" })).toBeVisible();
 });
 
+test("admin can review and permanently close an empty cage from detail and scan views", async ({ page }, testInfo) => {
+  const suffix = testInfo.project.name === "mobile" ? "098" : "099";
+  const created = await createCageWithAssignments({
+    cages: [{
+      clientId: `e2e-close-${suffix}`,
+      labId: "lab-microglia",
+      roomId: "room-a101",
+      rackId: "rack-a101-2",
+      cageNumber: suffix,
+      status: "active",
+      startDate: "2026-04-04",
+    }],
+    assignments: [],
+    movedAt: "2026-04-04",
+    reason: "Create an empty cage for closure browser verification.",
+  }, { id: "user-admin", role: "admin" });
+  expect(created.ok).toBe(true);
+  if (!created.ok) throw new Error(created.message);
+  expect(created.entityId).toBeTruthy();
+  const cage = await prisma.cage.findUniqueOrThrow({ where: { id: created.entityId! }, select: { barcode: true } });
+
+  await signInAs(page, "admin");
+  await page.goto(`/cages/${created.entityId}`);
+  await page.getByRole("link", { name: /Close cage/ }).click();
+  await expect(page.getByTestId("high-impact-workflow")).toBeVisible();
+  await page.getByRole("button", { name: "Review closure" }).click();
+  await page.getByRole("checkbox", { name: /closure and billing cutoff are permanent/i }).check();
+  await page.getByRole("button", { name: /Permanently close/ }).click();
+
+  await expect(page.getByText(`${cage.barcode} was closed and billing ended at the start of 2026-04-05.`)).toBeVisible({ timeout: 30_000 });
+  await page.goto(`/cages/${created.entityId}`);
+  await expect(page.getByRole("heading", { name: "Closure" })).toBeVisible();
+  await expect(page.getByText("Start of 2026-04-05")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Close cage/ })).toHaveCount(0);
+
+  await page.goto(`/scan/${cage.barcode}`);
+  await expect(page.getByRole("heading", { name: "Closure" })).toBeVisible();
+  await expect(page.getByText("Start of 2026-04-05")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Close cage/ })).toHaveCount(0);
+
+  const persisted = await prisma.cageClosure.findUniqueOrThrow({
+    where: { cageId: created.entityId! },
+    include: { chargePeriod: true },
+  });
+  expect(persisted.billingCutoffAt.toISOString()).toBe("2026-04-05T00:00:00.000Z");
+  expect(persisted.chargePeriod.endedAt?.toISOString()).toBe("2026-04-05T00:00:00.000Z");
+});
+
+test("animal staff can open a print-ready cage label sheet", async ({ page }) => {
+  await signInAs(page, "staff");
+  await page.goto("/cages");
+
+  await page.getByTestId("cage-search").fill("CM-A101-001");
+  await page.getByTestId("cage-print-current").click();
+
+  await expect(page).toHaveURL(/\/cages\/labels\?search=CM-A101-001/);
+  await expect(page.getByRole("heading", { name: "Cage QR labels" })).toBeVisible();
+  await expect(page.getByTestId("cage-print-label")).toHaveCount(1);
+  await expect(page.getByTestId("cage-print-label").first()).toContainText("CM-A101-001");
+  await expect(page.getByTestId("print-labels-button")).toBeVisible();
+});
+
+test("animal staff can transfer a mouse into a scanned cage with fallback controls", async ({ page }) => {
+  await signInAs(page, "staff");
+  await page.goto("/scan/CM-A101-001");
+
+  await page.getByTestId("animal-transfer-search").fill("CM-26003");
+  await page.getByTestId("animal-transfer-card").filter({ hasText: "CM-26003" }).click();
+  await expect(page.getByText("Staged move: CM-26003 from CM-A101-003 to CM-A101-001.")).toBeVisible();
+  await page.getByTestId("animal-transfer-date").fill("2026-04-10");
+  await page.getByTestId("animal-transfer-reason").fill("Transferred during e2e cage round.");
+  await submitAfterBlur(page, "animal-transfer-submit");
+
+  await expect(page.getByText("CM-26003 moved from A101 / R2 / 003 to A101 / R1 / 001.")).toBeVisible({
+    timeout: 30_000,
+  });
+
+  await page.goto("/cages/cage-a101-001");
+  await expect(page.locator("tbody").first()).toContainText("CM-26003", { timeout: 30_000 });
+  await page.goto("/cages/cage-a101-003");
+  await expect(page.locator("tbody").first()).not.toContainText("CM-26003", { timeout: 30_000 });
+});
+
 test("animal staff can move a cage from the scan workspace and review the history entry", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
   const moveReason = `Relocated during ${seed.noteSuffix} monitoring sweep.`;
@@ -175,7 +285,7 @@ test("researcher can review experiment overview and tune the distribution helper
   await signInAs(page, "researcher");
   await page.goto("/experiments");
 
-  await expect(page.getByRole("heading", { name: "Assignment conflicts and cohort planning." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Experiments" })).toBeVisible();
   await expect(page.getByTestId("experiment-cohort")).toBeVisible();
   await page.getByTestId("planner-sex").selectOption("male");
   await page.getByTestId("planner-desired-number").fill("2");
@@ -751,6 +861,8 @@ test("staff can sync an external cage move through the integration API", async (
 
 test("staff can sync an external animal lifecycle update through the integration API", async ({ page }) => {
   await signInForApiRequests(page, "staff");
+  const currentResponse = await page.request.get("/api/v1/animals/animal-003");
+  const currentPayload = await currentResponse.json();
 
   const response = await page.request.patch("/api/v1/animals", {
     data: {
@@ -758,6 +870,8 @@ test("staff can sync an external animal lifecycle update through the integration
       targetStatus: "euthanized",
       happenedAt: "2026-04-18",
       reason: "External colony system recorded humane endpoint completion.",
+      expectedVersion: currentPayload.data.animal.version,
+      confirmed: true,
     },
   });
   const payload = {
@@ -774,7 +888,7 @@ test("staff can sync an external animal lifecycle update through the integration
     outcomeStatus: "euthanized",
     deathReason: "External colony system recorded humane endpoint completion.",
   });
-  expect(payload.body.data.cageLabel).toBe("Archived");
+  expect(payload.body.data.cageLabel).toBe("Not in cage");
 });
 
 test("admin can create a breeding setup through the integration API", async ({ page }) => {
@@ -1148,10 +1262,13 @@ test("animal staff can euthanize and then archive an animal record", async ({ pa
 
   await signInAs(page, "staff");
   await page.goto(`/animals/${seed.lifecycleAnimalId}`);
+  await page.getByRole("link", { name: /Record terminal disposition/ }).click();
+  await expect(page.getByTestId("high-impact-workflow")).toBeVisible();
 
   await page.getByTestId("animal-lifecycle-target").selectOption("euthanized");
   await page.getByTestId("animal-lifecycle-date").fill("2026-04-09");
   await page.getByTestId("animal-lifecycle-reason").fill("Terminal tissue collection completed during endpoint round.");
+  await page.getByTestId("animal-lifecycle-review").click();
   await submitAfterBlur(page, "animal-lifecycle-submit");
 
   await expect(page.getByText(`${seed.lifecycleAnimalCode} marked euthanized.`)).toBeVisible({ timeout: 30_000 });
@@ -1163,10 +1280,11 @@ test("animal staff can euthanize and then archive an animal record", async ({ pa
   await page.getByTestId("animal-lifecycle-target").selectOption("archived");
   await page.getByTestId("animal-lifecycle-date").fill("2026-04-10");
   await page.getByTestId("animal-lifecycle-reason").fill("Archived after post-procedure disposition review.");
+  await page.getByTestId("animal-lifecycle-review").click();
   await submitAfterBlur(page, "animal-lifecycle-submit");
 
   await expect(page.getByText("archived").first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("This animal is already archived and cannot move to another lifecycle state.")).toBeVisible({
+  await expect(page.getByText("Terminal disposition complete")).toBeVisible({
     timeout: 30_000,
   });
 
@@ -1181,6 +1299,7 @@ test("admin can update a rule threshold and see the audit trail", async ({ page 
   await signInAs(page, "admin");
   await page.goto("/settings");
 
+  await page.getByTestId("rule-edit-reservation_start_grace_days").click();
   await page.getByTestId("rule-value-reservation_start_grace_days").fill(seed.ruleGraceDays);
   await submitAfterBlur(page, "rule-save-reservation_start_grace_days");
 

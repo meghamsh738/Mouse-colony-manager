@@ -7,6 +7,7 @@ import {
   getExistingCageHealthNoteApiRecord,
   resolveCageByApiReference,
 } from "@/lib/integration-api";
+import { isReservedQuarantineHealthAction } from "@/lib/quarantine-state-machine";
 
 const cageHealthNoteApiSchema = z.object({
   cageId: z.string().trim().min(1).optional(),
@@ -27,12 +28,15 @@ const cageHealthNoteApiSchema = z.object({
   severity: z.enum(["info", "warning", "critical"]),
   note: z.string().trim().min(6).max(500),
   followupRequired: z.boolean().default(false),
-  actionTaken: z.string().trim().max(300).optional(),
+  actionTaken: z.string().trim().max(300).refine(
+    (value) => !isReservedQuarantineHealthAction(value),
+    "That action label is reserved for the quarantine observation workflow.",
+  ).optional(),
   attachmentLabel: z.string().trim().max(120).optional(),
 });
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("cages:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -50,7 +54,7 @@ export async function POST(request: Request) {
 
   const parsed = parsedRequest.value;
 
-  const resolved = await resolveCageByApiReference(parsed);
+  const resolved = await resolveCageByApiReference(parsed, auth.user);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
@@ -64,7 +68,7 @@ export async function POST(request: Request) {
     note: parsed.note,
     followupRequired: parsed.followupRequired,
     actionTaken: parsed.actionTaken,
-  });
+  }, auth.user);
 
   if (existingNote && !parsedRequest.attachment) {
     return buildMutationResponse(existingNote, {
@@ -89,7 +93,7 @@ export async function POST(request: Request) {
           }
         : undefined,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok || !result.entityId) {
@@ -98,7 +102,7 @@ export async function POST(request: Request) {
     return buildApiErrorResponse(result.message, status);
   }
 
-  const healthNote = await getCageHealthNoteApiRecordById(result.entityId);
+  const healthNote = await getCageHealthNoteApiRecordById(result.entityId, auth.user);
 
   if (!healthNote) {
     return buildApiErrorResponse("Health note was logged but could not be read back.", 500);

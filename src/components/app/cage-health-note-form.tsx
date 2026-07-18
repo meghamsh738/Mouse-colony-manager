@@ -12,9 +12,10 @@ import { initialFormActionState } from "@/lib/form-state";
 type CageHealthNoteFormProps = {
   barcode: string;
   cageId: string;
+  identityLabel?: string;
 };
 
-export function CageHealthNoteForm({ barcode, cageId }: CageHealthNoteFormProps) {
+export function CageHealthNoteForm({ barcode, cageId, identityLabel }: CageHealthNoteFormProps) {
   const formRef = useRef<HTMLFormElement | null>(null);
   const action = addCageHealthNoteAction.bind(null, barcode);
   const [state, formAction, pending] = useActionState(action, initialFormActionState);
@@ -30,12 +31,15 @@ export function CageHealthNoteForm({ barcode, cageId }: CageHealthNoteFormProps)
     <form
       ref={formRef}
       action={formAction}
-      className="space-y-4"
+      className="safety-form-card space-y-4"
       data-testid="cage-health-note-form"
-      encType="multipart/form-data"
       onSubmit={handleSubmit}
     >
       <input name="cageId" type="hidden" value={cageId} />
+      <div className="scan-note-identity">
+        <p className="wrap-value font-semibold text-[var(--ink)]">Health note for {barcode}</p>
+        {identityLabel ? <p className="mt-1 wrap-value text-sm text-[var(--muted)]">{identityLabel}</p> : null}
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-2 text-sm">
           <span className="text-[var(--muted)]">Note type</span>

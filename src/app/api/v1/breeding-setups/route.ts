@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 import { buildApiErrorResponse, buildMutationResponse, requireApiUser } from "@/lib/api-route";
-import { createBreedingSetup } from "@/lib/colony-write";
+import { executeCreateBreedingSetupCommand } from "@/lib/colony-write";
+import { canonicalJsonHash } from "@/lib/command-foundation";
 import {
   getBreedingSetupApiRecordById,
   getExistingBreedingSetupApiRecord,
@@ -21,7 +22,7 @@ const createBreedingSetupApiSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("breeding:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Invalid breeding setup payload.", 400, parsed.error.flatten().fieldErrors);
   }
 
-  const resolved = await resolveBreedingSetupApiInput(parsed.data);
+  const resolved = await resolveBreedingSetupApiInput(parsed.data, auth.user);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
@@ -51,7 +52,7 @@ export async function POST(request: Request) {
     targetGenotype: parsed.data.targetGenotype,
     targetSex: parsed.data.targetSex,
     notes: parsed.data.notes,
-  });
+  }, auth.user);
 
   if (existingRecord) {
     return buildMutationResponse(existingRecord, {
@@ -61,21 +62,27 @@ export async function POST(request: Request) {
     });
   }
 
-  const result = await createBreedingSetup(
-    {
-      sireId: resolved.value.sireId,
-      damId: resolved.value.damId,
-      startDate: parsed.data.startDate,
-      targetGenotype: parsed.data.targetGenotype,
-      targetSex: parsed.data.targetSex,
-      notes: parsed.data.notes,
-      allowOverride: parsed.data.allowOverride,
-    },
-    { id: auth.user.id, role: auth.user.role },
-  );
+  const command = {
+    sireId: resolved.value.sireId,
+    damId: resolved.value.damId,
+    startDate: parsed.data.startDate,
+    targetGenotype: parsed.data.targetGenotype,
+    targetSex: parsed.data.targetSex,
+    notes: parsed.data.notes,
+    allowOverride: parsed.data.allowOverride,
+  };
+  const idempotencyKey = request.headers.get("idempotency-key")?.trim()
+    || canonicalJsonHash({ actorId: auth.user.id, command });
+  const result = await executeCreateBreedingSetupCommand({
+    actor: auth.user,
+    command,
+    idempotencyKey,
+    requestId: request.headers.get("x-request-id")?.trim() || idempotencyKey,
+  });
 
   if (!result.ok) {
-    if (result.message.includes("already in an active breeding setup")) {
+    const errorMessage = result.message ?? "Breeding setup could not be created.";
+    if (errorMessage.includes("already in an active breeding setup")) {
       const duplicateRecord = await getExistingBreedingSetupApiRecord({
         sireId: resolved.value.sireId,
         damId: resolved.value.damId,
@@ -83,7 +90,7 @@ export async function POST(request: Request) {
         targetGenotype: parsed.data.targetGenotype,
         targetSex: parsed.data.targetSex,
         notes: parsed.data.notes,
-      });
+      }, auth.user);
 
       if (duplicateRecord) {
         return buildMutationResponse(duplicateRecord, {
@@ -94,29 +101,39 @@ export async function POST(request: Request) {
       }
     }
 
-    const status = result.message.includes("role cannot") || result.message.includes("Only admins")
+    const status = errorMessage.includes("role cannot") || errorMessage.includes("Only admins")
       ? 403
-      : result.message.includes("not found")
+      : errorMessage.includes("not found")
         ? 404
         : 400;
 
-    return buildApiErrorResponse(result.message, status);
+    return buildApiErrorResponse(errorMessage, status);
   }
 
-  if (!result.entityId) {
+  const commandResult = result.result && typeof result.result === "object" && !Array.isArray(result.result)
+    ? result.result
+    : null;
+  const entityId = commandResult && "entityId" in commandResult && typeof commandResult.entityId === "string"
+    ? commandResult.entityId
+    : null;
+  const resultMessage = commandResult && "message" in commandResult && typeof commandResult.message === "string"
+    ? commandResult.message
+    : "Breeding setup created.";
+
+  if (!entityId) {
     return buildApiErrorResponse("Breeding setup was created but could not be read back.", 500);
   }
 
-  const record = await getBreedingSetupApiRecordById(result.entityId);
+  const record = await getBreedingSetupApiRecordById(entityId, auth.user);
 
   if (!record) {
     return buildApiErrorResponse("Breeding setup was created but could not be read back.", 500);
   }
 
   return buildMutationResponse(record, {
-    status: 201,
-    created: true,
-    message: result.message,
+    status: result.replayed ? 200 : 201,
+    created: !result.replayed,
+    message: resultMessage,
   });
 }
 

@@ -1,9 +1,33 @@
-import { addDays, differenceInDays, format } from "date-fns";
+import { addDays, differenceInDays } from "date-fns";
 
+import { normalizeUserRole } from "@/lib/capabilities";
 import { buildLineFertilityAdjustment, parseStrainFertilityProfiles } from "@/lib/fertility-rules";
 import { prisma } from "@/lib/prisma";
+import { getActorLabAccess, type ActorLabAccess } from "@/lib/lab-access";
+import type { ResolvedActor } from "@/lib/session";
 import type { BreedingForecastItem, ForecastDemandItem, ForecastSummary, SurplusMinimizationView } from "@/lib/types";
-import { formatPercent } from "@/lib/utils";
+import { formatDate, formatPercent } from "@/lib/utils";
+
+export type ForecastFilters = {
+  labId?: string;
+  cageId?: string;
+  responsibleUserId?: string;
+};
+
+type ForecastFilterOption = { id: string; label: string };
+
+type ForecastScope = {
+  access: ActorLabAccess;
+  labIds: string[];
+  cageIds: string[] | undefined;
+  filters: Required<ForecastFilters>;
+  invalid: boolean;
+  options: {
+    labs: ForecastFilterOption[];
+    cages: ForecastFilterOption[];
+    responsibleUsers: ForecastFilterOption[];
+  };
+};
 
 function getReferenceDate() {
   return process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString();
@@ -105,14 +129,283 @@ async function getForecastRuleContext() {
   };
 }
 
-export async function getBreedingForecastView(): Promise<BreedingForecastItem[]> {
-  const rules = await getForecastRuleContext();
+type ForecastRuleContext = Awaited<ReturnType<typeof getForecastRuleContext>>;
+
+type ForecastAnimalStatusCount = {
+  status: string;
+  _count: {
+    _all: number;
+  };
+};
+
+type ForecastCalloutRow = BreedingForecastItem & {
+  probabilityLabel: string;
+  nextLitterLabel: string;
+  readyLabel: string;
+};
+
+type SurplusMinimizationCalloutsView = Omit<SurplusMinimizationView, "demandItems"> & {
+  demandItems: Array<ForecastDemandItem & { startLabel: string }>;
+};
+
+export type ForecastWorkspaceView = {
+  summary: ForecastSummary;
+  rows: ForecastCalloutRow[];
+  surplus: SurplusMinimizationCalloutsView;
+  longRange: SurplusMinimizationCalloutsView;
+  partial: boolean;
+  issues: string[];
+  scope: Pick<ForecastScope, "filters" | "options" | "invalid">;
+};
+
+function getDefaultForecastRuleContext(): ForecastRuleContext {
+  return {
+    breederMaxAgeDays: 270,
+    weaningDueDays: 21,
+    longRangeDemandHorizonDays: 90,
+    strainFertilityProfiles: parseStrainFertilityProfiles(undefined),
+    today: getReferenceDate(),
+  };
+}
+
+function getEmptySurplusMinimizationView(horizonDays: number): SurplusMinimizationView {
+  return {
+    horizonDays,
+    demandAnimals: 0,
+    availableSupply: 0,
+    projectedUsableSupply: 0,
+    projectedSurplusPups: 0,
+    supplyGap: 0,
+    surplusAfterDemand: 0,
+    demandItems: [],
+    recommendations: ["Forecast data is temporarily unavailable."],
+  };
+}
+
+function getEmptyForecastSummary(longRangeHorizonDays: number): ForecastSummary {
+  return {
+    projectedPups30Days: 0,
+    projectedExperimentReady45Days: 0,
+    pendingDemand45Days: 0,
+    projectedSurplus45Days: 0,
+    supplyGap45Days: 0,
+    longRangeHorizonDays,
+    projectedExperimentReadyLongRangeDays: 0,
+    pendingDemandLongRangeDays: 0,
+    projectedSurplusLongRangeDays: 0,
+    supplyGapLongRangeDays: 0,
+    activeBreedingForecasts: 0,
+    cryostorageBackups: 0,
+    availableNow: 0,
+    reservedPressure: 0,
+  };
+}
+
+function logForecastReadError(label: string, error: unknown) {
+  console.error(`[forecast] ${label} unavailable`, error);
+}
+
+async function safeForecastRead<T>(label: string, read: () => Promise<T>, fallback: T, issues: string[]) {
+  try {
+    return await read();
+  } catch (error) {
+    logForecastReadError(label, error);
+    issues.push(`${label} unavailable`);
+    return fallback;
+  }
+}
+
+function normalizeFilters(filters: ForecastFilters = {}): Required<ForecastFilters> {
+  return {
+    labId: filters.labId?.trim() ?? "",
+    cageId: filters.cageId?.trim() ?? "",
+    responsibleUserId: filters.responsibleUserId?.trim() ?? "",
+  };
+}
+
+function cageLabel(cage: {
+  barcode: string;
+  cageNumber: string;
+  room: { roomNumber: string };
+  rack: { rackNumber: string };
+}) {
+  return `${cage.barcode} · ${cage.room.roomNumber} / ${cage.rack.rackNumber} / ${cage.cageNumber}`;
+}
+
+async function resolveForecastScope(actor: ResolvedActor, requestedFilters: ForecastFilters = {}): Promise<ForecastScope> {
+  const filters = normalizeFilters(requestedFilters);
+  const currentUser = await prisma.user.findUnique({
+    where: { id: actor.id },
+    select: { active: true, authzVersion: true, role: true },
+  });
+  if (
+    !currentUser?.active
+    || currentUser.authzVersion !== actor.authzVersion
+    || normalizeUserRole(currentUser.role) !== actor.canonicalRole
+    || !actor.capabilities.includes("forecast:read")
+  ) {
+    return {
+      access: { canViewAll: false, memberLabIds: [], manageableLabIds: [], membershipByLabId: new Map() },
+      labIds: [],
+      cageIds: [],
+      filters,
+      invalid: true,
+      options: { labs: [], cages: [], responsibleUsers: [] },
+    };
+  }
+
+  const access = await getActorLabAccess(actor);
+  const labs = await prisma.lab.findMany({
+    where: {
+      active: true,
+      ...(access.canViewAll ? {} : { id: { in: access.memberLabIds } }),
+    },
+    orderBy: [{ name: "asc" }, { code: "asc" }],
+    select: { id: true, name: true, code: true },
+  });
+  const labOptions = labs.map((lab) => ({ id: lab.id, label: `${lab.code} · ${lab.name}` }));
+  const accessibleLabIds = labs.map((lab) => lab.id);
+  const fixedLabId = access.canViewAll ? "" : accessibleLabIds[0] ?? "";
+  const selectedLabId = access.canViewAll ? filters.labId : fixedLabId;
+  let invalid = Boolean(
+    (access.canViewAll && filters.labId && !accessibleLabIds.includes(filters.labId))
+    || (!access.canViewAll && filters.labId && filters.labId !== fixedLabId),
+  );
+  const labIds = invalid ? [] : selectedLabId ? [selectedLabId] : accessibleLabIds;
+  const cages = labIds.length
+    ? await prisma.cage.findMany({
+        where: { labId: { in: labIds }, active: true, status: { not: "closed" } },
+        orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
+        select: {
+          id: true,
+          barcode: true,
+          cageNumber: true,
+          room: { select: { roomNumber: true } },
+          rack: { select: { rackNumber: true } },
+          userAssignments: {
+            where: { endedAt: null, user: { active: true }, membership: { active: true } },
+            orderBy: [{ user: { name: "asc" } }, { user: { email: "asc" } }],
+            select: { userId: true, user: { select: { name: true, email: true } } },
+          },
+        },
+      })
+    : [];
+  const cageOptions = cages.map((cage) => ({ id: cage.id, label: cageLabel(cage) }));
+  const responsibleUserMap = new Map<string, string>();
+  for (const cage of cages) {
+    for (const assignment of cage.userAssignments) {
+      responsibleUserMap.set(assignment.userId, `${assignment.user.name} · ${assignment.user.email}`);
+    }
+  }
+  const responsibleUsers = [...responsibleUserMap]
+    .map(([id, label]) => ({ id, label }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+
+  const requestedCage = filters.cageId ? cages.find((cage) => cage.id === filters.cageId) : null;
+  const responsibleUserValid = !filters.responsibleUserId || responsibleUserMap.has(filters.responsibleUserId);
+  if ((filters.cageId && !requestedCage) || !responsibleUserValid) invalid = true;
+
+  let cageIds: string[] | undefined;
+  if (filters.responsibleUserId) {
+    cageIds = cages
+      .filter((cage) => cage.userAssignments.some((assignment) => assignment.userId === filters.responsibleUserId))
+      .map((cage) => cage.id);
+  }
+  if (filters.cageId) {
+    cageIds = cageIds === undefined
+      ? (requestedCage ? [requestedCage.id] : [])
+      : cageIds.filter((cageId) => cageId === filters.cageId);
+  }
+  if (invalid) cageIds = [];
+
+  return {
+    access,
+    labIds,
+    cageIds,
+    filters: { ...filters, labId: access.canViewAll ? filters.labId : fixedLabId },
+    invalid,
+    options: { labs: labOptions, cages: cageOptions, responsibleUsers },
+  };
+}
+
+function labFilter(scope: ForecastScope, field: "labId" | "owningLabId" = "labId") {
+  return { [field]: { in: scope.labIds } };
+}
+
+function animalCageFilter(scope: ForecastScope) {
+  return scope.cageIds === undefined ? {} : { currentCageId: { in: scope.cageIds } };
+}
+
+type ForecastCageContext = {
+  id: string;
+  barcode: string;
+  cageNumber: string;
+  room: { roomNumber: string };
+  rack: { rackNumber: string };
+  userAssignments: Array<{ userId: string; user: { name: string } }>;
+};
+
+const forecastCageSelect = {
+  id: true,
+  barcode: true,
+  cageNumber: true,
+  room: { select: { roomNumber: true } },
+  rack: { select: { rackNumber: true } },
+  userAssignments: {
+    where: { endedAt: null, user: { active: true }, membership: { active: true } },
+    select: { userId: true, user: { select: { name: true } } },
+  },
+} as const;
+
+function collectCageContext(cages: Array<ForecastCageContext | null | undefined>) {
+  const cageById = new Map(cages.filter((cage): cage is ForecastCageContext => Boolean(cage)).map((cage) => [cage.id, cage]));
+  const responsibleUsers = new Map<string, string>();
+  for (const cage of cageById.values()) {
+    for (const assignment of cage.userAssignments) responsibleUsers.set(assignment.userId, assignment.user.name);
+  }
+
+  return {
+    cageIds: [...cageById.keys()],
+    cageLabels: [...cageById.values()].map(cageLabel),
+    responsibleUserIds: [...responsibleUsers.keys()],
+    responsibleUserNames: [...responsibleUsers.values()],
+  };
+}
+
+function buildForecastCallouts(rows: BreedingForecastItem[]): ForecastCalloutRow[] {
+  return rows.map((row) => ({
+    ...row,
+    probabilityLabel: formatPercent(row.expectedProbability),
+    nextLitterLabel: formatDate(row.projectedNextLitterDate),
+    readyLabel: formatDate(row.projectedExperimentReadyDate),
+  }));
+}
+
+function buildSurplusMinimizationCallouts(view: SurplusMinimizationView): SurplusMinimizationCalloutsView {
+  return {
+    ...view,
+    demandItems: view.demandItems.map((item) => ({
+      ...item,
+      startLabel: formatDate(item.startDate),
+    })),
+  };
+}
+
+async function getBreedingForecastRows(rules: ForecastRuleContext, scope: ForecastScope): Promise<BreedingForecastItem[]> {
   const referenceDate = new Date(rules.today);
   const activeBreedings = await prisma.breedingSetup.findMany({
-    where: { status: "active" },
+    where: {
+      status: "active",
+      ...labFilter(scope),
+      ...(scope.cageIds === undefined
+        ? {}
+        : { adults: { some: { animal: { currentCageId: { in: scope.cageIds } } } } }),
+    },
     orderBy: [{ startDate: "desc" }, { id: "asc" }],
     include: {
+      lab: { select: { id: true, name: true, code: true } },
       adults: {
+        where: { animal: { owningLabId: { in: scope.labIds } } },
         include: {
           animal: {
             select: {
@@ -121,6 +414,7 @@ export async function getBreedingForecastView(): Promise<BreedingForecastItem[]>
               dob: true,
               strainId: true,
               strain: { select: { name: true } },
+              currentCage: { select: forecastCageSelect },
               alleles: {
                 include: {
                   allele: {
@@ -172,10 +466,14 @@ export async function getBreedingForecastView(): Promise<BreedingForecastItem[]>
     const projectedExperimentReadyDate = addDays(projectedNextLitterDate, rules.weaningDueDays + 21);
     const sireAgeDays = sire ? differenceInDays(referenceDate, sire.dob) : 0;
     const damAgeDays = dam ? differenceInDays(referenceDate, dam.dob) : 0;
+    const cageContext = collectCageContext([sire?.currentCage, dam?.currentCage]);
 
     return {
       id: breeding.id,
+      labId: breeding.lab.id,
+      labLabel: `${breeding.lab.code} · ${breeding.lab.name}`,
       pairLabel: `${sire?.animalId ?? "Unknown sire"} x ${dam?.animalId ?? "Unknown dam"}`,
+      ...cageContext,
       targetGenotype: breeding.targetGenotype,
       projectedNextLitterDate: projectedNextLitterDate.toISOString(),
       projectedExperimentReadyDate: projectedExperimentReadyDate.toISOString(),
@@ -198,6 +496,14 @@ export async function getBreedingForecastView(): Promise<BreedingForecastItem[]>
       lineFertilitySummary: lineFertility.summary,
     };
   });
+}
+
+export async function getBreedingForecastView(
+  actor: ResolvedActor,
+  filters: ForecastFilters = {},
+): Promise<BreedingForecastItem[]> {
+  const scope = await resolveForecastScope(actor, filters);
+  return getBreedingForecastRows(await getForecastRuleContext(), scope);
 }
 
 function summarizeDemandItems(items: ForecastDemandItem[], availableSupply: number) {
@@ -242,39 +548,50 @@ function buildSurplusRecommendations(input: {
   return recommendations;
 }
 
-export async function getSurplusMinimizationView(horizonDays = 45): Promise<SurplusMinimizationView> {
-  const rules = await getForecastRuleContext();
+async function buildSurplusMinimizationView(input: {
+  rules: ForecastRuleContext;
+  forecastRows: BreedingForecastItem[];
+  horizonDays: number;
+  scope: ForecastScope;
+}): Promise<SurplusMinimizationView> {
+  const { forecastRows, horizonDays, rules, scope } = input;
   const referenceDate = new Date(rules.today);
   const horizonDate = addDays(referenceDate, horizonDays);
-  const [forecastRows, availableNow, experiments] = await Promise.all([
-    getBreedingForecastView(),
+  const [availableNow, experiments] = await Promise.all([
     prisma.animal.count({
       where: {
         outcomeStatus: "alive",
         status: "colony_holding",
+        ...labFilter(scope, "owningLabId"),
+        ...animalCageFilter(scope),
       },
     }),
     prisma.experiment.findMany({
       where: {
         status: { in: ["planned", "active"] },
+        ...labFilter(scope),
         assignments: {
           some: {
             status: { in: ["planned", "reserved", "active"] },
             startDate: { lte: horizonDate },
+            ...(scope.cageIds === undefined ? {} : { animal: { currentCageId: { in: scope.cageIds } } }),
           },
         },
       },
       orderBy: [{ status: "asc" }, { experimentCode: "asc" }],
       include: {
         project: { select: { projectCode: true } },
+        lab: { select: { id: true, name: true, code: true } },
         assignments: {
           where: {
             status: { in: ["planned", "reserved", "active"] },
             startDate: { lte: horizonDate },
+            ...(scope.cageIds === undefined ? {} : { animal: { currentCageId: { in: scope.cageIds } } }),
           },
           select: {
             status: true,
             startDate: true,
+            animal: { select: { currentCage: { select: forecastCageSelect } } },
           },
         },
       },
@@ -292,9 +609,12 @@ export async function getSurplusMinimizationView(horizonDays = 45): Promise<Surp
     const reservedAnimals = experiment.assignments.filter((assignment) => assignment.status === "reserved").length;
     const activeAnimals = experiment.assignments.filter((assignment) => assignment.status === "active").length;
     const earliestStart = [...experiment.assignments].sort((left, right) => left.startDate.getTime() - right.startDate.getTime())[0]?.startDate;
+    const cageContext = collectCageContext(experiment.assignments.map((assignment) => assignment.animal.currentCage));
 
     return {
       experimentId: experiment.id,
+      labId: experiment.lab.id,
+      labLabel: `${experiment.lab.code} · ${experiment.lab.name}`,
       experimentCode: experiment.experimentCode,
       projectCode: experiment.project.projectCode,
       title: experiment.title,
@@ -304,6 +624,7 @@ export async function getSurplusMinimizationView(horizonDays = 45): Promise<Surp
       reservedAnimals,
       activeAnimals,
       supplyGap: 0,
+      ...cageContext,
     };
   });
   const demandItems = summarizeDemandItems(rawDemandItems, availableSupply);
@@ -330,28 +651,64 @@ export async function getSurplusMinimizationView(horizonDays = 45): Promise<Surp
   };
 }
 
-export async function getForecastSummaryView(): Promise<ForecastSummary> {
+export async function getSurplusMinimizationView(
+  actor: ResolvedActor,
+  requestedHorizonDays = 45,
+  filters: ForecastFilters = {},
+): Promise<SurplusMinimizationView> {
+  const horizonDays = requestedHorizonDays;
+  const scope = await resolveForecastScope(actor, filters);
   const rules = await getForecastRuleContext();
+  const forecastRows = await getBreedingForecastRows(rules, scope);
+
+  return buildSurplusMinimizationView({ rules, forecastRows, horizonDays, scope });
+}
+
+async function getForecastInventoryCounts(scope: ForecastScope): Promise<{
+  cryostorageCount: number;
+  animalCounts: ForecastAnimalStatusCount[];
+}> {
+  try {
+    const [cryostorageCount, animalCounts] = await Promise.all([
+      scope.cageIds === undefined
+        ? prisma.cryostorageRecord.count({
+            where: {
+              status: { in: ["stored", "reserved"] },
+              ...labFilter(scope),
+            },
+          })
+        : Promise.resolve(0),
+      prisma.animal.groupBy({
+        by: ["status"],
+        where: {
+          outcomeStatus: "alive",
+          ...labFilter(scope, "owningLabId"),
+          ...animalCageFilter(scope),
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+    ]);
+
+    return { cryostorageCount, animalCounts };
+  } catch (error) {
+    logForecastReadError("inventory counts", error);
+
+    return { cryostorageCount: 0, animalCounts: [] };
+  }
+}
+
+async function buildForecastSummaryView(input: {
+  rules: ForecastRuleContext;
+  forecastRows: BreedingForecastItem[];
+  surplusView: SurplusMinimizationView;
+  longRangeView: SurplusMinimizationView;
+  scope: ForecastScope;
+}): Promise<ForecastSummary> {
+  const { forecastRows, longRangeView, rules, scope, surplusView } = input;
   const referenceDate = new Date(rules.today);
-  const [forecastRows, surplusView, longRangeView, cryostorageCount, animalCounts] = await Promise.all([
-    getBreedingForecastView(),
-    getSurplusMinimizationView(),
-    getSurplusMinimizationView(rules.longRangeDemandHorizonDays),
-    prisma.cryostorageRecord.count({
-      where: {
-        status: { in: ["stored", "reserved"] },
-      },
-    }),
-    prisma.animal.groupBy({
-      by: ["status"],
-      where: {
-        outcomeStatus: "alive",
-      },
-      _count: {
-        _all: true,
-      },
-    }),
-  ]);
+  const { animalCounts, cryostorageCount } = await getForecastInventoryCounts(scope);
 
   return {
     projectedPups30Days: Math.round(
@@ -383,31 +740,73 @@ export async function getForecastSummaryView(): Promise<ForecastSummary> {
   };
 }
 
-export async function getForecastCalloutsView() {
-  const rows = await getBreedingForecastView();
+export async function getForecastSummaryView(
+  actor: ResolvedActor,
+  filters: ForecastFilters = {},
+): Promise<ForecastSummary> {
+  const scope = await resolveForecastScope(actor, filters);
+  const rules = await getForecastRuleContext();
+  const forecastRows = await getBreedingForecastRows(rules, scope);
+  const [surplusView, longRangeView] = await Promise.all([
+    buildSurplusMinimizationView({ rules, forecastRows, horizonDays: 45, scope }),
+    buildSurplusMinimizationView({ rules, forecastRows, horizonDays: rules.longRangeDemandHorizonDays, scope }),
+  ]);
 
-  return rows.map((row) => ({
-    ...row,
-    probabilityLabel: formatPercent(row.expectedProbability),
-    nextLitterLabel: format(new Date(row.projectedNextLitterDate), "dd MMM yyyy"),
-    readyLabel: format(new Date(row.projectedExperimentReadyDate), "dd MMM yyyy"),
-  }));
+  return buildForecastSummaryView({ rules, forecastRows, surplusView, longRangeView, scope });
 }
 
-export async function getSurplusMinimizationCalloutsView(horizonDays = 45) {
-  const view = await getSurplusMinimizationView(horizonDays);
-
-  return {
-    ...view,
-    demandItems: view.demandItems.map((item) => ({
-      ...item,
-      startLabel: format(new Date(item.startDate), "dd MMM yyyy"),
-    })),
-  };
+export async function getForecastCalloutsView(actor: ResolvedActor, filters: ForecastFilters = {}) {
+  return buildForecastCallouts(await getBreedingForecastView(actor, filters));
 }
 
-export async function getLongRangeDemandCalloutsView() {
+export async function getSurplusMinimizationCalloutsView(
+  actor: ResolvedActor,
+  requestedHorizonDays = 45,
+  filters: ForecastFilters = {},
+) {
+  return buildSurplusMinimizationCallouts(await getSurplusMinimizationView(actor, requestedHorizonDays, filters));
+}
+
+export async function getLongRangeDemandCalloutsView(actor: ResolvedActor, filters: ForecastFilters = {}) {
   const rules = await getForecastRuleContext();
 
-  return getSurplusMinimizationCalloutsView(rules.longRangeDemandHorizonDays);
+  return getSurplusMinimizationCalloutsView(actor, rules.longRangeDemandHorizonDays, filters);
+}
+
+export async function getForecastWorkspaceView(
+  actor: ResolvedActor,
+  filters: ForecastFilters = {},
+): Promise<ForecastWorkspaceView> {
+  const issues: string[] = [];
+  const scope = await resolveForecastScope(actor, filters);
+  const rules = await safeForecastRead("forecast rules", getForecastRuleContext, getDefaultForecastRuleContext(), issues);
+  const forecastRows = await safeForecastRead("breeding forecast", () => getBreedingForecastRows(rules, scope), [], issues);
+  const surplusView = await safeForecastRead(
+    "45-day demand",
+    () => buildSurplusMinimizationView({ rules, forecastRows, horizonDays: 45, scope }),
+    getEmptySurplusMinimizationView(45),
+    issues,
+  );
+  const longRangeView = await safeForecastRead(
+    `${rules.longRangeDemandHorizonDays}-day demand`,
+    () => buildSurplusMinimizationView({ rules, forecastRows, horizonDays: rules.longRangeDemandHorizonDays, scope }),
+    getEmptySurplusMinimizationView(rules.longRangeDemandHorizonDays),
+    issues,
+  );
+  const summary = await safeForecastRead(
+    "forecast summary",
+    () => buildForecastSummaryView({ rules, forecastRows, surplusView, longRangeView, scope }),
+    getEmptyForecastSummary(rules.longRangeDemandHorizonDays),
+    issues,
+  );
+
+  return {
+    summary,
+    rows: buildForecastCallouts(forecastRows),
+    surplus: buildSurplusMinimizationCallouts(surplusView),
+    longRange: buildSurplusMinimizationCallouts(longRangeView),
+    partial: issues.length > 0,
+    issues,
+    scope: { filters: scope.filters, options: scope.options, invalid: scope.invalid },
+  };
 }

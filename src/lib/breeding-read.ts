@@ -5,8 +5,9 @@ import {
   parseStrainFertilityProfiles,
   type StrainFertilityProfile,
 } from "@/lib/fertility-rules";
+import { getActorLabAccess, labScopedWhere, type LabActor } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
-import type { BreedingSuggestion } from "@/lib/types";
+import type { BreedingStatus, BreedingSuggestion } from "@/lib/types";
 import { formatAgeLabel, formatPercent } from "@/lib/utils";
 
 type BreedingRuleContext = {
@@ -24,10 +25,12 @@ type BreedingRuleContext = {
   today: string;
 };
 
-type BreedingOverviewItem = {
+export type BreedingOverviewItem = {
   id: string;
+  labId: string;
+  version: number;
   startDate: string;
-  status: string;
+  status: BreedingStatus;
   targetGenotype: string;
   adults: Array<{
     id: string;
@@ -35,6 +38,8 @@ type BreedingOverviewItem = {
     animal: {
       id: string;
       animalId: string;
+      strain: { id: string; name: string };
+      genotype: string;
     } | null;
   }>;
   litter:
@@ -47,15 +52,22 @@ type BreedingOverviewItem = {
         progenyCount: number;
       }
     | null;
+  litters: Array<{
+    id: string;
+    birthDate: string;
+    litterSizeBirth: number;
+    litterSizeWean: number | null;
+    notes: string | null;
+    progeny: Array<{ id: string; animalId: string; sex: string; status: string }>;
+  }>;
   ageDays: number;
 };
 
-type BreedingSuggestionSummary = BreedingSuggestion & {
+export type BreedingSuggestionSummary = BreedingSuggestion & {
   probabilityLabel: string;
 };
 
 const BREEDING_SUGGESTION_CANDIDATES_PER_SEX = 40;
-
 type BreederHistory = {
   activeBreedings: number;
   totalBreedings: number;
@@ -303,18 +315,28 @@ async function getBreedingRuleContext(): Promise<BreedingRuleContext> {
   };
 }
 
-export async function getBreedingOverviewView(): Promise<BreedingOverviewItem[]> {
+export async function getWeaningDueDays() {
+  const rule = await prisma.ruleConfig.findUnique({ where: { key: "weaning_due_days" }, select: { value: true } });
+  return Number(rule?.value ?? 21);
+}
+
+export async function getBreedingOverviewView(actor: LabActor): Promise<BreedingOverviewItem[]> {
+  const access = await getActorLabAccess(actor);
   const referenceDate = getReferenceDate();
   const breedings = await prisma.breedingSetup.findMany({
+    where: labScopedWhere(access),
     orderBy: [{ startDate: "desc" }, { id: "asc" }],
     include: {
       adults: {
+        where: access.canViewAll ? {} : { animal: { owningLabId: { in: access.memberLabIds } } },
         orderBy: [{ role: "asc" }, { id: "asc" }],
         include: {
           animal: {
             select: {
               id: true,
               animalId: true,
+              strain: { select: { id: true, name: true } },
+              alleles: { include: { allele: { select: { name: true } } } },
             },
           },
         },
@@ -327,9 +349,11 @@ export async function getBreedingOverviewView(): Promise<BreedingOverviewItem[]>
           litterSizeBirth: true,
           litterSizeWean: true,
           notes: true,
-          _count: {
+          litterAnimals: {
+            where: access.canViewAll ? {} : { animal: { owningLabId: { in: access.memberLabIds } } },
+            orderBy: { animal: { animalId: "asc" } },
             select: {
-              litterAnimals: true,
+              animal: { select: { id: true, animalId: true, sex: true, status: true } },
             },
           },
         },
@@ -342,13 +366,22 @@ export async function getBreedingOverviewView(): Promise<BreedingOverviewItem[]>
 
     return {
       id: breeding.id,
+      labId: breeding.labId,
+      version: breeding.version,
       startDate: breeding.startDate.toISOString(),
       status: breeding.status,
       targetGenotype: breeding.targetGenotype,
       adults: breeding.adults.map((adult) => ({
         id: adult.id,
         role: adult.role,
-        animal: adult.animal,
+        animal: adult.animal
+          ? {
+              id: adult.animal.id,
+              animalId: adult.animal.animalId,
+              strain: adult.animal.strain,
+              genotype: buildGenotypeSummary(adult.animal.alleles),
+            }
+          : null,
       })),
       litter: latestLitter
         ? {
@@ -357,24 +390,35 @@ export async function getBreedingOverviewView(): Promise<BreedingOverviewItem[]>
             litterSizeBirth: latestLitter.litterSizeBirth,
             litterSizeWean: latestLitter.litterSizeWean ?? undefined,
             notes: latestLitter.notes ?? undefined,
-            progenyCount: latestLitter._count.litterAnimals,
+            progenyCount: latestLitter.litterAnimals.length,
           }
         : null,
+      litters: breeding.litters.map((litter) => ({
+        id: litter.id,
+        birthDate: litter.birthDate.toISOString(),
+        litterSizeBirth: litter.litterSizeBirth,
+        litterSizeWean: litter.litterSizeWean,
+        notes: litter.notes,
+        progeny: litter.litterAnimals.map(({ animal }) => animal),
+      })),
       ageDays: differenceInDays(new Date(referenceDate), breeding.startDate),
     };
   });
 }
 
 export async function getBreedingSuggestionsView(
+  actor: LabActor,
   desiredGenotype = "Cre ; tdTomato",
   desiredSex: "male" | "female" = "female",
   minimumYield = 4,
 ): Promise<BreedingSuggestion[]> {
+  const access = await getActorLabAccess(actor);
   const rules = await getBreedingRuleContext();
   const animals = await prisma.animal.findMany({
     where: {
       outcomeStatus: "alive",
       sex: { in: ["male", "female"] },
+      ...labScopedWhere(access, "owningLabId"),
     },
     orderBy: { animalId: "asc" },
     include: {
@@ -384,6 +428,7 @@ export async function getBreedingSuggestionsView(
         },
       },
       breedingAdults: {
+        where: access.canViewAll ? {} : { breedingSetup: { labId: { in: access.memberLabIds } } },
         include: {
           breedingSetup: {
             select: {
@@ -463,10 +508,6 @@ export async function getBreedingSuggestionsView(
           warnings.push(`${dam.animalId} exceeds breeder age threshold`);
         }
 
-        if (sireGenotypeSummary.includes("CreER +/-") && damGenotypeSummary.includes("tdTomato +/-")) {
-          warnings.push("Cross can yield desired dual-transgenic pups");
-        }
-
         if (sireHistory.activeBreedings || damHistory.activeBreedings) {
           warnings.push("One or both breeders are already carrying active breeding workload");
         }
@@ -543,8 +584,8 @@ export async function getBreedingSuggestionsView(
   return riskPreview ? [...topSuggestions, riskPreview] : topSuggestions;
 }
 
-export async function getBreedingSuggestionSummaryView(): Promise<BreedingSuggestionSummary[]> {
-  const suggestions = await getBreedingSuggestionsView();
+export async function getBreedingSuggestionSummaryView(actor: LabActor): Promise<BreedingSuggestionSummary[]> {
+  const suggestions = await getBreedingSuggestionsView(actor);
 
   return suggestions.map((suggestion) => ({
     ...suggestion,
@@ -552,13 +593,15 @@ export async function getBreedingSuggestionSummaryView(): Promise<BreedingSugges
   }));
 }
 
-export async function getBreedingSetupOptionsView() {
+export async function getBreedingSetupOptionsView(actor: LabActor) {
+  const access = await getActorLabAccess(actor);
   const referenceDate = getReferenceDate();
   const animals = await prisma.animal.findMany({
     where: {
       outcomeStatus: "alive",
       sex: { in: ["male", "female"] },
       currentCageId: { not: null },
+      ...labScopedWhere(access, "owningLabId"),
     },
     orderBy: [{ sex: "asc" }, { animalId: "asc" }],
     include: {
@@ -595,11 +638,13 @@ export async function getBreedingSetupOptionsView() {
   };
 }
 
-export async function getBreedingWeaningOptionsView() {
+export async function getBreedingWeaningOptionsView(actor: LabActor) {
+  const access = await getActorLabAccess(actor);
   const [cages, strains] = await prisma.$transaction([
     prisma.cage.findMany({
       where: {
         active: true,
+        ...labScopedWhere(access),
         status: {
           notIn: ["closed", "retired"],
         },
@@ -611,6 +656,9 @@ export async function getBreedingWeaningOptionsView() {
       },
     }),
     prisma.strain.findMany({
+      where: access.canViewAll
+        ? {}
+        : { animals: { some: { owningLabId: { in: access.memberLabIds } } } },
       orderBy: { name: "asc" },
       select: {
         id: true,

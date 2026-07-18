@@ -28,14 +28,14 @@ const moveCageApiSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("cages:read");
 
   if ("response" in auth) {
     return auth.response;
   }
 
   const filters = parseCageApiFilters(new URL(request.url).searchParams);
-  const result = await getCageApiList(filters);
+  const result = await getCageApiList(filters, auth.user);
 
   return buildCollectionResponse(result.data, {
     total: result.total,
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("cages:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -68,7 +68,7 @@ export async function PATCH(request: Request) {
     return buildApiErrorResponse("Invalid cage move payload.", 400, parsed.error.flatten().fieldErrors);
   }
 
-  const resolved = await resolveCageMoveApiInput(parsed.data);
+  const resolved = await resolveCageMoveApiInput(parsed.data, auth.user);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
@@ -83,7 +83,7 @@ export async function PATCH(request: Request) {
       movedAt: parsed.data.movedAt,
       reason: parsed.data.reason,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok || !result.entityId) {
@@ -98,7 +98,7 @@ export async function PATCH(request: Request) {
     return buildApiErrorResponse(result.message, status);
   }
 
-  const cage = await getCageApiRecordById(resolved.value.cageId);
+  const cage = await getCageApiRecordById(resolved.value.cageId, auth.user);
 
   if (!cage) {
     return buildApiErrorResponse("Cage move was recorded but the updated cage could not be read back.", 500);

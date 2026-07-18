@@ -23,7 +23,7 @@ export async function createAnimalAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "animals:manage" });
   const parsed = createAnimalSchema.safeParse({
     animalId: formData.get("animalId"),
     labId: formData.get("labId"),
@@ -42,7 +42,7 @@ export async function createAnimalAction(
     };
   }
 
-  const result = await createAnimalRecord(parsed.data, { id: user.id, role: user.role });
+  const result = await createAnimalRecord(parsed.data, { id: user.id, role: user.role, activeLabId: user.activeLabId });
 
   if (!result.ok) {
     return {
@@ -66,7 +66,7 @@ export async function importGenotypeCsvAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "animals:manage" });
   const csvTextInput = String(formData.get("csvText") ?? "").trim();
   const fileField = formData.get("file");
   const file = fileField instanceof File && fileField.size > 0 ? fileField : null;
@@ -91,7 +91,7 @@ export async function importGenotypeCsvAction(
       csvText,
       fileName: file?.name,
     },
-    { id: user.id, role: user.role },
+    { id: user.id, role: user.role, activeLabId: user.activeLabId },
   );
 
   if (!result.ok) {

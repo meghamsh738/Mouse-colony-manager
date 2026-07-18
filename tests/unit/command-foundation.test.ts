@@ -1,0 +1,125 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  FacilityIdentifierExhaustedError,
+  OUTBOX_TOPIC_AUTHORITY,
+  OUTBOX_WORKER_TOPICS,
+  allocateFacilityIdentifiers,
+  authenticateOutboxWorker,
+  canonicalJsonHash,
+  executeIdempotentCommand,
+  staleConflict,
+} from "@/lib/command-foundation";
+
+describe("command foundation", () => {
+  it("hashes semantically identical object payloads consistently", () => {
+    expect(canonicalJsonHash({ b: 2, a: { d: 4, c: 3 } })).toBe(
+      canonicalJsonHash({ a: { c: 3, d: 4 }, b: 2 }),
+    );
+    expect(canonicalJsonHash({ values: [2, 1] })).not.toBe(canonicalJsonHash({ values: [1, 2] }));
+  });
+
+  it("returns a structured stale-conflict response", () => {
+    expect(staleConflict("animal", "animal-1", 4, 6)).toMatchObject({
+      ok: false,
+      code: "stale_conflict",
+      aggregateType: "animal",
+      aggregateId: "animal-1",
+      expectedVersion: 4,
+      currentVersion: 6,
+    });
+  });
+
+  it("allocates fixed-width facility identifiers returned by the reservation query", async () => {
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([
+        { sequence_value: BigInt(8), width: 4 },
+        { sequence_value: BigInt(9), width: 4 },
+        { sequence_value: BigInt(11), width: 4 },
+      ]),
+    };
+    await expect(allocateFacilityIdentifiers(tx as never, "animal", 3)).resolves.toEqual(["0008", "0009", "0011"]);
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it("fails with a domain error when the sequence is exhausted", async () => {
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([]) };
+    await expect(allocateFacilityIdentifiers(tx as never, "cage", 1)).rejects.toEqual(
+      expect.objectContaining({
+        name: "FacilityIdentifierExhaustedError",
+        code: "facility_identifier_exhausted",
+        entityType: "cage",
+      } satisfies Partial<FacilityIdentifierExhaustedError>),
+    );
+  });
+
+  it("requires explicit topic-specific authority", () => {
+    expect(OUTBOX_TOPIC_AUTHORITY).toEqual({
+      "notifications.in_app": "notifications:deliver",
+      "notifications.email": "notifications:deliver",
+      "notifications.digest": "notifications:deliver",
+      "billing.invoice": "billing:generate",
+      "sop.assignment": "sops:manage",
+      "audit.security": "audit:security",
+      "workflow.command": "approvals:read",
+    });
+    expect(OUTBOX_WORKER_TOPICS.billing_delivery).toEqual(["billing.invoice"]);
+  });
+
+  it("authenticates a worker only with its topic-specific secret", () => {
+    vi.stubEnv("OUTBOX_WORKER_TOKEN_BILLING_DELIVERY", "billing-worker-secret-token-at-least-32-characters");
+    expect(authenticateOutboxWorker({
+      workerId: "billing-worker-1",
+      workerType: "billing_delivery",
+      token: "billing-worker-secret-token-at-least-32-characters",
+    })).toMatchObject({ id: "billing-worker-1", type: "billing_delivery" });
+    expect(authenticateOutboxWorker({
+      workerId: "billing-worker-1",
+      workerType: "billing_delivery",
+      token: "wrong-worker-secret-token-at-least-32-character",
+    })).toBeNull();
+    expect(() => authenticateOutboxWorker({
+      workerId: "billing-worker-1",
+      workerType: "billing_delivery",
+      token: "é".repeat("billing-worker-secret-token-at-least-32-characters".length),
+    })).not.toThrow();
+    vi.unstubAllEnvs();
+  });
+
+  it("fails closed when stale-write protection names an unknown aggregate", async () => {
+    const result = await executeIdempotentCommand({
+      actor: {} as never,
+      commandType: "verification.invalid-aggregate",
+      idempotencyKey: "invalid-aggregate",
+      requestId: "request-invalid-aggregate",
+      request: {},
+      requiredCapability: "animals:manage",
+      aggregateType: "animla",
+      aggregateId: "animal-1",
+      expectedVersion: 1,
+      handler: async () => ({ ok: true as const, result: {} }),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      code: "invalid_aggregate_type",
+      message: "Expected-version commands require a supported aggregate type and aggregate ID.",
+    });
+  });
+
+  it("fails closed when expected-version protection omits the aggregate ID", async () => {
+    const result = await executeIdempotentCommand({
+      actor: {} as never,
+      commandType: "verification.missing-aggregate-id",
+      idempotencyKey: "missing-aggregate-id",
+      requestId: "request-missing-aggregate-id",
+      request: {},
+      requiredCapability: "animals:manage",
+      aggregateType: "animal",
+      expectedVersion: 1,
+      handler: async () => ({ ok: true as const, result: {} }),
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "invalid_aggregate_type" });
+  });
+});

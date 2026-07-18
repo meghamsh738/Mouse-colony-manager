@@ -4,15 +4,25 @@ import { z } from "zod";
 
 import { verifyPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
+import { recordSecurityEventBestEffort, securityEventTimeBucket } from "@/lib/security-event";
 
 const credentialsSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
 });
+const authSecret = process.env.AUTH_SECRET;
+
+function authEventKey(kind: "unknown" | "inactive" | "denied" | "succeeded", subject: string) {
+  return `auth:${kind}:${subject}:${securityEventTimeBucket()}`;
+}
+
+if (!authSecret) {
+  throw new Error("AUTH_SECRET is required.");
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
-  secret: process.env.AUTH_SECRET ?? "colony-maintenance-dev-secret",
+  secret: authSecret,
   session: {
     strategy: "jwt",
   },
@@ -40,23 +50,80 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             name: true,
             role: true,
             active: true,
+            authzVersion: true,
             passwordHash: true,
           },
         });
 
-        if (!user || !user.active) {
+        if (!user) {
+          const dedupeKey = authEventKey("unknown", "credentials");
+          await recordSecurityEventBestEffort({
+            eventType: "authentication.sign_in.denied",
+            outcome: "denied",
+            severity: "warning",
+            correlationId: dedupeKey,
+            dedupeKey,
+            subjectType: "authentication_surface",
+            subjectId: "credentials",
+            source: "credentials_provider",
+            summary: "Credentials sign-in denied.",
+          });
+          return null;
+        }
+
+        if (!user.active) {
+          const dedupeKey = authEventKey("inactive", user.id);
+          await recordSecurityEventBestEffort({
+            eventType: "authentication.sign_in.denied",
+            outcome: "denied",
+            severity: "warning",
+            actorId: user.id,
+            correlationId: dedupeKey,
+            dedupeKey,
+            subjectType: "user",
+            subjectId: user.id,
+            source: "credentials_provider",
+            summary: "Credentials sign-in denied.",
+          });
           return null;
         }
 
         if (!verifyPassword(parsed.data.password, user.passwordHash)) {
+          const dedupeKey = authEventKey("denied", user.id);
+          await recordSecurityEventBestEffort({
+            eventType: "authentication.sign_in.denied",
+            outcome: "denied",
+            severity: "warning",
+            actorId: user.id,
+            correlationId: dedupeKey,
+            dedupeKey,
+            subjectType: "user",
+            subjectId: user.id,
+            source: "credentials_provider",
+            summary: "Credentials sign-in denied.",
+          });
           return null;
         }
+
+        const dedupeKey = authEventKey("succeeded", user.id);
+        await recordSecurityEventBestEffort({
+          eventType: "authentication.sign_in.succeeded",
+          outcome: "succeeded",
+          actorId: user.id,
+          correlationId: dedupeKey,
+          dedupeKey,
+          subjectType: "user",
+          subjectId: user.id,
+          source: "credentials_provider",
+          summary: "Credentials sign-in succeeded.",
+        });
 
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           role: user.role,
+          authzVersion: user.authzVersion,
         };
       },
     }),
@@ -65,6 +132,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     jwt({ token, user }) {
       if (user) {
         token.role = user.role;
+        token.authzVersion = user.authzVersion;
       }
 
       return token;
@@ -72,7 +140,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     session({ session, token }) {
       if (session.user) {
         session.user.id = token.sub ?? "";
-        session.user.role = (token.role as typeof session.user.role) ?? "read_only";
+        session.user.role = (token.role as typeof session.user.role) ?? "lab_user";
+        session.user.authzVersion = Number(token.authzVersion ?? 0);
       }
 
       return session;

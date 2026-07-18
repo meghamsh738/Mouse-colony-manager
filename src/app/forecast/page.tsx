@@ -1,211 +1,304 @@
 import Link from "next/link";
+import { Filter, RotateCcw } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { AppShell } from "@/components/app/app-shell";
 import { PageHeader } from "@/components/app/page-header";
 import { StatStrip } from "@/components/app/stat-strip";
 import { Surface } from "@/components/app/surface";
-import {
-  getForecastCalloutsView,
-  getForecastSummaryView,
-  getLongRangeDemandCalloutsView,
-  getSurplusMinimizationCalloutsView,
-} from "@/lib/forecast-read";
+import { MobileWorksheetCard, WorksheetShell } from "@/components/app/worksheet-shell";
+import { Badge } from "@/components/ui/badge";
+import { getForecastWorkspaceView, type ForecastFilters, type ForecastWorkspaceView } from "@/lib/forecast-read";
 import { requireUser } from "@/lib/session";
 
-export default async function ForecastPage() {
-  const user = await requireUser();
-  const [summary, rows, surplus, longRange] = await Promise.all([
-    getForecastSummaryView(),
-    getForecastCalloutsView(),
-    getSurplusMinimizationCalloutsView(),
-    getLongRangeDemandCalloutsView(),
-  ]);
+type DemandView = ForecastWorkspaceView["surplus"];
+
+function Field({ label, value, wide = false }: { label: string; value: ReactNode; wide?: boolean }) {
+  return (
+    <div className={wide ? "mobile-worksheet-field mobile-worksheet-field-wide" : "mobile-worksheet-field"}>
+      <dt className="mobile-worksheet-label">{label}</dt>
+      <dd className="mobile-worksheet-value">{value}</dd>
+    </div>
+  );
+}
+
+function DemandWorksheet({ title, view }: { title: string; view: DemandView }) {
+  return (
+    <WorksheetShell
+      eyebrow={`${view.horizonDays} day horizon`}
+      summary={
+        <>
+          <span>{view.demandAnimals} demand</span>
+          <span>{view.projectedUsableSupply} usable supply</span>
+          <span>{view.supplyGap} gap</span>
+        </>
+      }
+      title={title}
+      toolbar={
+        <div className="chip-list">
+          <span className="value-chip">Available {view.availableSupply}</span>
+          <span className="value-chip">Surplus {view.surplusAfterDemand}</span>
+          <span className="value-chip">Projected pups {view.projectedSurplusPups}</span>
+          {view.recommendations.map((recommendation) => (
+            <span className="value-chip" key={recommendation}>
+              {recommendation}
+            </span>
+          ))}
+        </div>
+      }
+    >
+      {view.demandItems.length ? (
+        <>
+          <div className="worksheet-table-wrap hidden md:block">
+            <table className="worksheet-table min-w-[1180px]">
+              <thead>
+                <tr>
+                  <th>Experiment</th>
+                  <th>Project</th>
+                  <th>Lab</th>
+                  <th>Cages</th>
+                  <th>Responsible</th>
+                  <th>Start</th>
+                  <th>Requested</th>
+                  <th>Planned</th>
+                  <th>Reserved</th>
+                  <th>Active</th>
+                  <th>Gap</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.demandItems.map((item) => (
+                  <tr key={item.experimentId}>
+                    <td>
+                      <p className="worksheet-cell-strong">{item.experimentCode}</p>
+                      <p className="worksheet-cell-muted">{item.title}</p>
+                    </td>
+                    <td>{item.projectCode}</td>
+                    <td className="worksheet-cell-muted max-w-[12rem]">{item.labLabel}</td>
+                    <td className="worksheet-cell-muted max-w-[16rem]">{item.cageLabels.join(", ") || "Unassigned"}</td>
+                    <td className="worksheet-cell-muted max-w-[14rem]">{item.responsibleUserNames.join(", ") || "Unassigned"}</td>
+                    <td>{item.startLabel}</td>
+                    <td>{item.requestedAnimals}</td>
+                    <td>{item.plannedAnimals}</td>
+                    <td>{item.reservedAnimals}</td>
+                    <td>{item.activeAnimals}</td>
+                    <td>
+                      <Badge variant={item.supplyGap > 0 ? "warning" : "success"}>{item.supplyGap}</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="worksheet-mobile-list md:hidden">
+            {view.demandItems.map((item) => (
+              <MobileWorksheetCard
+                key={item.experimentId}
+                meta={
+                  <>
+                    <span>{item.projectCode}</span>
+                    <span>{item.startLabel}</span>
+                  </>
+                }
+                title={item.experimentCode}
+              >
+                <dl className="contents">
+                  <Field label="Requested" value={item.requestedAnimals} />
+                  <Field label="Lab" value={item.labLabel} />
+                  <Field label="Cages" value={item.cageLabels.join(", ") || "Unassigned"} wide />
+                  <Field label="Responsible" value={item.responsibleUserNames.join(", ") || "Unassigned"} wide />
+                  <Field label="Planned" value={item.plannedAnimals} />
+                  <Field label="Reserved" value={item.reservedAnimals} />
+                  <Field label="Active" value={item.activeAnimals} />
+                  <Field label="Gap" value={item.supplyGap} />
+                  <Field label="Title" value={item.title} wide />
+                </dl>
+              </MobileWorksheetCard>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="px-4 py-5 text-sm text-[var(--muted)]">No demand rows for this horizon.</p>
+      )}
+    </WorksheetShell>
+  );
+}
+
+function queryValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
+export default async function ForecastPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const user = await requireUser({ capability: "forecast:read" });
+  const query = await searchParams;
+  const filters: ForecastFilters = {
+    labId: queryValue(query.labId),
+    cageId: queryValue(query.cageId),
+    responsibleUserId: queryValue(query.responsibleUserId),
+  };
+  const { longRange, partial, rows, summary, surplus, issues, scope } = await getForecastWorkspaceView(user, filters);
 
   return (
     <AppShell currentPath="/forecast" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
-      <div className="space-y-8">
-        <PageHeader
-          eyebrow="Forecast"
-          title="Projected breeding output and experiment-ready runway."
-          description="This read-only planning surface estimates short-horizon colony supply from active breedings, recent litter performance, configured weaning timing, and available cryostorage backups."
-        />
+      <div className="space-y-5">
+        <PageHeader eyebrow="Forecast" title="Forecast" />
+        <Surface className="p-3 md:p-4">
+          <form className="grid gap-3 md:grid-cols-[minmax(10rem,0.8fr)_minmax(12rem,1.2fr)_minmax(12rem,1.2fr)_auto] md:items-end" method="get">
+            <label className="space-y-1 text-sm">
+              <span className="text-[var(--muted)]">Lab</span>
+              <select className="h-11 w-full rounded-md border border-[var(--line)] bg-white px-3 text-sm" defaultValue={scope.filters.labId} name="labId">
+                {scope.options.labs.length > 1 ? <option value="">All accessible labs</option> : null}
+                {scope.options.labs.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-[var(--muted)]">Responsible user</span>
+              <select className="h-11 w-full rounded-md border border-[var(--line)] bg-white px-3 text-sm" defaultValue={scope.filters.responsibleUserId} name="responsibleUserId">
+                <option value="">All responsible users</option>
+                {scope.options.responsibleUsers.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="text-[var(--muted)]">Cage</span>
+              <select className="h-11 w-full rounded-md border border-[var(--line)] bg-white px-3 text-sm" defaultValue={scope.filters.cageId} name="cageId">
+                <option value="">All accessible cages</option>
+                {scope.options.cages.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button className="action-chip action-chip-primary" type="submit"><Filter aria-hidden="true" size={15} />Apply</button>
+              <Link className="action-chip" href="/forecast"><RotateCcw aria-hidden="true" size={15} />Clear</Link>
+            </div>
+          </form>
+        </Surface>
+        {scope.invalid ? (
+          <Surface className="border-amber-200 bg-amber-50/80 text-sm text-amber-950">
+            The selected forecast scope is unavailable. Clear the filters or choose an accessible lab, user, and cage.
+          </Surface>
+        ) : null}
+        {partial ? (
+          <Surface className="border-amber-200 bg-amber-50/80 text-sm text-amber-950">
+            <p className="font-medium">Some forecast data is temporarily unavailable.</p>
+            <p className="mt-1 text-amber-900">{issues.slice(0, 2).join(" · ")}</p>
+          </Surface>
+        ) : null}
         <StatStrip
           stats={[
-            { label: "Forecast rows", value: summary.activeBreedingForecasts, hint: "Active breedings with forward projections", emphasis: "info" },
-            {
-              label: "Ready supply",
-              value: summary.projectedExperimentReady45Days,
-              hint: "Estimated experiment-ready animals on current trend",
-              emphasis: "success",
-            },
-            { label: "Pending demand", value: summary.pendingDemand45Days, hint: "Planned or reserved demand inside 45 days", emphasis: "warning" },
-            { label: "Supply gap", value: summary.supplyGap45Days, hint: "Demand not covered by current forecast", emphasis: summary.supplyGap45Days ? "danger" : "success" },
+            { label: "Forecast rows", value: summary.activeBreedingForecasts, emphasis: "info" },
+            { label: "Ready supply", value: summary.projectedExperimentReady45Days, emphasis: "success" },
+            { label: "Pending demand", value: summary.pendingDemand45Days, emphasis: "warning" },
+            { label: "Supply gap", value: summary.supplyGap45Days, emphasis: summary.supplyGap45Days ? "danger" : "success" },
             {
               label: `${summary.longRangeHorizonDays}d gap`,
               value: summary.supplyGapLongRangeDays,
-              hint: "Long-range demand not covered by current runway",
               emphasis: summary.supplyGapLongRangeDays ? "danger" : "success",
             },
-            { label: "Surplus pups", value: summary.projectedSurplus45Days, hint: "Projected non-target pups inside 45 days", emphasis: summary.projectedSurplus45Days ? "warning" : "success" },
-            { label: "Cryo backups", value: summary.cryostorageBackups, hint: "Stored or reserved frozen line backups", emphasis: "info" },
+            {
+              label: "Surplus pups",
+              value: summary.projectedSurplus45Days,
+              emphasis: summary.projectedSurplus45Days ? "warning" : "success",
+            },
+            { label: "Cryo backups", value: summary.cryostorageBackups, emphasis: "info" },
           ]}
         />
-        <div className="grid gap-6 xl:grid-cols-[1.12fr_0.88fr]">
-          <Surface className="space-y-4" data-testid="forecast-table">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Breeding outlook</p>
-                <h2 className="mt-2 font-display text-2xl font-semibold tracking-[-0.04em]">Projected supply by active pair</h2>
-              </div>
-              <Link className="text-sm text-[var(--accent)]" href="/breeding">
-                Open breeding
+        <WorksheetShell
+          actions={
+            <>
+              <Link className="action-chip" href="/breeding">
+                Breeding
               </Link>
-            </div>
-            <div className="space-y-3">
-              {rows.map((row) => (
-                <article key={row.id} className="rounded-2xl border border-[var(--line)] p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{row.pairLabel}</p>
-                      <p className="mt-1 text-sm text-[var(--muted)]">{row.targetGenotype}</p>
-                    </div>
-                    <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{row.probabilityLabel}</p>
-                  </div>
-                  <div className="mt-3 grid gap-3 text-sm md:grid-cols-3">
-                    <div>
-                      <p className="text-[var(--muted)]">Next litter</p>
-                      <p className="mt-1 font-medium">{row.nextLitterLabel}</p>
-                    </div>
-                    <div>
-                      <p className="text-[var(--muted)]">Experiment-ready</p>
-                      <p className="mt-1 font-medium">{row.readyLabel}</p>
-                    </div>
-                    <div>
-                      <p className="text-[var(--muted)]">Usable pups</p>
-                      <p className="mt-1 font-medium">
-                        {row.expectedUsablePups} / {row.expectedLitterSize}
-                      </p>
-                    </div>
-                  </div>
-                  <p className="mt-3 text-sm text-[var(--muted)]">
-                    Projected surplus {row.expectedSurplusPups} pups if all pups from this litter are produced.
-                  </p>
-                  <p className="mt-3 text-sm text-[var(--muted)]">{row.lineFertilitySummary}</p>
-                  <p className="mt-3 text-sm text-[var(--muted)]">
-                    Estimated from recent litter size, target genotype token match, and current breeder age state.
-                  </p>
-                  <p className="mt-2 text-sm text-amber-900">{row.warnings[0] ?? "No immediate forecast warning."}</p>
-                </article>
-              ))}
-            </div>
-          </Surface>
-          <div className="space-y-6">
-            <Surface className="space-y-4" data-testid="surplus-minimization">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Surplus minimization</p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                  <p className="text-sm text-[var(--muted)]">Demand in {surplus.horizonDays} days</p>
-                  <p className="mt-1 font-display text-3xl font-semibold tracking-[-0.05em]">{surplus.demandAnimals}</p>
-                </div>
-                <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                  <p className="text-sm text-[var(--muted)]">Supply after demand</p>
-                  <p className="mt-1 font-display text-3xl font-semibold tracking-[-0.05em]">{surplus.surplusAfterDemand}</p>
-                </div>
+              <Link className="action-chip" href="/experiments">
+                Experiments
+              </Link>
+              <Link className="action-chip" href="/cryostorage">
+                Cryostorage
+              </Link>
+            </>
+          }
+          eyebrow="Worksheet"
+          summary={<span>{rows.length} active pair forecasts</span>}
+          title="Breeding outlook"
+        >
+          {rows.length ? (
+            <>
+              <div className="worksheet-table-wrap hidden md:block" data-testid="forecast-table">
+                <table className="worksheet-table min-w-[1320px]">
+                  <thead>
+                    <tr>
+                      <th>Pair</th>
+                      <th>Lab</th>
+                      <th>Cages</th>
+                      <th>Responsible</th>
+                      <th>Target genotype</th>
+                      <th>Chance</th>
+                      <th>Next litter</th>
+                      <th>Ready</th>
+                      <th>Usable</th>
+                      <th>Litter</th>
+                      <th>Surplus</th>
+                      <th>Model</th>
+                      <th>Warning</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row) => (
+                      <tr key={row.id}>
+                        <td className="worksheet-cell-strong">{row.pairLabel}</td>
+                        <td className="worksheet-cell-muted max-w-[12rem]">{row.labLabel}</td>
+                        <td className="worksheet-cell-muted max-w-[16rem]">{row.cageLabels.join(", ") || "Unassigned"}</td>
+                        <td className="worksheet-cell-muted max-w-[14rem]">{row.responsibleUserNames.join(", ") || "Unassigned"}</td>
+                        <td className="worksheet-cell-muted max-w-[16rem]">{row.targetGenotype}</td>
+                        <td>{row.probabilityLabel}</td>
+                        <td>{row.nextLitterLabel}</td>
+                        <td>{row.readyLabel}</td>
+                        <td>{row.expectedUsablePups}</td>
+                        <td>{row.expectedLitterSize}</td>
+                        <td>{row.expectedSurplusPups}</td>
+                        <td className="worksheet-cell-muted max-w-[22rem]">{row.lineFertilitySummary}</td>
+                        <td className="worksheet-cell-muted max-w-[18rem]">{row.warnings[0] ?? "None"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="space-y-2">
-                {surplus.recommendations.map((recommendation) => (
-                  <p key={recommendation} className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] px-4 py-3 text-sm text-[var(--ink)]">
-                    {recommendation}
-                  </p>
+              <div className="worksheet-mobile-list md:hidden">
+                {rows.map((row) => (
+                  <MobileWorksheetCard
+                    key={row.id}
+                    meta={
+                      <>
+                        <span>{row.probabilityLabel}</span>
+                        <span>{row.readyLabel}</span>
+                      </>
+                    }
+                    title={row.pairLabel}
+                  >
+                    <dl className="contents">
+                      <Field label="Target" value={row.targetGenotype} wide />
+                      <Field label="Lab" value={row.labLabel} />
+                      <Field label="Cages" value={row.cageLabels.join(", ") || "Unassigned"} wide />
+                      <Field label="Responsible" value={row.responsibleUserNames.join(", ") || "Unassigned"} wide />
+                      <Field label="Next litter" value={row.nextLitterLabel} />
+                      <Field label="Usable" value={row.expectedUsablePups} />
+                      <Field label="Litter" value={row.expectedLitterSize} />
+                      <Field label="Surplus" value={row.expectedSurplusPups} />
+                      <Field label="Model" value={row.lineFertilitySummary} wide />
+                      <Field label="Warning" value={row.warnings[0] ?? "None"} wide />
+                    </dl>
+                  </MobileWorksheetCard>
                 ))}
               </div>
-              <div className="space-y-3">
-                {surplus.demandItems.map((item) => (
-                  <article key={item.experimentId} className="rounded-2xl border border-[var(--line)] bg-white/70 p-4 text-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium text-[var(--ink)]">{item.experimentCode}</p>
-                        <p className="mt-1 text-[var(--muted)]">
-                          {item.projectCode} · starts {item.startLabel}
-                        </p>
-                      </div>
-                      <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{item.requestedAnimals}</p>
-                    </div>
-                    <p className="mt-3 text-[var(--muted)]">
-                      {item.plannedAnimals} planned · {item.reservedAnimals} reserved · {item.activeAnimals} active · gap {item.supplyGap}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            </Surface>
-            <Surface className="space-y-4" data-testid="long-range-forecast">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Long-range study demand</p>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                  <p className="text-sm text-[var(--muted)]">Demand in {longRange.horizonDays} days</p>
-                  <p className="mt-1 font-display text-3xl font-semibold tracking-[-0.05em]">{longRange.demandAnimals}</p>
-                </div>
-                <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                  <p className="text-sm text-[var(--muted)]">Projected usable supply</p>
-                  <p className="mt-1 font-display text-3xl font-semibold tracking-[-0.05em]">{longRange.projectedUsableSupply}</p>
-                </div>
-                <div className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-                  <p className="text-sm text-[var(--muted)]">Runway gap</p>
-                  <p className="mt-1 font-display text-3xl font-semibold tracking-[-0.05em]">{longRange.supplyGap}</p>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {longRange.demandItems.slice(0, 3).map((item) => (
-                  <article key={item.experimentId} className="rounded-2xl border border-[var(--line)] bg-white/70 p-4 text-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-medium text-[var(--ink)]">{item.experimentCode}</p>
-                        <p className="mt-1 text-[var(--muted)]">
-                          {item.projectCode} · starts {item.startLabel}
-                        </p>
-                      </div>
-                      <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{item.supplyGap}</p>
-                    </div>
-                    <p className="mt-3 text-[var(--muted)]">
-                      {item.requestedAnimals} requested · {item.activeAnimals} already active · long-range gap {item.supplyGap}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            </Surface>
-            <Surface className="space-y-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Interpretation</p>
-              <div className="space-y-3 text-sm leading-7 text-[var(--muted)]">
-                <p>
-                  Use this page to decide whether current active breedings are enough to cover near-term study demand without overproducing surplus animals.
-                </p>
-                <p>
-                  Forecasts are intentionally conservative. They use actual breeding records and current rule timings, but they do not assume perfect fertility or 100% genotype success.
-                </p>
-                <p>
-                  Cryostorage counts are shown here to make recovery options visible when live supply starts to tighten.
-                </p>
-              </div>
-            </Surface>
-            <Surface className="space-y-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Planning links</p>
-              <div className="grid gap-3">
-                <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/breeding">
-                  <p className="font-medium">Adjust active pairings</p>
-                  <p className="mt-1 text-sm text-[var(--muted)]">Open the breeding workspace to start, pause, or review current setups.</p>
-                </Link>
-                <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/experiments">
-                  <p className="font-medium">Check current demand</p>
-                  <p className="mt-1 text-sm text-[var(--muted)]">Review reserved animals and experiment pressure against the projected supply.</p>
-                </Link>
-                <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/cryostorage">
-                  <p className="font-medium">Inspect frozen backups</p>
-                  <p className="mt-1 text-sm text-[var(--muted)]">Check reserve sperm or embryo stock when live colony output is not enough.</p>
-                </Link>
-              </div>
-            </Surface>
-          </div>
-        </div>
+            </>
+          ) : (
+            <p className="px-4 py-5 text-sm text-[var(--muted)]">No active breeding forecast rows.</p>
+          )}
+        </WorksheetShell>
+        <DemandWorksheet title="Surplus minimization" view={surplus} />
+        <DemandWorksheet title="Long-range study demand" view={longRange} />
       </div>
     </AppShell>
   );

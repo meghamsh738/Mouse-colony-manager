@@ -1,10 +1,13 @@
 import { Prisma } from "@prisma/client";
 
 import { getAnimalDetailView, getAnimalListView } from "@/lib/animals-read";
+import { normalizeUserRole, type Capability } from "@/lib/capabilities";
 import { getCageDetailView, getCageListView } from "@/lib/cages-read";
 import { getCryostorageInventoryView } from "@/lib/cryostorage-read";
 import { getExperimentOverviewView } from "@/lib/experiments-read";
 import { parseGenotypeImportCsv } from "@/lib/genotype-import";
+import { getActorLabAccess, labScopedWhere, type LabActor } from "@/lib/lab-access";
+import { parseExternalTransferProvenance } from "@/lib/lifecycle-provenance";
 import { prisma } from "@/lib/prisma";
 import { getRuleSummaryView } from "@/lib/settings-read";
 import { getSampleInventoryView } from "@/lib/samples-read";
@@ -19,6 +22,16 @@ import type {
 
 const defaultListLimit = 100;
 const maxListLimit = 500;
+
+type IntegrationReadActor = LabActor & {
+  canonicalRole?: ReturnType<typeof normalizeUserRole>;
+  capabilities?: readonly Capability[];
+};
+
+function canReadPrivateExperimentData(actor: IntegrationReadActor) {
+  if (actor.capabilities) return actor.capabilities.includes("experiments:full");
+  return (actor.canonicalRole ?? normalizeUserRole(actor.role)) !== "cmu_staff";
+}
 
 export type AnimalApiFilters = {
   search: string;
@@ -89,6 +102,7 @@ export type SampleApiFilters = {
   status: string;
   animalCode: string;
   projectCode: string;
+  experimentCode: string;
   limit: number;
 };
 
@@ -112,6 +126,8 @@ export type CreateSampleApiInput = {
   animalCode?: string;
   projectId?: string;
   projectCode?: string;
+  experimentId?: string;
+  experimentCode?: string;
   sampleLabel: string;
   sampleType: string;
   status: SampleStatus;
@@ -176,6 +192,7 @@ export type CreateCageHealthNoteApiInput = {
 export type CreateExperimentAssignmentApiInput = {
   experimentId?: string;
   experimentCode?: string;
+  expectedExperimentVersion: number;
   startDate: string;
   notes?: string;
   assignments: Array<{
@@ -190,6 +207,8 @@ export type CreateExperimentReservationApiInput = {
   experimentCode?: string;
   animalId?: string;
   animalCode?: string;
+  expectedAnimalVersion: number;
+  expectedExperimentVersion: number;
   startDate: string;
   treatmentGroup?: string;
   notes?: string;
@@ -240,8 +259,11 @@ export type RuleApiReferenceInput = {
 export type ResolvedSampleApiInput = {
   animalCode: string;
   animalId: string;
+  labId: string;
   projectCode: string | null;
   projectId?: string;
+  experimentCode: string | null;
+  experimentId?: string;
 };
 
 export type ResolvedSampleApiRecordReference = {
@@ -250,6 +272,7 @@ export type ResolvedSampleApiRecordReference = {
 };
 
 export type ResolvedCryostorageApiInput = {
+  labId?: string;
   projectCode: string | null;
   projectId?: string;
   strainId: string;
@@ -271,6 +294,7 @@ export type ResolvedGenotypeApiInput = {
 export type ResolvedCageApiInput = {
   cageBarcode: string;
   cageId: string;
+  labId: string;
 };
 
 export type ResolvedCageMoveApiInput = {
@@ -285,6 +309,7 @@ export type ResolvedCageMoveApiInput = {
 export type ResolvedExperimentAssignmentApiInput = {
   experimentCode: string;
   experimentId: string;
+  experimentVersion: number;
   assignments: Array<{
     animalCode: string;
     animalId: string;
@@ -295,8 +320,10 @@ export type ResolvedExperimentAssignmentApiInput = {
 export type ResolvedExperimentReservationApiInput = {
   animalCode: string;
   animalId: string;
+  animalVersion: number;
   experimentCode: string;
   experimentId: string;
+  experimentVersion: number;
   treatmentGroup?: string;
   notes?: string;
 };
@@ -314,6 +341,7 @@ export type ResolvedStrainApiReference = {
 };
 
 export type ResolvedProjectApiReference = {
+  labId: string;
   projectId: string;
   projectCode: string;
 };
@@ -327,6 +355,9 @@ export type ResolvedProjectOwnerApiReference = {
 export type ResolvedExperimentApiReference = {
   experimentCode: string;
   experimentId: string;
+  version: number;
+  labId: string;
+  projectId: string;
 };
 
 export type ResolvedRuleApiReference = {
@@ -414,6 +445,7 @@ export function parseSampleApiFilters(searchParams: URLSearchParams): SampleApiF
     status: normalizeText(searchParams.get("status")) || "all",
     animalCode: normalizeText(searchParams.get("animalCode")),
     projectCode: normalizeText(searchParams.get("projectCode")),
+    experimentCode: normalizeText(searchParams.get("experimentCode")),
     limit: parseLimit(searchParams.get("limit")),
   };
 }
@@ -437,8 +469,58 @@ export function parseRuleApiFilters(searchParams: URLSearchParams): RuleApiFilte
   };
 }
 
-export async function getAnimalApiList(filters: AnimalApiFilters) {
-  const animals = await getAnimalListView();
+export async function getAnimalApiList(filters: AnimalApiFilters, actor: IntegrationReadActor) {
+  const animalView = await getAnimalListView(actor);
+  const includeExperiments = canReadPrivateExperimentData(actor);
+  const consistencyRows = await prisma.animal.findMany({
+    where: { id: { in: animalView.map((animal) => animal.id) } },
+    select: {
+      id: true,
+      owningLabId: true,
+      version: true,
+      projectAllocations: {
+        where: { endedAt: null },
+        select: { project: { select: { labId: true, projectCode: true } } },
+      },
+    },
+  });
+  const experimentRows = includeExperiments && animalView.length
+    ? await prisma.experimentAssignment.findMany({
+        where: { animalId: { in: animalView.map((animal) => animal.id) } },
+        select: {
+          animalId: true,
+          animal: { select: { owningLabId: true } },
+          experiment: { select: { labId: true, experimentCode: true } },
+        },
+      })
+    : [];
+  const experimentCodesByAnimalId = new Map<string, string[]>();
+  for (const assignment of experimentRows) {
+    if (assignment.experiment.labId !== assignment.animal.owningLabId) continue;
+    experimentCodesByAnimalId.set(assignment.animalId, [
+      ...(experimentCodesByAnimalId.get(assignment.animalId) ?? []),
+      assignment.experiment.experimentCode,
+    ]);
+  }
+  const relationshipsByAnimalId = new Map(
+    consistencyRows.map((animal) => [
+      animal.id,
+      {
+        projectCodes: animal.projectAllocations
+          .filter((allocation) => allocation.project.labId === animal.owningLabId)
+          .map((allocation) => allocation.project.projectCode),
+        experimentCodes: experimentCodesByAnimalId.get(animal.id) ?? [],
+      },
+    ]),
+  );
+  const animals = animalView.map((animal) => {
+    const relationships = relationshipsByAnimalId.get(animal.id);
+    return {
+      ...animal,
+      projectCodes: relationships?.projectCodes ?? [],
+      experimentSummary: relationships?.experimentCodes.join(", ") || "None",
+    };
+  });
   const search = normalizeSearch(filters.search);
   const strain = normalizeSearch(filters.strain);
   const projectCode = normalizeSearch(filters.projectCode);
@@ -482,8 +564,67 @@ export async function getAnimalApiList(filters: AnimalApiFilters) {
   };
 }
 
-export async function getCageApiList(filters: CageApiFilters) {
-  const cages = await getCageListView();
+export async function getCageApiList(filters: CageApiFilters, actor: LabActor) {
+  const cageView = await getCageListView(actor);
+  const consistencyRows = await prisma.cage.findMany({
+    where: { id: { in: cageView.map((cage) => cage.id) } },
+    select: {
+      id: true,
+      labId: true,
+      animals: {
+        where: { outcomeStatus: "alive" },
+        select: {
+          animalId: true,
+          labId: true,
+          owningLabId: true,
+          sex: true,
+          strain: { select: { name: true } },
+          projectAllocations: {
+            where: { endedAt: null },
+            select: { project: { select: { labId: true, projectCode: true } } },
+          },
+        },
+      },
+    },
+  });
+  const relationshipsByCageId = new Map(
+    consistencyRows.map((cage) => {
+      const animals = cage.animals.filter((animal) => animal.owningLabId === cage.labId);
+      return [cage.id, { labId: cage.labId, animals }] as const;
+    }),
+  );
+  const cages = cageView.map((cage) => {
+    const relationship = relationshipsByCageId.get(cage.id);
+    const animals = relationship?.animals ?? [];
+    const sexCounts = animals.reduce<Record<string, number>>((counts, animal) => {
+      counts[animal.sex] = (counts[animal.sex] ?? 0) + 1;
+      return counts;
+    }, {});
+    const projectCodes = Array.from(
+      new Set(
+        animals.flatMap((animal) =>
+          animal.projectAllocations
+            .filter((allocation) => allocation.project.labId === relationship?.labId)
+            .map((allocation) => allocation.project.projectCode),
+        ),
+      ),
+    );
+
+    return {
+      ...cage,
+      occupantCount: animals.length,
+      remainingCapacity: Math.max(0, cage.capacity - animals.length),
+      animalIdentifiers: animals.map((animal) => animal.animalId),
+      animalLabIdentifiers: animals.map((animal) => animal.labId),
+      sexComposition: animals.length
+        ? Object.entries(sexCounts)
+            .map(([sex, count]) => `${count}${sex === "male" ? "M" : sex === "female" ? "F" : "U"}`)
+            .join(" / ")
+        : "Empty",
+      strainSummary: Array.from(new Set(animals.map((animal) => animal.strain.name))).join(", ") || "No active occupants",
+      projectSummary: projectCodes.join(", ") || "Unallocated",
+    };
+  });
   const search = normalizeSearch(filters.search);
   const room = normalizeSearch(filters.room);
   const rack = normalizeSearch(filters.rack);
@@ -514,8 +655,35 @@ export async function getCageApiList(filters: CageApiFilters) {
   };
 }
 
-export async function getExperimentApiList(filters: ExperimentApiFilters) {
-  const experiments = await getExperimentOverviewView();
+export async function getExperimentApiList(filters: ExperimentApiFilters, actor: LabActor) {
+  const experimentView = await getExperimentOverviewView(actor);
+  const consistencyRows = await prisma.experiment.findMany({
+    where: { id: { in: experimentView.map((experiment) => experiment.id) } },
+    select: {
+      id: true,
+      labId: true,
+      project: { select: { labId: true } },
+      assignments: { select: { id: true, animal: { select: { owningLabId: true } } } },
+    },
+  });
+  const consistentExperimentIds = new Set(
+    consistencyRows
+      .filter((experiment) => experiment.project.labId === experiment.labId)
+      .map((experiment) => experiment.id),
+  );
+  const consistentAssignmentIds = new Set(
+    consistencyRows.flatMap((experiment) =>
+      experiment.assignments
+        .filter((assignment) => assignment.animal.owningLabId === experiment.labId)
+        .map((assignment) => assignment.id),
+    ),
+  );
+  const experiments = experimentView
+    .filter((experiment) => consistentExperimentIds.has(experiment.id))
+    .map((experiment) => ({
+      ...experiment,
+      assignments: experiment.assignments.filter((assignment) => consistentAssignmentIds.has(assignment.id)),
+    }));
   const search = normalizeSearch(filters.search);
   const projectCode = normalizeSearch(filters.projectCode);
 
@@ -543,6 +711,7 @@ export async function getExperimentApiList(filters: ExperimentApiFilters) {
 
 const projectApiSelect = {
   id: true,
+  labId: true,
   projectCode: true,
   title: true,
   notes: true,
@@ -560,11 +729,13 @@ const projectApiSelect = {
     },
     select: {
       id: true,
+      animal: { select: { owningLabId: true } },
     },
   },
   experiments: {
     select: {
       id: true,
+      labId: true,
       status: true,
     },
   },
@@ -573,40 +744,50 @@ const projectApiSelect = {
 type ProjectApiRecordSource = Prisma.ProjectGetPayload<{ select: typeof projectApiSelect }>;
 
 function buildProjectApiRecord(project: ProjectApiRecordSource) {
+  const labAllocations = project.animalAllocations.filter(
+    (allocation) => allocation.animal.owningLabId === project.labId,
+  );
+  const labExperiments = project.experiments.filter((experiment) => experiment.labId === project.labId);
+
   return {
     id: project.id,
+    labId: project.labId,
     projectCode: project.projectCode,
     title: project.title,
     notes: project.notes,
     ownerId: project.ownerId,
     ownerName: project.owner.name ?? project.owner.email,
     ownerEmail: project.owner.email,
-    activeAnimalAllocations: project.animalAllocations.length,
-    experimentCount: project.experiments.length,
-    activeExperimentCount: project.experiments.filter((experiment) => experiment.status === "active").length,
+    activeAnimalAllocations: labAllocations.length,
+    experimentCount: labExperiments.length,
+    activeExperimentCount: labExperiments.filter((experiment) => experiment.status === "active").length,
   };
 }
 
-export async function getProjectApiRecordById(projectId: string) {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
+export async function getProjectApiRecordById(projectId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, ...labScopedWhere(access) },
     select: projectApiSelect,
   });
 
   return project ? buildProjectApiRecord(project) : null;
 }
 
-export async function getProjectApiRecordByCode(projectCode: string) {
-  const project = await prisma.project.findUnique({
-    where: { projectCode },
+export async function getProjectApiRecordByCode(projectCode: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const project = await prisma.project.findFirst({
+    where: { projectCode, ...labScopedWhere(access) },
     select: projectApiSelect,
   });
 
   return project ? buildProjectApiRecord(project) : null;
 }
 
-export async function getProjectApiList(filters: ProjectApiFilters) {
+export async function getProjectApiList(filters: ProjectApiFilters, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
   const projects = await prisma.project.findMany({
+    where: labScopedWhere(access),
     orderBy: { projectCode: "asc" },
     select: projectApiSelect,
   });
@@ -638,11 +819,32 @@ export async function getProjectApiList(filters: ProjectApiFilters) {
   };
 }
 
-export async function getSampleApiList(filters: SampleApiFilters) {
-  const samples = await getSampleInventoryView();
+export async function getSampleApiList(filters: SampleApiFilters, actor: LabActor) {
+  const sampleView = await getSampleInventoryView(actor);
+  const consistencyRows = await prisma.sampleRecord.findMany({
+    where: { id: { in: sampleView.map((sample) => sample.id) } },
+    select: {
+      id: true,
+      labId: true,
+      animal: { select: { owningLabId: true } },
+      project: { select: { labId: true } },
+      experiment: { select: { labId: true } },
+    },
+  });
+  const consistentSampleIds = new Set(
+    consistencyRows
+      .filter(
+        (sample) =>
+          (!sample.project || sample.project.labId === sample.labId) &&
+          (!sample.experiment || sample.experiment.labId === sample.labId),
+      )
+      .map((sample) => sample.id),
+  );
+  const samples = sampleView.filter((sample) => consistentSampleIds.has(sample.id));
   const search = normalizeSearch(filters.search);
   const animalCode = normalizeSearch(filters.animalCode);
   const projectCode = normalizeSearch(filters.projectCode);
+  const experimentCode = normalizeSearch(filters.experimentCode);
 
   const filtered = samples.filter((sample) => {
     const matchesSearch = search
@@ -653,6 +855,7 @@ export async function getSampleApiList(filters: SampleApiFilters) {
           sample.animalCode,
           sample.labId,
           sample.projectCode,
+          sample.experimentCode,
           sample.storageLocation,
           sample.quantityLabel,
           sample.notes,
@@ -661,8 +864,9 @@ export async function getSampleApiList(filters: SampleApiFilters) {
     const matchesStatus = filters.status !== "all" ? sample.status === filters.status : true;
     const matchesAnimal = animalCode ? sample.animalCode.toLowerCase().includes(animalCode) : true;
     const matchesProject = projectCode ? sample.projectCode?.toLowerCase().includes(projectCode) : true;
+    const matchesExperiment = experimentCode ? sample.experimentCode?.toLowerCase().includes(experimentCode) : true;
 
-    return matchesSearch && matchesStatus && matchesAnimal && matchesProject;
+    return matchesSearch && matchesStatus && matchesAnimal && matchesProject && matchesExperiment;
   });
 
   return {
@@ -671,8 +875,18 @@ export async function getSampleApiList(filters: SampleApiFilters) {
   };
 }
 
-export async function getCryostorageApiList(filters: CryostorageApiFilters) {
-  const records = await getCryostorageInventoryView();
+export async function getCryostorageApiList(filters: CryostorageApiFilters, actor: LabActor) {
+  const recordView = await getCryostorageInventoryView(actor);
+  const consistencyRows = await prisma.cryostorageRecord.findMany({
+    where: { id: { in: recordView.map((record) => record.id) } },
+    select: { id: true, labId: true, project: { select: { labId: true } } },
+  });
+  const consistentRecordIds = new Set(
+    consistencyRows
+      .filter((record) => !record.project || record.project.labId === record.labId)
+      .map((record) => record.id),
+  );
+  const records = recordView.filter((record) => consistentRecordIds.has(record.id));
   const search = normalizeSearch(filters.search);
   const strain = normalizeSearch(filters.strain);
   const projectCode = normalizeSearch(filters.projectCode);
@@ -704,7 +918,8 @@ export async function getCryostorageApiList(filters: CryostorageApiFilters) {
   };
 }
 
-export async function getRuleApiList(filters: RuleApiFilters) {
+export async function getRuleApiList(filters: RuleApiFilters, actor: LabActor) {
+  void actor;
   const rules = await getRuleSummaryView();
   const search = normalizeSearch(filters.search);
   const category = normalizeSearch(filters.category);
@@ -733,17 +948,53 @@ export async function getRuleApiList(filters: RuleApiFilters) {
   };
 }
 
-export async function getAnimalApiDetail(animalId: string) {
-  return getAnimalDetailView(animalId);
+export async function getAnimalApiDetail(animalId: string, actor: LabActor) {
+  const record = await getAnimalApiRecordById(animalId, actor);
+
+  if (!record) {
+    return null;
+  }
+
+  const [detail, experiments, projects] = await Promise.all([
+    getAnimalDetailView(animalId, actor),
+    prisma.experiment.findMany({
+      where: { labId: record.animal.owningLabId },
+      select: { id: true },
+    }),
+    prisma.project.findMany({
+      where: { labId: record.animal.owningLabId },
+      select: { id: true },
+    }),
+  ]);
+
+  if (!detail) {
+    return null;
+  }
+
+  const experimentIds = new Set(experiments.map((experiment) => experiment.id));
+  const projectIds = new Set(projects.map((project) => project.id));
+
+  return {
+    ...detail,
+    experimentOptions: detail.experimentOptions.filter((experiment) => experimentIds.has(experiment.id)),
+    projectOptions: detail.projectOptions.filter((project) => projectIds.has(project.id)),
+    defaultSampleProjectId:
+      detail.defaultSampleProjectId && projectIds.has(detail.defaultSampleProjectId)
+        ? detail.defaultSampleProjectId
+        : null,
+  };
 }
 
-export async function getAnimalApiRecordById(animalId: string) {
-  const animal = await prisma.animal.findUnique({
-    where: { id: animalId },
+export async function getAnimalApiRecordById(animalId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const animal = await prisma.animal.findFirst({
+    where: { id: animalId, ...labScopedWhere(access, "owningLabId") },
     select: {
       id: true,
       animalId: true,
       labId: true,
+      owningLabId: true,
+      version: true,
       status: true,
       dob: true,
       outcomeStatus: true,
@@ -752,6 +1003,7 @@ export async function getAnimalApiRecordById(animalId: string) {
       deathReason: true,
       currentCage: {
         select: {
+          labId: true,
           cageNumber: true,
           room: {
             select: {
@@ -781,10 +1033,24 @@ export async function getAnimalApiRecordById(animalId: string) {
           project: {
             select: {
               projectCode: true,
+              labId: true,
             },
           },
         },
       },
+      experimentAssignments: {
+        select: {
+          experiment: { select: { labId: true } },
+        },
+      },
+      sampleRecords: {
+        select: {
+          labId: true,
+          project: { select: { labId: true } },
+        },
+      },
+      genotypingRecords: { select: { labId: true } },
+      healthNotes: { select: { labId: true } },
     },
   });
 
@@ -792,21 +1058,52 @@ export async function getAnimalApiRecordById(animalId: string) {
     return null;
   }
 
+  if (
+    animal.projectAllocations.some((allocation) => allocation.project.labId !== animal.owningLabId) ||
+    animal.experimentAssignments.some((assignment) => assignment.experiment.labId !== animal.owningLabId) ||
+    animal.sampleRecords.some(
+      (sample) =>
+        sample.labId !== animal.owningLabId ||
+        (sample.project && sample.project.labId !== animal.owningLabId),
+    ) ||
+    animal.genotypingRecords.some((record) => record.labId !== animal.owningLabId) ||
+    animal.healthNotes.some((note) => note.labId !== animal.owningLabId) ||
+    (animal.currentCage && animal.currentCage.labId !== animal.owningLabId)
+  ) {
+    return null;
+  }
+
+  const externalTransfer = animal.outcomeStatus === "transferred"
+    ? parseExternalTransferProvenance((await prisma.auditLog.findFirst({
+        where: {
+          entityType: "animal",
+          entityId: animal.id,
+          action: "lifecycle_update",
+          newValue: { path: ["status"], equals: "transferred_out" },
+        },
+        orderBy: [{ timestamp: "desc" }, { id: "desc" }],
+        select: { newValue: true },
+      }))?.newValue)
+    : null;
+
   return {
     animal: {
       id: animal.id,
       animalId: animal.animalId,
       labId: animal.labId,
+      owningLabId: animal.owningLabId,
+      version: animal.version,
       status: animal.status,
       dob: animal.dob.toISOString(),
       outcomeStatus: animal.outcomeStatus,
       experimentalStatus: animal.experimentalStatus,
       deathDate: animal.deathDate?.toISOString() ?? null,
       deathReason: animal.deathReason ?? null,
+      externalTransfer,
     },
     cageLabel: animal.currentCage
       ? `${animal.currentCage.room.roomNumber} / ${animal.currentCage.rack.rackNumber} / ${animal.currentCage.cageNumber}`
-      : "Archived",
+      : animal.status === "archived" ? "Archived" : "Not in cage",
     strainName: animal.strain.name,
     projectCodes: animal.projectAllocations.map((allocation) => allocation.project.projectCode),
   };
@@ -818,9 +1115,11 @@ export async function getExistingAnimalApiRecord(input: {
   cageId: string;
   strainId: string;
   projectId?: string;
-}) {
+}, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
   const animal = await prisma.animal.findFirst({
     where: {
+      ...labScopedWhere(access, "owningLabId"),
       animalId: input.animalCode.trim(),
       labId: input.labId.trim(),
       currentCageId: input.cageId,
@@ -853,22 +1152,34 @@ export async function getExistingAnimalApiRecord(input: {
     return null;
   }
 
-  return getAnimalApiRecordById(animal.id);
+  return getAnimalApiRecordById(animal.id, actor);
 }
 
-export async function getCageApiDetail(cageId: string) {
-  return getCageDetailView(cageId);
+export async function getCageApiDetail(cageId: string, actor: LabActor) {
+  if (!(await getCageApiRecordById(cageId, actor))) {
+    return null;
+  }
+
+  return getCageDetailView(cageId, actor);
 }
 
-export async function getCageApiRecordById(cageId: string) {
-  const cage = await prisma.cage.findUnique({
-    where: { id: cageId },
+export async function getCageApiRecordById(cageId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const cage = await prisma.cage.findFirst({
+    where: { id: cageId, ...labScopedWhere(access) },
     select: {
       id: true,
+      labId: true,
       barcode: true,
       status: true,
       cageNumber: true,
       lastUpdatedAt: true,
+      animals: {
+        where: { outcomeStatus: "alive" },
+        select: {
+          owningLabId: true,
+        },
+      },
       room: {
         select: {
           roomNumber: true,
@@ -886,8 +1197,13 @@ export async function getCageApiRecordById(cageId: string) {
     return null;
   }
 
+  if (cage.animals.some((animal) => animal.owningLabId !== cage.labId)) {
+    return null;
+  }
+
   return {
     id: cage.id,
+    labId: cage.labId,
     cageBarcode: cage.barcode,
     status: cage.status,
     cageNumber: cage.cageNumber,
@@ -901,7 +1217,7 @@ export async function getCageApiRecordById(cageId: string) {
 export async function resolveCageByApiReference(input: {
   cageId?: string;
   cageBarcode?: string;
-}): Promise<
+}, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedCageApiInput;
@@ -919,18 +1235,30 @@ export async function resolveCageByApiReference(input: {
     return { ok: false, message: "Provide cageId or cageBarcode.", status: 400 };
   }
 
-  const cage = await prisma.cage.findFirst({
-    where: {
-      OR: [
-        ...(cageRef ? [{ id: cageRef }, { barcode: cageRef }] : []),
-        ...(cageBarcode ? [{ barcode: cageBarcode }] : []),
-      ],
-    },
-    select: {
-      id: true,
-      barcode: true,
-    },
-  });
+  const access = await getActorLabAccess(actor);
+  const select = { id: true, facilityCageId: true, barcode: true, labId: true } as const;
+  const directReferences = [
+    ...(cageRef ? [{ id: cageRef }, { facilityCageId: cageRef }, { barcode: cageRef }] : []),
+    ...(cageBarcode ? [{ facilityCageId: cageBarcode }, { barcode: cageBarcode }] : []),
+  ];
+  let cage = null;
+  for (const reference of directReferences) {
+    cage = await prisma.cage.findFirst({ where: { ...labScopedWhere(access), ...reference }, select });
+    if (cage) break;
+  }
+
+  if (!cage) {
+    const aliases = [...new Set([cageRef, cageBarcode].filter((value): value is string => Boolean(value)))];
+    for (const reference of aliases) {
+      const alias = await prisma.legacyIdentifierAlias.findUnique({
+        where: { entityType_alias: { entityType: "cage", alias: reference } },
+        select: { entityId: true },
+      });
+      if (!alias) continue;
+      cage = await prisma.cage.findFirst({ where: { id: alias.entityId, ...labScopedWhere(access) }, select });
+      if (cage) break;
+    }
+  }
 
   if (!cage) {
     return { ok: false, message: "Cage not found for the supplied cageId or cageBarcode.", status: 404 };
@@ -941,11 +1269,12 @@ export async function resolveCageByApiReference(input: {
     value: {
       cageBarcode: cage.barcode,
       cageId: cage.id,
+      labId: cage.labId,
     },
   };
 }
 
-export async function resolveCageMoveApiInput(input: MoveCageApiInput): Promise<
+export async function resolveCageMoveApiInput(input: MoveCageApiInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedCageMoveApiInput;
@@ -956,7 +1285,7 @@ export async function resolveCageMoveApiInput(input: MoveCageApiInput): Promise<
       status: number;
     }
 > {
-  const cage = await resolveCageByApiReference(input);
+  const cage = await resolveCageByApiReference(input, actor);
 
   if (!cage.ok) {
     return cage;
@@ -1026,13 +1355,15 @@ export async function resolveCageMoveApiInput(input: MoveCageApiInput): Promise<
 export async function resolveAnimalByApiReference(input: {
   animalId?: string;
   animalCode?: string;
-}): Promise<
+}, actor: LabActor): Promise<
   | {
       ok: true;
       value: {
         animalCode: string;
         animalId: string;
         labId: string;
+        owningLabId: string;
+        version: number;
       };
     }
   | {
@@ -1048,19 +1379,36 @@ export async function resolveAnimalByApiReference(input: {
     return { ok: false, message: "Provide animalId or animalCode.", status: 400 };
   }
 
-  const animal = await prisma.animal.findFirst({
-    where: {
-      OR: [
-        ...(animalRef ? [{ id: animalRef }, { animalId: animalRef }] : []),
-        ...(animalCode ? [{ animalId: animalCode }, { labId: animalCode }] : []),
-      ],
-    },
-    select: {
-      id: true,
-      animalId: true,
-      labId: true,
-    },
-  });
+  const access = await getActorLabAccess(actor);
+  const select = { id: true, facilityAnimalId: true, animalId: true, labId: true, owningLabId: true, version: true } as const;
+  const directReferences = [
+    ...(animalRef ? [{ id: animalRef }, { facilityAnimalId: animalRef }, { animalId: animalRef }] : []),
+    ...(animalCode ? [{ facilityAnimalId: animalCode }, { animalId: animalCode }, { labId: animalCode }] : []),
+  ];
+  let animal = null;
+  for (const reference of directReferences) {
+    animal = await prisma.animal.findFirst({
+      where: { ...labScopedWhere(access, "owningLabId"), ...reference },
+      select,
+    });
+    if (animal) break;
+  }
+
+  if (!animal) {
+    const aliases = [...new Set([animalRef, animalCode].filter((value): value is string => Boolean(value)))];
+    for (const reference of aliases) {
+      const alias = await prisma.legacyIdentifierAlias.findUnique({
+        where: { entityType_alias: { entityType: "animal", alias: reference } },
+        select: { entityId: true },
+      });
+      if (!alias) continue;
+      animal = await prisma.animal.findFirst({
+        where: { id: alias.entityId, ...labScopedWhere(access, "owningLabId") },
+        select,
+      });
+      if (animal) break;
+    }
+  }
 
   if (!animal) {
     return { ok: false, message: "Animal not found for the supplied animalId or animalCode.", status: 404 };
@@ -1072,6 +1420,8 @@ export async function resolveAnimalByApiReference(input: {
       animalCode: animal.animalId,
       animalId: animal.id,
       labId: animal.labId,
+      owningLabId: animal.owningLabId,
+      version: animal.version,
     },
   };
 }
@@ -1079,7 +1429,7 @@ export async function resolveAnimalByApiReference(input: {
 export async function resolveStrainByApiReference(input: {
   strainId?: string;
   strainName?: string;
-}): Promise<
+}, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedStrainApiReference;
@@ -1090,6 +1440,7 @@ export async function resolveStrainByApiReference(input: {
       status: number;
     }
 > {
+  void actor;
   const strainRef = input.strainId?.trim();
   const strainName = input.strainName?.trim();
 
@@ -1126,7 +1477,7 @@ export async function resolveStrainByApiReference(input: {
 export async function resolveProjectByApiReference(input: {
   projectId?: string;
   projectCode?: string;
-}): Promise<
+}, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedProjectApiReference;
@@ -1144,8 +1495,10 @@ export async function resolveProjectByApiReference(input: {
     return { ok: false, message: "Provide projectId or projectCode.", status: 400 };
   }
 
+  const access = await getActorLabAccess(actor);
   const project = await prisma.project.findFirst({
     where: {
+      ...labScopedWhere(access),
       OR: [
         ...(projectRef ? [{ id: projectRef }, { projectCode: projectRef }] : []),
         ...(projectCode ? [{ projectCode }] : []),
@@ -1153,6 +1506,7 @@ export async function resolveProjectByApiReference(input: {
     },
     select: {
       id: true,
+      labId: true,
       projectCode: true,
     },
   });
@@ -1166,6 +1520,7 @@ export async function resolveProjectByApiReference(input: {
     value: {
       projectId: project.id,
       projectCode: project.projectCode,
+      labId: project.labId,
     },
   };
 }
@@ -1173,6 +1528,7 @@ export async function resolveProjectByApiReference(input: {
 export async function resolveProjectOwnerByApiReference(
   input: ProjectOwnerApiReferenceInput,
   fallbackOwnerId: string,
+  actor: LabActor,
 ): Promise<
   | {
       ok: true;
@@ -1184,19 +1540,25 @@ export async function resolveProjectOwnerByApiReference(
       status: number;
     }
 > {
+  const access = await getActorLabAccess(actor);
   const ownerId = input.ownerId?.trim();
   const ownerEmail = input.ownerEmail?.trim();
   const suppliedOwnerReference = ownerId || ownerEmail;
 
   const owner = await prisma.user.findFirst({
-    where: suppliedOwnerReference
-      ? {
-          OR: [
-            ...(ownerId ? [{ id: ownerId }] : []),
-            ...(ownerEmail ? [{ email: ownerEmail }] : []),
-          ],
-        }
-      : { id: fallbackOwnerId },
+    where: {
+      ...(suppliedOwnerReference
+        ? {
+            OR: [
+              ...(ownerId ? [{ id: ownerId }] : []),
+              ...(ownerEmail ? [{ email: ownerEmail }] : []),
+            ],
+          }
+        : { id: fallbackOwnerId }),
+      ...(access.canViewAll
+        ? {}
+        : { labMemberships: { some: { active: true, labId: { in: access.memberLabIds }, lab: { active: true } } } }),
+    },
     select: {
       id: true,
       email: true,
@@ -1218,7 +1580,7 @@ export async function resolveProjectOwnerByApiReference(
   };
 }
 
-export async function resolveSampleApiInput(input: CreateSampleApiInput): Promise<
+export async function resolveSampleApiInput(input: CreateSampleApiInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedSampleApiInput;
@@ -1231,7 +1593,9 @@ export async function resolveSampleApiInput(input: CreateSampleApiInput): Promis
 > {
   const projectRef = input.projectId?.trim();
   const projectCode = input.projectCode?.trim();
-  const animal = await resolveAnimalByApiReference(input);
+  const experimentRef = input.experimentId?.trim();
+  const experimentCode = input.experimentCode?.trim();
+  const animal = await resolveAnimalByApiReference(input, actor);
 
   if (!animal.ok) {
     return animal;
@@ -1239,22 +1603,28 @@ export async function resolveSampleApiInput(input: CreateSampleApiInput): Promis
 
   const project =
     projectRef || projectCode
-      ? await prisma.project.findFirst({
-          where: {
-            OR: [
-              ...(projectRef ? [{ id: projectRef }, { projectCode: projectRef }] : []),
-              ...(projectCode ? [{ projectCode }] : []),
-            ],
-          },
-          select: {
-            id: true,
-            projectCode: true,
-          },
-        })
+      ? await resolveProjectByApiReference(input, actor)
       : null;
+  const experiment = experimentRef || experimentCode
+    ? await resolveExperimentApiReference(input, actor)
+    : null;
 
-  if ((projectRef || projectCode) && !project) {
+  if (project && !project.ok) {
+    return project;
+  }
+
+  if (experiment && !experiment.ok) {
+    return experiment;
+  }
+
+  if (project?.ok && project.value.labId !== animal.value.owningLabId) {
     return { ok: false, message: "Project not found for the supplied projectId or projectCode.", status: 404 };
+  }
+  if (experiment?.ok && experiment.value.labId !== animal.value.owningLabId) {
+    return { ok: false, message: "Experiment not found for the supplied experimentId or experimentCode.", status: 404 };
+  }
+  if (project?.ok && experiment?.ok && project.value.projectId !== experiment.value.projectId) {
+    return { ok: false, message: "The selected project and experiment must match.", status: 400 };
   }
 
   return {
@@ -1262,13 +1632,16 @@ export async function resolveSampleApiInput(input: CreateSampleApiInput): Promis
     value: {
       animalCode: animal.value.animalCode,
       animalId: animal.value.animalId,
-      projectCode: project?.projectCode ?? null,
-      projectId: project?.id,
+      labId: animal.value.owningLabId,
+      projectCode: project?.ok ? project.value.projectCode : null,
+      projectId: project?.ok ? project.value.projectId : experiment?.ok ? experiment.value.projectId : undefined,
+      experimentCode: experiment?.ok ? experiment.value.experimentCode : null,
+      experimentId: experiment?.ok ? experiment.value.experimentId : undefined,
     },
   };
 }
 
-export async function resolveCryostorageApiInput(input: CreateCryostorageApiInput): Promise<
+export async function resolveCryostorageApiInput(input: CreateCryostorageApiInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedCryostorageApiInput;
@@ -1281,7 +1654,7 @@ export async function resolveCryostorageApiInput(input: CreateCryostorageApiInpu
 > {
   const projectRef = input.projectId?.trim();
   const projectCode = input.projectCode?.trim();
-  const strain = await resolveStrainByApiReference(input);
+  const strain = await resolveStrainByApiReference(input, actor);
 
   if (!strain.ok) {
     return strain;
@@ -1289,36 +1662,26 @@ export async function resolveCryostorageApiInput(input: CreateCryostorageApiInpu
 
   const project =
     projectRef || projectCode
-      ? await prisma.project.findFirst({
-          where: {
-            OR: [
-              ...(projectRef ? [{ id: projectRef }, { projectCode: projectRef }] : []),
-              ...(projectCode ? [{ projectCode }] : []),
-            ],
-          },
-          select: {
-            id: true,
-            projectCode: true,
-          },
-        })
+      ? await resolveProjectByApiReference(input, actor)
       : null;
 
-  if ((projectRef || projectCode) && !project) {
-    return { ok: false, message: "Project not found for the supplied projectId or projectCode.", status: 404 };
+  if (project && !project.ok) {
+    return project;
   }
 
   return {
     ok: true,
     value: {
-      projectCode: project?.projectCode ?? null,
-      projectId: project?.id,
+      labId: project?.ok ? project.value.labId : actor.activeLabId ?? undefined,
+      projectCode: project?.ok ? project.value.projectCode : null,
+      projectId: project?.ok ? project.value.projectId : undefined,
       strainId: strain.value.strainId,
       strainName: strain.value.strainName,
     },
   };
 }
 
-export async function resolveGenotypeApiInput(input: CreateGenotypeApiInput): Promise<
+export async function resolveGenotypeApiInput(input: CreateGenotypeApiInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedGenotypeApiInput;
@@ -1329,7 +1692,7 @@ export async function resolveGenotypeApiInput(input: CreateGenotypeApiInput): Pr
       status: number;
     }
 > {
-  const animal = await resolveAnimalByApiReference(input);
+  const animal = await resolveAnimalByApiReference(input, actor);
   const alleleRef = input.alleleId?.trim();
   const marker = input.marker?.trim();
 
@@ -1369,7 +1732,7 @@ export async function resolveGenotypeApiInput(input: CreateGenotypeApiInput): Pr
   };
 }
 
-export async function resolveExperimentAssignmentApiInput(input: CreateExperimentAssignmentApiInput): Promise<
+export async function resolveExperimentAssignmentApiInput(input: CreateExperimentAssignmentApiInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedExperimentAssignmentApiInput;
@@ -1380,7 +1743,7 @@ export async function resolveExperimentAssignmentApiInput(input: CreateExperimen
       status: number;
     }
 > {
-  const experiment = await resolveExperimentApiReference(input);
+  const experiment = await resolveExperimentApiReference(input, actor);
 
   if (!experiment.ok) {
     return experiment;
@@ -1394,14 +1757,18 @@ export async function resolveExperimentAssignmentApiInput(input: CreateExperimen
   const seenAnimalIds = new Set<string>();
 
   for (const assignment of input.assignments) {
-    const animal = await resolveAnimalByApiReference(assignment);
+    const animal = await resolveAnimalByApiReference(assignment, actor);
 
     if (!animal.ok) {
       return animal;
     }
 
+    if (animal.value.owningLabId !== experiment.value.labId) {
+      return { ok: false, message: "Animal not found for the supplied animalId or animalCode.", status: 404 };
+    }
+
     if (seenAnimalIds.has(animal.value.animalId)) {
-      continue;
+      return { ok: false, message: "Duplicate animals are not allowed in an assignment snapshot.", status: 400 };
     }
 
     seenAnimalIds.add(animal.value.animalId);
@@ -1421,12 +1788,13 @@ export async function resolveExperimentAssignmentApiInput(input: CreateExperimen
     value: {
       experimentCode: experiment.value.experimentCode,
       experimentId: experiment.value.experimentId,
+      experimentVersion: experiment.value.version,
       assignments: resolvedAssignments,
     },
   };
 }
 
-export async function resolveExperimentReservationApiInput(input: CreateExperimentReservationApiInput): Promise<
+export async function resolveExperimentReservationApiInput(input: CreateExperimentReservationApiInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedExperimentReservationApiInput;
@@ -1438,8 +1806,8 @@ export async function resolveExperimentReservationApiInput(input: CreateExperime
     }
 > {
   const [experiment, animal] = await Promise.all([
-    resolveExperimentApiReference(input),
-    resolveAnimalByApiReference(input),
+    resolveExperimentApiReference(input, actor),
+    resolveAnimalByApiReference(input, actor),
   ]);
 
   if (!experiment.ok) {
@@ -1450,20 +1818,26 @@ export async function resolveExperimentReservationApiInput(input: CreateExperime
     return animal;
   }
 
+  if (animal.value.owningLabId !== experiment.value.labId) {
+    return { ok: false, message: "Animal not found for the supplied animalId or animalCode.", status: 404 };
+  }
+
   return {
     ok: true,
     value: {
       animalCode: animal.value.animalCode,
       animalId: animal.value.animalId,
+      animalVersion: animal.value.version,
       experimentCode: experiment.value.experimentCode,
       experimentId: experiment.value.experimentId,
+      experimentVersion: experiment.value.version,
       treatmentGroup: input.treatmentGroup?.trim() || undefined,
       notes: input.notes?.trim() || undefined,
     },
   };
 }
 
-export async function resolveExperimentApiReference(input: ExperimentApiReferenceInput): Promise<
+export async function resolveExperimentApiReference(input: ExperimentApiReferenceInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedExperimentApiReference;
@@ -1481,8 +1855,10 @@ export async function resolveExperimentApiReference(input: ExperimentApiReferenc
     return { ok: false, message: "Provide experimentId or experimentCode.", status: 400 };
   }
 
+  const access = await getActorLabAccess(actor);
   const experiment = await prisma.experiment.findFirst({
     where: {
+      ...labScopedWhere(access),
       OR: [
         ...(experimentRef ? [{ id: experimentRef }, { experimentCode: experimentRef }] : []),
         ...(experimentCode ? [{ experimentCode }] : []),
@@ -1490,8 +1866,11 @@ export async function resolveExperimentApiReference(input: ExperimentApiReferenc
     },
     select: {
       id: true,
+      labId: true,
       experimentCode: true,
       status: true,
+      projectId: true,
+      version: true,
     },
   });
 
@@ -1504,11 +1883,14 @@ export async function resolveExperimentApiReference(input: ExperimentApiReferenc
     value: {
       experimentCode: experiment.experimentCode,
       experimentId: experiment.id,
+      labId: experiment.labId,
+      projectId: experiment.projectId,
+      version: experiment.version,
     },
   };
 }
 
-export async function resolveRuleApiReference(input: RuleApiReferenceInput): Promise<
+export async function resolveRuleApiReference(input: RuleApiReferenceInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedRuleApiReference;
@@ -1519,6 +1901,7 @@ export async function resolveRuleApiReference(input: RuleApiReferenceInput): Pro
       status: number;
     }
 > {
+  void actor;
   const ruleRef = input.ruleId?.trim();
   const ruleKey = input.ruleKey?.trim();
 
@@ -1552,20 +1935,13 @@ export async function resolveRuleApiReference(input: RuleApiReferenceInput): Pro
   };
 }
 
-export async function resolveBreedingSetupApiInput(input: CreateBreedingSetupApiInput): Promise<
-  | {
-      ok: true;
-      value: ResolvedBreedingSetupApiInput;
-    }
-  | {
-      ok: false;
-      message: string;
-      status: number;
-    }
+export async function resolveBreedingSetupApiInput(input: CreateBreedingSetupApiInput, actor: LabActor): Promise<
+  | { ok: true; value: ResolvedBreedingSetupApiInput }
+  | { ok: false; message: string; status: number }
 > {
   const [sire, dam] = await Promise.all([
-    resolveAnimalByApiReference({ animalId: input.sireId, animalCode: input.sireCode }),
-    resolveAnimalByApiReference({ animalId: input.damId, animalCode: input.damCode }),
+    resolveAnimalByApiReference({ animalId: input.sireId, animalCode: input.sireCode }, actor),
+    resolveAnimalByApiReference({ animalId: input.damId, animalCode: input.damCode }, actor),
   ]);
 
   if (!sire.ok) {
@@ -1580,6 +1956,10 @@ export async function resolveBreedingSetupApiInput(input: CreateBreedingSetupApi
     return { ok: false, message: "Choose two different animals for the breeding setup.", status: 400 };
   }
 
+  if (sire.value.owningLabId !== dam.value.owningLabId) {
+    return { ok: false, message: "Animal not found for the supplied animalId or animalCode.", status: 404 };
+  }
+
   return {
     ok: true,
     value: {
@@ -1591,43 +1971,47 @@ export async function resolveBreedingSetupApiInput(input: CreateBreedingSetupApi
   };
 }
 
-export async function getSampleApiRecordById(sampleId: string) {
-  const record = await prisma.sampleRecord.findUnique({
-    where: { id: sampleId },
+export async function getSampleApiRecordById(sampleId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const record = await prisma.sampleRecord.findFirst({
+    where: { id: sampleId, ...labScopedWhere(access) },
     select: sampleApiSelect,
   });
 
-  return record ? formatSampleApiRecord(record) : null;
+  return record && sampleRecordHasConsistentLab(record) ? formatSampleApiRecord(record) : null;
 }
 
-export async function getCryostorageApiRecordById(recordId: string) {
-  const record = await prisma.cryostorageRecord.findUnique({
-    where: { id: recordId },
+export async function getCryostorageApiRecordById(recordId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const record = await prisma.cryostorageRecord.findFirst({
+    where: { id: recordId, ...labScopedWhere(access) },
     select: cryostorageApiSelect,
   });
 
-  return record ? formatCryostorageApiRecord(record) : null;
+  return record && cryostorageRecordHasConsistentLab(record) ? formatCryostorageApiRecord(record) : null;
 }
 
-export async function getCryostorageApiRecordByLabel(sampleLabel: string) {
-  const record = await prisma.cryostorageRecord.findUnique({
-    where: { sampleLabel },
+export async function getCryostorageApiRecordByLabel(sampleLabel: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const record = await prisma.cryostorageRecord.findFirst({
+    where: { sampleLabel, ...labScopedWhere(access) },
     select: cryostorageApiSelect,
   });
 
-  return record ? formatCryostorageApiRecord(record) : null;
+  return record && cryostorageRecordHasConsistentLab(record) ? formatCryostorageApiRecord(record) : null;
 }
 
-export async function getSampleApiRecordByLabel(sampleLabel: string) {
-  const record = await prisma.sampleRecord.findUnique({
-    where: { sampleLabel },
+export async function getSampleApiRecordByLabel(sampleLabel: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const record = await prisma.sampleRecord.findFirst({
+    where: { sampleLabel, ...labScopedWhere(access) },
     select: sampleApiSelect,
   });
 
-  return record ? formatSampleApiRecord(record) : null;
+  return record && sampleRecordHasConsistentLab(record) ? formatSampleApiRecord(record) : null;
 }
 
-export async function resolveCryostorageApiRecordReference(input: CryostorageApiRecordReferenceInput): Promise<
+export async function resolveCryostorageApiRecordReference(input: CryostorageApiRecordReferenceInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedCryostorageApiRecordReference;
@@ -1645,8 +2029,10 @@ export async function resolveCryostorageApiRecordReference(input: CryostorageApi
     return { ok: false, message: "Provide recordId or sampleLabel.", status: 400 };
   }
 
+  const access = await getActorLabAccess(actor);
   const record = await prisma.cryostorageRecord.findFirst({
     where: {
+      ...labScopedWhere(access),
       OR: [
         ...(recordId ? [{ id: recordId }, { sampleLabel: recordId }] : []),
         ...(sampleLabel ? [{ sampleLabel }] : []),
@@ -1655,10 +2041,12 @@ export async function resolveCryostorageApiRecordReference(input: CryostorageApi
     select: {
       id: true,
       sampleLabel: true,
+      labId: true,
+      project: { select: { labId: true } },
     },
   });
 
-  if (!record) {
+  if (!record || (record.project && record.project.labId !== record.labId)) {
     return { ok: false, message: "Cryostorage record not found for the supplied recordId or sampleLabel.", status: 404 };
   }
 
@@ -1671,7 +2059,7 @@ export async function resolveCryostorageApiRecordReference(input: CryostorageApi
   };
 }
 
-export async function resolveSampleApiRecordReference(input: SampleApiRecordReferenceInput): Promise<
+export async function resolveSampleApiRecordReference(input: SampleApiRecordReferenceInput, actor: LabActor): Promise<
   | {
       ok: true;
       value: ResolvedSampleApiRecordReference;
@@ -1689,8 +2077,10 @@ export async function resolveSampleApiRecordReference(input: SampleApiRecordRefe
     return { ok: false, message: "Provide sampleId or sampleLabel.", status: 400 };
   }
 
+  const access = await getActorLabAccess(actor);
   const record = await prisma.sampleRecord.findFirst({
     where: {
+      ...labScopedWhere(access),
       OR: [
         ...(sampleId ? [{ id: sampleId }, { sampleLabel: sampleId }] : []),
         ...(sampleLabel ? [{ sampleLabel }] : []),
@@ -1699,10 +2089,17 @@ export async function resolveSampleApiRecordReference(input: SampleApiRecordRefe
     select: {
       id: true,
       sampleLabel: true,
+      labId: true,
+      project: { select: { labId: true } },
+      experiment: { select: { labId: true } },
     },
   });
 
-  if (!record) {
+  if (
+    !record ||
+    (record.project && record.project.labId !== record.labId) ||
+    (record.experiment && record.experiment.labId !== record.labId)
+  ) {
     return { ok: false, message: "Sample record not found for the supplied sampleId or sampleLabel.", status: 404 };
   }
 
@@ -1715,22 +2112,24 @@ export async function resolveSampleApiRecordReference(input: SampleApiRecordRefe
   };
 }
 
-export async function getGenotypeApiRecordById(recordId: string) {
-  const record = await prisma.genotypingRecord.findUnique({
-    where: { id: recordId },
+export async function getGenotypeApiRecordById(recordId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const record = await prisma.genotypingRecord.findFirst({
+    where: { id: recordId, ...labScopedWhere(access) },
     select: genotypeApiSelect,
   });
 
-  return record ? formatGenotypeApiRecord(record) : null;
+  return record && genotypeRecordHasConsistentLab(record) ? formatGenotypeApiRecord(record) : null;
 }
 
-export async function getCageHealthNoteApiRecordById(noteId: string) {
-  const record = await prisma.healthNote.findUnique({
-    where: { id: noteId },
+export async function getCageHealthNoteApiRecordById(noteId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const record = await prisma.healthNote.findFirst({
+    where: { id: noteId, ...labScopedWhere(access) },
     select: cageHealthNoteApiSelect,
   });
 
-  return record ? formatCageHealthNoteApiRecord(record) : null;
+  return record && cageHealthNoteHasConsistentLab(record) ? formatCageHealthNoteApiRecord(record) : null;
 }
 
 export async function getExistingCageHealthNoteApiRecord(input: {
@@ -1741,9 +2140,11 @@ export async function getExistingCageHealthNoteApiRecord(input: {
   note: string;
   followupRequired: boolean;
   actionTaken?: string;
-}) {
+}, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
   const record = await prisma.healthNote.findFirst({
     where: {
+      ...labScopedWhere(access),
       cageId: input.cageId,
       createdById: input.createdById,
       noteType: input.noteType,
@@ -1762,24 +2163,35 @@ export async function getExistingCageHealthNoteApiRecord(input: {
 
   const now = Date.now();
 
-  return now - record.createdAt.getTime() < 2 * 60 * 1000 ? formatCageHealthNoteApiRecord(record) : null;
+  return now - record.createdAt.getTime() < 2 * 60 * 1000 && cageHealthNoteHasConsistentLab(record)
+    ? formatCageHealthNoteApiRecord(record)
+    : null;
 }
 
 export async function getExperimentAssignmentApiRecords(input: {
   experimentId: string;
   animalIds: string[];
-}) {
+}, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
   const records = await prisma.experimentAssignment.findMany({
     where: {
       experimentId: input.experimentId,
       animalId: { in: input.animalIds },
       status: { in: ["planned", "reserved", "active", "completed"] },
+      ...(access.canViewAll
+        ? {}
+        : {
+            experiment: { labId: { in: access.memberLabIds } },
+            animal: { owningLabId: { in: access.memberLabIds } },
+          }),
     },
     orderBy: [{ startDate: "asc" }, { id: "asc" }],
     select: experimentAssignmentApiSelect,
   });
 
-  return records.map(formatExperimentAssignmentApiRecord);
+  return records
+    .filter((record) => record.experiment.labId === record.animal.owningLabId)
+    .map(formatExperimentAssignmentApiRecord);
 }
 
 export async function getExistingExperimentReservationApiRecord(input: {
@@ -1787,7 +2199,7 @@ export async function getExistingExperimentReservationApiRecord(input: {
   animalId: string;
   startDate: string;
   treatmentGroup?: string;
-}) {
+}, actor: LabActor) {
   const startDate = new Date(input.startDate);
 
   if (Number.isNaN(startDate.getTime())) {
@@ -1795,6 +2207,7 @@ export async function getExistingExperimentReservationApiRecord(input: {
   }
 
   const normalizedTreatmentGroup = input.treatmentGroup?.trim() || null;
+  const access = await getActorLabAccess(actor);
   const record = await prisma.experimentAssignment.findFirst({
     where: {
       experimentId: input.experimentId,
@@ -1802,45 +2215,74 @@ export async function getExistingExperimentReservationApiRecord(input: {
       status: "reserved",
       startDate,
       treatmentGroup: normalizedTreatmentGroup,
+      ...(access.canViewAll
+        ? {}
+        : {
+            experiment: { labId: { in: access.memberLabIds } },
+            animal: { owningLabId: { in: access.memberLabIds } },
+          }),
     },
     select: experimentAssignmentApiSelect,
   });
 
-  return record ? formatExperimentAssignmentApiRecord(record) : null;
+  return record && record.experiment.labId === record.animal.owningLabId
+    ? formatExperimentAssignmentApiRecord(record)
+    : null;
 }
 
-export async function getExperimentAssignmentApiRecordById(assignmentId: string) {
-  const record = await prisma.experimentAssignment.findUnique({
-    where: { id: assignmentId },
+export async function getExperimentAssignmentApiRecordById(assignmentId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const record = await prisma.experimentAssignment.findFirst({
+    where: {
+      id: assignmentId,
+      ...(access.canViewAll
+        ? {}
+        : {
+            experiment: { labId: { in: access.memberLabIds } },
+            animal: { owningLabId: { in: access.memberLabIds } },
+          }),
+    },
     select: experimentAssignmentApiSelect,
   });
 
-  return record ? formatExperimentAssignmentApiRecord(record) : null;
+  return record && record.experiment.labId === record.animal.owningLabId
+    ? formatExperimentAssignmentApiRecord(record)
+    : null;
 }
 
 export async function getExperimentAssignmentApiRecordsForExperiment(input: {
   experimentId: string;
   statuses?: AssignmentStatus[];
-}) {
+}, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
   const records = await prisma.experimentAssignment.findMany({
     where: {
       experimentId: input.experimentId,
       ...(input.statuses?.length ? { status: { in: input.statuses } } : {}),
+      ...(access.canViewAll
+        ? {}
+        : {
+            experiment: { labId: { in: access.memberLabIds } },
+            animal: { owningLabId: { in: access.memberLabIds } },
+          }),
     },
     orderBy: [{ startDate: "asc" }, { id: "asc" }],
     select: experimentAssignmentApiSelect,
   });
 
-  return records.map(formatExperimentAssignmentApiRecord);
+  return records
+    .filter((record) => record.experiment.labId === record.animal.owningLabId)
+    .map(formatExperimentAssignmentApiRecord);
 }
 
-export async function getBreedingSetupApiRecordById(breedingSetupId: string) {
-  const record = await prisma.breedingSetup.findUnique({
-    where: { id: breedingSetupId },
+export async function getBreedingSetupApiRecordById(breedingSetupId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const record = await prisma.breedingSetup.findFirst({
+    where: { id: breedingSetupId, ...labScopedWhere(access) },
     select: breedingSetupApiSelect,
   });
 
-  return record ? formatBreedingSetupApiRecord(record) : null;
+  return record && breedingSetupHasConsistentLab(record) ? formatBreedingSetupApiRecord(record) : null;
 }
 
 export async function getExistingBreedingSetupApiRecord(input: {
@@ -1850,7 +2292,7 @@ export async function getExistingBreedingSetupApiRecord(input: {
   targetGenotype: string;
   targetSex?: "male" | "female" | "unknown";
   notes?: string;
-}) {
+}, actor: LabActor) {
   const startDate = new Date(input.startDate);
 
   if (Number.isNaN(startDate.getTime())) {
@@ -1861,8 +2303,10 @@ export async function getExistingBreedingSetupApiRecord(input: {
   const normalizedNotes = input.notes?.trim() || null;
   const normalizedTargetSex = input.targetSex && input.targetSex !== "unknown" ? input.targetSex : null;
 
+  const access = await getActorLabAccess(actor);
   const record = await prisma.breedingSetup.findFirst({
     where: {
+      ...labScopedWhere(access),
       startDate,
       status: { in: ["planned", "active", "paused"] },
       targetGenotype: normalizedTargetGenotype,
@@ -1888,16 +2332,20 @@ export async function getExistingBreedingSetupApiRecord(input: {
     select: breedingSetupApiSelect,
   });
 
-  return record ? formatBreedingSetupApiRecord(record) : null;
+  return record && breedingSetupHasConsistentLab(record) ? formatBreedingSetupApiRecord(record) : null;
 }
 
-export async function getLitterApiRecordById(litterId: string) {
-  const record = await prisma.litter.findUnique({
-    where: { id: litterId },
+export async function getLitterApiRecordById(litterId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
+  const record = await prisma.litter.findFirst({
+    where: {
+      id: litterId,
+      ...(access.canViewAll ? {} : { breedingSetup: { labId: { in: access.memberLabIds } } }),
+    },
     select: litterApiSelect,
   });
 
-  return record ? formatLitterApiRecord(record) : null;
+  return record && litterHasConsistentLab(record) ? formatLitterApiRecord(record) : null;
 }
 
 export async function getExistingLitterApiRecord(input: {
@@ -1905,7 +2353,7 @@ export async function getExistingLitterApiRecord(input: {
   birthDate: string;
   litterSizeBirth: number;
   notes?: string;
-}) {
+}, actor: LabActor) {
   const birthDate = new Date(input.birthDate);
 
   if (Number.isNaN(birthDate.getTime())) {
@@ -1915,8 +2363,10 @@ export async function getExistingLitterApiRecord(input: {
   const normalizedBirthKey = birthDate.toISOString().slice(0, 10);
   const normalizedNotes = input.notes?.trim() || null;
 
+  const access = await getActorLabAccess(actor);
   const record = await prisma.litter.findFirst({
     where: {
+      ...(access.canViewAll ? {} : { breedingSetup: { labId: { in: access.memberLabIds } } }),
       breedingSetupId: input.breedingSetupId,
       birthDate,
       litterSizeBirth: input.litterSizeBirth,
@@ -1929,13 +2379,19 @@ export async function getExistingLitterApiRecord(input: {
     return null;
   }
 
-  return record.birthDate.toISOString().slice(0, 10) === normalizedBirthKey ? formatLitterApiRecord(record) : null;
+  return record.birthDate.toISOString().slice(0, 10) === normalizedBirthKey && litterHasConsistentLab(record)
+    ? formatLitterApiRecord(record)
+    : null;
 }
 
-export async function getWeaningApiRecordByLitterId(litterId: string) {
+export async function getWeaningApiRecordByLitterId(litterId: string, actor: LabActor) {
+  const access = await getActorLabAccess(actor);
   const [record, auditLog] = await Promise.all([
-    prisma.litter.findUnique({
-      where: { id: litterId },
+    prisma.litter.findFirst({
+      where: {
+        id: litterId,
+        ...(access.canViewAll ? {} : { breedingSetup: { labId: { in: access.memberLabIds } } }),
+      },
       select: weaningApiSelect,
     }),
     prisma.auditLog.findFirst({
@@ -1951,7 +2407,7 @@ export async function getWeaningApiRecordByLitterId(litterId: string) {
     }),
   ]);
 
-  return record ? formatWeaningApiRecord(record, auditLog?.newValue) : null;
+  return record && weaningHasConsistentLab(record) ? formatWeaningApiRecord(record, auditLog?.newValue) : null;
 }
 
 export async function getExistingGenotypeApiRecord(input: {
@@ -1962,7 +2418,7 @@ export async function getExistingGenotypeApiRecord(input: {
   resultDate: string;
   finalCall: string;
   resultText: string;
-}) {
+}, actor: LabActor) {
   const sampleDate = new Date(input.sampleDate);
   const resultDate = new Date(input.resultDate);
 
@@ -1970,8 +2426,10 @@ export async function getExistingGenotypeApiRecord(input: {
     return null;
   }
 
+  const access = await getActorLabAccess(actor);
   const record = await prisma.genotypingRecord.findFirst({
     where: {
+      ...labScopedWhere(access),
       animalId: input.animalId,
       markerTested: input.marker,
       status: input.status,
@@ -1984,7 +2442,7 @@ export async function getExistingGenotypeApiRecord(input: {
     select: genotypeApiSelect,
   });
 
-  return record ? formatGenotypeApiRecord(record) : null;
+  return record && genotypeRecordHasConsistentLab(record) ? formatGenotypeApiRecord(record) : null;
 }
 
 export function buildGenotypeApiFinalCall(input: { marker: string; status: GenotypeCallStatus; zygosity: string }) {
@@ -1999,7 +2457,8 @@ export function buildGenotypeApiFinalCall(input: { marker: string; status: Genot
   return `${input.marker} ${input.zygosity.trim()}`;
 }
 
-export async function getRuleApiRecordById(ruleId: string) {
+export async function getRuleApiRecordById(ruleId: string, actor: LabActor) {
+  void actor;
   const rules = await getRuleSummaryView();
 
   return rules.find((rule) => rule.id === ruleId) ?? null;
@@ -2033,7 +2492,7 @@ const resourceCatalog = [
     name: "animals",
     path: "/api/v1/animals",
     detailPath: "/api/v1/animals/{animalId}",
-    description: "Animal summaries and animal detail records.",
+    description: "Animal summaries, detail records, intake, and terminal lifecycle sync. Euthanasia PATCH requests require an exact timezone-qualified happenedAt and the current approved sopAssignmentId assigned to the animal's lab.",
     methods: ["GET", "POST", "PATCH"],
   },
   {
@@ -2085,6 +2544,18 @@ const resourceCatalog = [
     path: "/api/v1/experiments/reservations",
     description: "External direct experiment reservation intake with audit provenance.",
     methods: ["POST"],
+  },
+  {
+    name: "procedures",
+    path: "/api/v1/procedures",
+    description: "Operational procedure plans with exact approved SOP-version references.",
+    methods: ["GET", "POST"],
+  },
+  {
+    name: "procedure-occurrences",
+    path: "/api/v1/procedures/{procedureId}/occurrences",
+    description: "Append-only procedure outcomes recorded by CMU or Facility operators.",
+    methods: ["GET", "POST"],
   },
   {
     name: "projects",
@@ -2165,6 +2636,7 @@ export function buildGenotypeImportApiSummary(input: {
 
 const sampleApiSelect = {
   id: true,
+  labId: true,
   sampleLabel: true,
   sampleType: true,
   status: true,
@@ -2173,22 +2645,33 @@ const sampleApiSelect = {
   quantityLabel: true,
   notes: true,
   createdAt: true,
+  version: true,
   animalId: true,
   animal: {
     select: {
       animalId: true,
       labId: true,
+      owningLabId: true,
     },
   },
   project: {
     select: {
       projectCode: true,
+      labId: true,
+    },
+  },
+  experiment: {
+    select: {
+      id: true,
+      experimentCode: true,
+      labId: true,
     },
   },
 } as const;
 
 const cryostorageApiSelect = {
   id: true,
+  labId: true,
   sampleLabel: true,
   materialType: true,
   status: true,
@@ -2207,12 +2690,14 @@ const cryostorageApiSelect = {
   project: {
     select: {
       projectCode: true,
+      labId: true,
     },
   },
 } as const;
 
 const genotypeApiSelect = {
   id: true,
+  labId: true,
   animalId: true,
   sourceType: true,
   assayType: true,
@@ -2229,6 +2714,7 @@ const genotypeApiSelect = {
     select: {
       animalId: true,
       labId: true,
+      owningLabId: true,
     },
   },
   attachments: {
@@ -2245,6 +2731,7 @@ const genotypeApiSelect = {
 
 const breedingSetupApiSelect = {
   id: true,
+  labId: true,
   startDate: true,
   status: true,
   targetGenotype: true,
@@ -2258,6 +2745,7 @@ const breedingSetupApiSelect = {
         select: {
           id: true,
           animalId: true,
+          owningLabId: true,
           sex: true,
           status: true,
           currentCage: {
@@ -2307,6 +2795,7 @@ const litterApiSelect = {
   breedingSetupId: true,
   breedingSetup: {
     select: {
+      labId: true,
       targetGenotype: true,
       status: true,
       adults: {
@@ -2316,6 +2805,7 @@ const litterApiSelect = {
           animal: {
             select: {
               animalId: true,
+              owningLabId: true,
             },
           },
         },
@@ -2338,6 +2828,7 @@ const weaningApiSelect = {
   breedingSetupId: true,
   breedingSetup: {
     select: {
+      labId: true,
       targetGenotype: true,
       status: true,
     },
@@ -2349,6 +2840,7 @@ const weaningApiSelect = {
         select: {
           id: true,
           animalId: true,
+          owningLabId: true,
           sex: true,
           strain: {
             select: {
@@ -2381,6 +2873,8 @@ const weaningApiSelect = {
 
 const cageHealthNoteApiSelect = {
   id: true,
+  labId: true,
+  animalId: true,
   cageId: true,
   noteType: true,
   severity: true,
@@ -2392,6 +2886,7 @@ const cageHealthNoteApiSelect = {
   cage: {
     select: {
       barcode: true,
+      labId: true,
     },
   },
   attachments: {
@@ -2416,22 +2911,72 @@ const experimentAssignmentApiSelect = {
   treatmentGroup: true,
   notes: true,
   isPrimary: true,
+  version: true,
   animal: {
     select: {
       animalId: true,
       labId: true,
+      owningLabId: true,
     },
   },
   experiment: {
     select: {
       experimentCode: true,
       title: true,
+      labId: true,
+      version: true,
     },
   },
 } as const;
 
+function sampleRecordHasConsistentLab(record: {
+  labId: string;
+  project: { labId: string } | null;
+  experiment: { labId: string } | null;
+}) {
+  return (!record.project || record.project.labId === record.labId) &&
+    (!record.experiment || record.experiment.labId === record.labId);
+}
+
+function cryostorageRecordHasConsistentLab(record: { labId: string; project: { labId: string } | null }) {
+  return !record.project || record.project.labId === record.labId;
+}
+
+function genotypeRecordHasConsistentLab(record: { labId: string; animal: { owningLabId: string } }) {
+  return record.animal.owningLabId === record.labId;
+}
+
+function cageHealthNoteHasConsistentLab(record: { labId: string; cage: { labId: string } | null }) {
+  return !record.cage || record.cage.labId === record.labId;
+}
+
+function breedingSetupHasConsistentLab(record: {
+  labId: string;
+  adults: Array<{ animal: { owningLabId: string } }>;
+}) {
+  return record.adults.every((adult) => adult.animal.owningLabId === record.labId);
+}
+
+function litterHasConsistentLab(record: {
+  breedingSetup: { labId: string; adults: Array<{ animal: { owningLabId: string } }> };
+}) {
+  return record.breedingSetup.adults.every(
+    (adult) => adult.animal.owningLabId === record.breedingSetup.labId,
+  );
+}
+
+function weaningHasConsistentLab(record: {
+  breedingSetup: { labId: string };
+  litterAnimals: Array<{ animal: { owningLabId: string } }>;
+}) {
+  return record.litterAnimals.every(
+    (entry) => entry.animal.owningLabId === record.breedingSetup.labId,
+  );
+}
+
 function formatSampleApiRecord(record: {
   id: string;
+  labId: string;
   sampleLabel: string;
   sampleType: string;
   status: SampleStatus;
@@ -2440,13 +2985,21 @@ function formatSampleApiRecord(record: {
   quantityLabel: string | null;
   notes: string | null;
   createdAt: Date;
+  version: number;
   animalId: string;
   animal: {
     animalId: string;
     labId: string;
+    owningLabId: string;
   };
   project: {
     projectCode: string;
+    labId: string;
+  } | null;
+  experiment: {
+    id: string;
+    experimentCode: string;
+    labId: string;
   } | null;
 }) {
   return {
@@ -2459,15 +3012,20 @@ function formatSampleApiRecord(record: {
     quantityLabel: record.quantityLabel,
     notes: record.notes,
     createdAt: record.createdAt.toISOString(),
+    version: record.version,
     animalId: record.animalId,
     animalCode: record.animal.animalId,
-    labId: record.animal.labId,
+    labId: record.labId,
+    animalLabId: record.animal.labId,
     projectCode: record.project?.projectCode ?? null,
+    experimentId: record.experiment?.id ?? null,
+    experimentCode: record.experiment?.experimentCode ?? null,
   };
 }
 
 function formatCryostorageApiRecord(record: {
   id: string;
+  labId: string;
   sampleLabel: string;
   materialType: string;
   status: CryostorageStatus;
@@ -2483,10 +3041,12 @@ function formatCryostorageApiRecord(record: {
   };
   project: {
     projectCode: string;
+    labId: string;
   } | null;
 }) {
   return {
     id: record.id,
+    labId: record.labId,
     sampleLabel: record.sampleLabel,
     materialType: record.materialType,
     status: record.status,
@@ -2512,13 +3072,17 @@ function formatExperimentAssignmentApiRecord(record: {
   treatmentGroup: string | null;
   notes: string | null;
   isPrimary: boolean;
+  version: number;
   animal: {
     animalId: string;
     labId: string;
+    owningLabId: string;
   };
   experiment: {
     experimentCode: string;
     title: string;
+    labId: string;
+    version: number;
   };
 }) {
   return {
@@ -2526,20 +3090,24 @@ function formatExperimentAssignmentApiRecord(record: {
     experimentId: record.experimentId,
     experimentCode: record.experiment.experimentCode,
     experimentTitle: record.experiment.title,
+    experimentVersion: record.experiment.version,
     animalId: record.animalId,
     animalCode: record.animal.animalId,
-    labId: record.animal.labId,
+    labId: record.experiment.labId,
+    animalLabId: record.animal.labId,
     status: record.status,
     startDate: record.startDate.toISOString(),
     endDate: record.endDate?.toISOString() ?? null,
     treatmentGroup: record.treatmentGroup,
     notes: record.notes,
     isPrimary: record.isPrimary,
+    version: record.version,
   };
 }
 
 function formatBreedingSetupApiRecord(record: {
   id: string;
+  labId: string;
   startDate: Date;
   status: string;
   targetGenotype: string;
@@ -2550,6 +3118,7 @@ function formatBreedingSetupApiRecord(record: {
     animal: {
       id: string;
       animalId: string;
+      owningLabId: string;
       sex: string;
       status: string;
       currentCage: {
@@ -2575,6 +3144,7 @@ function formatBreedingSetupApiRecord(record: {
 }) {
   return {
     id: record.id,
+    labId: record.labId,
     startDate: record.startDate.toISOString().slice(0, 10),
     status: record.status,
     targetGenotype: record.targetGenotype,
@@ -2611,12 +3181,14 @@ function formatLitterApiRecord(record: {
   notes: string | null;
   breedingSetupId: string;
   breedingSetup: {
+    labId: string;
     targetGenotype: string;
     status: string;
     adults: Array<{
       role: string;
       animal: {
         animalId: string;
+        owningLabId: string;
       };
     }>;
   };
@@ -2624,6 +3196,7 @@ function formatLitterApiRecord(record: {
 }) {
   return {
     id: record.id,
+    labId: record.breedingSetup.labId,
     breedingSetupId: record.breedingSetupId,
     birthDate: record.birthDate.toISOString().slice(0, 10),
     litterSizeBirth: record.litterSizeBirth,
@@ -2648,6 +3221,7 @@ function formatWeaningApiRecord(
     notes: string | null;
     breedingSetupId: string;
     breedingSetup: {
+      labId: string;
       targetGenotype: string;
       status: string;
     };
@@ -2655,6 +3229,7 @@ function formatWeaningApiRecord(
       animal: {
         id: string;
         animalId: string;
+        owningLabId: string;
         sex: string;
         strain: {
           id: string;
@@ -2696,6 +3271,7 @@ function formatWeaningApiRecord(
 
   return {
     litterId: record.id,
+    labId: record.breedingSetup.labId,
     breedingSetupId: record.breedingSetupId,
     birthDate: record.birthDate.toISOString().slice(0, 10),
     litterSizeBirth: record.litterSizeBirth,
@@ -2726,6 +3302,8 @@ function formatWeaningApiRecord(
 
 function formatCageHealthNoteApiRecord(record: {
   id: string;
+  labId: string;
+  animalId: string | null;
   cageId: string | null;
   noteType: HealthNoteType;
   severity: AlertSeverity;
@@ -2736,6 +3314,7 @@ function formatCageHealthNoteApiRecord(record: {
   createdAt: Date;
   cage: {
     barcode: string;
+    labId: string;
   } | null;
   attachments: Array<{
     id: string;
@@ -2747,6 +3326,8 @@ function formatCageHealthNoteApiRecord(record: {
 }) {
   return {
     id: record.id,
+    labId: record.labId,
+    animalId: record.animalId,
     cageId: record.cageId,
     cageBarcode: record.cage?.barcode ?? null,
     noteType: record.noteType,
@@ -2768,6 +3349,7 @@ function formatCageHealthNoteApiRecord(record: {
 
 function formatGenotypeApiRecord(record: {
   id: string;
+  labId: string;
   animalId: string;
   sourceType: string;
   assayType: string;
@@ -2783,6 +3365,7 @@ function formatGenotypeApiRecord(record: {
   animal: {
     animalId: string;
     labId: string;
+    owningLabId: string;
   };
   attachments: Array<{
     id: string;
@@ -2796,7 +3379,8 @@ function formatGenotypeApiRecord(record: {
     id: record.id,
     animalId: record.animalId,
     animalCode: record.animal.animalId,
-    labId: record.animal.labId,
+    labId: record.labId,
+    animalLabId: record.animal.labId,
     markerTested: record.markerTested,
     finalCall: record.finalCall,
     zygosity: record.finalCall.startsWith(`${record.markerTested} `)

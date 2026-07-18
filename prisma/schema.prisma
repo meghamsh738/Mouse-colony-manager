@@ -3,17 +3,54 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_DATABASE_URL")
 }
 
 enum UserRole {
+  it_head
+  facility_admin
+  cmu_staff
+  lab_user
+  // Transitional values retained until populated-data role migration is verified.
   admin
   colony_manager
   animal_staff
   researcher
   read_only
+}
+
+enum LabMembershipRole {
+  owner
+  manager
+  staff
+  viewer
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  revoked
+  expired
+}
+
+enum PrivilegedRoleChangeStatus {
+  pending
+  approved
+  rejected
+  expired
+}
+
+enum InvoiceStatus {
+  draft
+  finalized
+  void
+}
+
+enum InvoiceAdjustmentType {
+  debit
+  credit
 }
 
 enum Sex {
@@ -96,6 +133,35 @@ enum AlertStatus {
   resolved
 }
 
+enum NotificationAudienceType {
+  user
+  lab_members
+  facility_role
+}
+
+enum NotificationRecipientStatus {
+  active
+  revoked
+}
+
+enum NotificationEmailMode {
+  off
+  daily_digest
+  weekly_digest
+}
+
+enum NotificationDeliveryKind {
+  immediate
+  digest
+}
+
+enum NotificationDeliveryStatus {
+  queued
+  delivered
+  failed
+  cancelled
+}
+
 enum GenotypeCallStatus {
   pending
   provisional
@@ -119,12 +185,59 @@ enum CryostorageStatus {
   discarded
 }
 
+enum CryostorageRequestType {
+  store
+  recover
+  discard
+}
+
+enum CryostorageRequestStatus {
+  submitted
+  completed
+  rejected
+  cancelled
+}
+
+enum CryostorageRequestEventType {
+  submitted
+  completed
+  rejected
+  cancelled
+}
+
+enum CryostorageOperationType {
+  store
+  recover
+  discard
+}
+
 enum BreedingStatus {
   planned
   active
   paused
   retired
   failed
+}
+
+enum AnimalIntakeDisposition {
+  holding
+  quarantine
+}
+
+enum QuarantineCaseStatus {
+  admitted
+  under_observation
+  exception_open
+  release_requested
+  released
+  cancelled
+}
+
+enum QuarantineObservationResult {
+  clear
+  monitor
+  exception
+  exception_resolved
 }
 
 enum RuleCategory {
@@ -142,33 +255,412 @@ enum BreedingAdultRole {
   support
 }
 
+enum WorkflowDraftStatus {
+  draft
+  review
+  submitted
+  committed
+  cancelled
+  expired
+}
+
+enum CommandReceiptStatus {
+  processing
+  succeeded
+  failed
+}
+
+enum OutboxMessageStatus {
+  pending
+  leased
+  retry
+  delivered
+  dead_letter
+  cancelled
+}
+
+enum OutboxAttemptStatus {
+  processing
+  delivered
+  failed
+}
+
+enum FacilityIdentifierType {
+  animal
+  cage
+}
+
+enum MigrationRunStatus {
+  planned
+  running
+  succeeded
+  failed
+  rolled_back
+}
+
+enum OwnershipExceptionStatus {
+  open
+  resolved
+  rejected
+}
+
+enum LabTransferSubjectType {
+  cage
+  animals
+}
+
+enum LabTransferRequestStatus {
+  requested
+  destination_accepted
+  destination_rejected
+  cancelled
+  finalized
+}
+
+enum LabTransferEventType {
+  requested
+  packet_revised
+  destination_accepted
+  destination_rejected
+  cancelled
+  override_applied
+  finalized
+}
+
+enum SopScope {
+  facility
+  lab
+}
+
+enum SopApprovalDecision {
+  approved
+  rejected
+}
+
+enum ProcedurePlanStatus {
+  planned
+  completed
+  cancelled
+}
+
+enum ProcedureOccurrenceStatus {
+  completed
+  not_performed
+  aborted
+}
+
 model User {
-  id                 String              @id
-  name               String
-  email              String              @unique
-  passwordHash       String
-  role               UserRole
-  active             Boolean             @default(true)
-  projectsOwned      Project[]           @relation("ProjectOwner")
-  experimentsOwned   Experiment[]        @relation("ExperimentOwner")
-  healthNotesCreated HealthNote[]        @relation("HealthNoteCreator")
-  auditLogs          AuditLog[]          @relation("AuditActor")
-  cageMoves          CageMovement[]      @relation("CageMoveActor")
-  animalMoves        AnimalMovement[]    @relation("AnimalMoveActor")
-  statusEvents       AnimalStatusEvent[] @relation("StatusEventActor")
-  genotypesPerformed GenotypingRecord[]  @relation("GenotypeOperator")
-  genotypesVerified  GenotypingRecord[]  @relation("GenotypeVerifier")
-  sampleRecordsCreated SampleRecord[]    @relation("SampleRecordCreator")
-  cryostorageRecordsCreated CryostorageRecord[] @relation("CryostorageRecordCreator")
+  id                           String                        @id
+  name                         String
+  email                        String                        @unique
+  passwordHash                 String
+  role                         UserRole
+  active                       Boolean                       @default(true)
+  authzVersion                 Int                           @default(1)
+  labMemberships               LabMembership[]
+  projectsOwned                Project[]                     @relation("ProjectOwner")
+  experimentsOwned             Experiment[]                  @relation("ExperimentOwner")
+  healthNotesCreated           HealthNote[]                  @relation("HealthNoteCreator")
+  auditLogs                    AuditLog[]                    @relation("AuditActor")
+  securityEvents               SecurityEvent[]               @relation("SecurityEventActor")
+  cageMoves                    CageMovement[]                @relation("CageMoveActor")
+  animalMoves                  AnimalMovement[]              @relation("AnimalMoveActor")
+  cageLabTransfers             CageLabTransfer[]             @relation("CageLabTransferActor")
+  animalLabTransfers           AnimalLabTransfer[]           @relation("AnimalLabTransferActor")
+  finalizedInvoices            Invoice[]                     @relation("InvoiceFinalizer")
+  voidedInvoices               Invoice[]                     @relation("InvoiceVoider")
+  invoiceAdjustmentsCreated    InvoiceAdjustment[]           @relation("InvoiceAdjustmentCreator")
+  statusEvents                 AnimalStatusEvent[]           @relation("StatusEventActor")
+  genotypesPerformed           GenotypingRecord[]            @relation("GenotypeOperator")
+  genotypesVerified            GenotypingRecord[]            @relation("GenotypeVerifier")
+  sampleRecordsCreated         SampleRecord[]                @relation("SampleRecordCreator")
+  cryostorageRecordsCreated    CryostorageRecord[]           @relation("CryostorageRecordCreator")
+  cryostorageRequestsCreated   CryostorageRequest[]          @relation("CryostorageRequestCreator")
+  cryostorageRequestsDecided   CryostorageRequest[]          @relation("CryostorageRequestDecisionActor")
+  cryostorageRequestEvents     CryostorageRequestEvent[]     @relation("CryostorageRequestEventActor")
+  cryostorageOperations        CryostorageOperation[]        @relation("CryostorageOperationActor")
+  animalIntakeBatchesCreated   AnimalIntakeBatch[]           @relation("AnimalIntakeBatchCreator")
+  invitationsSent              UserInvitation[]              @relation("InvitationSender")
+  privilegedChangesTarget      PrivilegedRoleChangeRequest[] @relation("PrivilegedChangeTarget")
+  privilegedChangesRequested   PrivilegedRoleChangeRequest[] @relation("PrivilegedChangeRequester")
+  privilegedChangesApproved    PrivilegedRoleChangeRequest[] @relation("PrivilegedChangeApprover")
+  workflowDrafts               WorkflowDraft[]               @relation("WorkflowDraftActor")
+  workflowReviewSnapshots      WorkflowReviewSnapshot[]      @relation("WorkflowSnapshotActor")
+  commandReceipts              CommandReceipt[]              @relation("CommandReceiptActor")
+  outboxMessages               OutboxMessage[]               @relation("OutboxActor")
+  migrationRuns                MigrationRun[]                @relation("MigrationRunActor")
+  ownershipExceptionsResolved  OwnershipException[]          @relation("OwnershipExceptionResolver")
+  quarantineCasesAdmitted      QuarantineCase[]              @relation("QuarantineAdmissionActor")
+  quarantineReleasesRequested  QuarantineCase[]              @relation("QuarantineReleaseRequester")
+  quarantineCasesReleased      QuarantineCase[]              @relation("QuarantineReleaseActor")
+  quarantineObservations       QuarantineObservation[]       @relation("QuarantineObservationActor")
+  cageClosures                 CageClosure[]                 @relation("CageClosureActor")
+  labTransferRequestsCreated   LabTransferRequest[]          @relation("LabTransferRequester")
+  labTransferDecisions         LabTransferRequest[]          @relation("LabTransferDestinationDecision")
+  labTransferFinalizations     LabTransferRequest[]          @relation("LabTransferFinalizer")
+  labTransferOverrides         LabTransferRequest[]          @relation("LabTransferOverrideApprover")
+  labTransferPacketsCreated    LabTransferPacket[]           @relation("LabTransferPacketCreator")
+  labTransferEvents            LabTransferEvent[]            @relation("LabTransferEventActor")
+  sopDocumentsCreated          SopDocument[]                 @relation("SopDocumentCreator")
+  sopVersionsCreated           SopVersion[]                  @relation("SopVersionCreator")
+  sopVersionApprovals          SopVersionApproval[]          @relation("SopVersionApprovalActor")
+  sopAssignmentsAssigned       SopAssignment[]               @relation("SopAssignmentActor")
+  sopAssignmentsRevoked        SopAssignment[]               @relation("SopAssignmentRevoker")
+  sopAcknowledgements          SopAcknowledgement[]          @relation("SopAcknowledgementUser")
+  procedurePlansCreated        ProcedurePlan[]               @relation("ProcedurePlanCreator")
+  procedureOccurrencesExecuted ProcedureOccurrence[]         @relation("ProcedureOccurrenceExecutor")
+  cageResponsibilities         CageUserAssignment[]          @relation("CageResponsibleUser")
+  cageResponsibilityChanges    CageUserAssignment[]          @relation("CageResponsibilityActor")
+  cageResponsibilitiesEnded    CageUserAssignment[]          @relation("CageResponsibilityEndActor")
+  notificationAudienceTargets  NotificationAudience[]        @relation("NotificationAudienceUser")
+  notificationRecipients       NotificationRecipient[]       @relation("NotificationRecipientUser")
+  notificationPreferences      NotificationPreference[]
+}
+
+model Lab {
+  id                     String                    @id
+  name                   String
+  code                   String                    @unique
+  billingContact         String?
+  notes                  String?
+  active                 Boolean                   @default(true)
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+  memberships            LabMembership[]
+  cages                  Cage[]
+  animals                Animal[]
+  chargePeriods          CageChargePeriod[]
+  invoices               Invoice[]
+  invoiceAdjustments     InvoiceAdjustment[]
+  cageTransfersFrom      CageLabTransfer[]         @relation("CageTransferFromLab")
+  cageTransfersTo        CageLabTransfer[]         @relation("CageTransferToLab")
+  animalTransfersFrom    AnimalLabTransfer[]       @relation("AnimalTransferFromLab")
+  animalTransfersTo      AnimalLabTransfer[]       @relation("AnimalTransferToLab")
+  animalIntakeBatches    AnimalIntakeBatch[]
+  invitations            UserInvitation[]
+  projects               Project[]
+  experiments            Experiment[]
+  breedingSetups         BreedingSetup[]
+  sampleRecords          SampleRecord[]
+  cryostorageRecords     CryostorageRecord[]
+  cryostorageRequests    CryostorageRequest[]
+  cryostorageEvents      CryostorageRequestEvent[]
+  cryostorageOperations  CryostorageOperation[]
+  healthNotes            HealthNote[]
+  genotypingRecords      GenotypingRecord[]
+  attachments            Attachment[]
+  alerts                 Alert[]
+  workflowDrafts         WorkflowDraft[]
+  commandReceipts        CommandReceipt[]
+  outboxMessages         OutboxMessage[]
+  quarantineCases        QuarantineCase[]
+  quarantineObservations QuarantineObservation[]
+  cageClosures           CageClosure[]
+  transferRequestsFrom   LabTransferRequest[]      @relation("LabTransferSourceLab")
+  transferRequestsTo     LabTransferRequest[]      @relation("LabTransferDestinationLab")
+  transferEvents         LabTransferEvent[]
+  sopDocuments           SopDocument[]
+  sopAssignments         SopAssignment[]
+  sopAcknowledgements    SopAcknowledgement[]
+  procedurePlans         ProcedurePlan[]
+  procedureOccurrences   ProcedureOccurrence[]
+  notificationEvents     NotificationEvent[]
+  notificationAudiences  NotificationAudience[]
+  notificationRecipients NotificationRecipient[]
+  auditLogs              AuditLog[]
+  scopedSecurityEvents   SecurityEvent[]
+}
+
+model SopDocument {
+  id                   String                @id
+  scope                SopScope
+  labId                String?
+  code                 String
+  title                String
+  category             String
+  active               Boolean               @default(true)
+  version              Int                   @default(1)
+  currentVersionId     String?               @unique
+  createdById          String
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  lab                  Lab?                  @relation(fields: [labId], references: [id], onDelete: Restrict)
+  createdBy            User                  @relation("SopDocumentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  currentVersion       SopVersion?           @relation("SopCurrentVersion", fields: [currentVersionId, id], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
+  versions             SopVersion[]          @relation("SopDocumentVersions")
+  assignments          SopAssignment[]
+  procedurePlans       ProcedurePlan[]       @relation("ProcedurePlanSop")
+  procedureOccurrences ProcedureOccurrence[] @relation("ProcedureOccurrenceSop")
+  statusEvents         AnimalStatusEvent[]   @relation("AnimalStatusEventSop")
+
+  @@unique([currentVersionId, id])
+  @@index([labId, active])
+  @@index([createdById, createdAt])
+}
+
+model SopVersion {
+  id                   String                @id
+  sopId                String
+  versionNumber        Int
+  title                String
+  category             String
+  contentMarkdown      String
+  contentHash          String
+  changeSummary        String
+  createdById          String
+  createdAt            DateTime              @default(now())
+  sop                  SopDocument           @relation("SopDocumentVersions", fields: [sopId], references: [id], onDelete: Restrict)
+  currentForDocument   SopDocument?          @relation("SopCurrentVersion")
+  createdBy            User                  @relation("SopVersionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  approval             SopVersionApproval?
+  assignments          SopAssignment[]
+  acknowledgements     SopAcknowledgement[]
+  procedurePlans       ProcedurePlan[]       @relation("ProcedurePlanSopVersion")
+  procedureOccurrences ProcedureOccurrence[] @relation("ProcedureOccurrenceSopVersion")
+  statusEvents         AnimalStatusEvent[]   @relation("AnimalStatusEventSopVersion")
+
+  @@unique([sopId, versionNumber])
+  @@unique([id, sopId])
+  @@index([createdById, createdAt])
+}
+
+model SopVersionApproval {
+  id           String              @id
+  sopId        String
+  sopVersionId String              @unique
+  decision     SopApprovalDecision
+  decidedById  String
+  decidedAt    DateTime            @default(now())
+  note         String?
+  sopVersion   SopVersion          @relation(fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
+  decidedBy    User                @relation("SopVersionApprovalActor", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@unique([sopVersionId, sopId])
+  @@index([sopId, decision])
+  @@index([decidedById, decidedAt])
+}
+
+model SopAssignment {
+  id                   String                @id
+  sopId                String
+  sopVersionId         String
+  labId                String
+  assignedById         String
+  assignedAt           DateTime              @default(now())
+  dueAt                DateTime?
+  reason               String
+  revokedById          String?
+  revokedAt            DateTime?
+  revocationReason     String?
+  version              Int                   @default(1)
+  sop                  SopDocument           @relation(fields: [sopId], references: [id], onDelete: Restrict)
+  sopVersion           SopVersion            @relation(fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
+  lab                  Lab                   @relation(fields: [labId], references: [id], onDelete: Restrict)
+  assignedBy           User                  @relation("SopAssignmentActor", fields: [assignedById], references: [id], onDelete: Restrict)
+  revokedBy            User?                 @relation("SopAssignmentRevoker", fields: [revokedById], references: [id], onDelete: Restrict)
+  acknowledgements     SopAcknowledgement[]
+  procedurePlans       ProcedurePlan[]       @relation("ProcedurePlanSopAssignment")
+  procedureOccurrences ProcedureOccurrence[] @relation("ProcedureOccurrenceSopAssignment")
+  statusEvents         AnimalStatusEvent[]   @relation("AnimalStatusEventSopAssignment")
+
+  @@unique([id, sopId, sopVersionId, labId])
+  @@index([sopId, labId])
+  @@index([sopVersionId])
+  @@index([labId, assignedAt])
+  @@index([assignedById, assignedAt])
+  @@index([revokedById, revokedAt])
+}
+
+model SopAcknowledgement {
+  id             String        @id
+  assignmentId   String
+  sopId          String
+  sopVersionId   String
+  labId          String
+  userId         String
+  contentHash    String
+  acknowledgedAt DateTime      @default(now())
+  attestation    String
+  assignment     SopAssignment @relation(fields: [assignmentId, sopId, sopVersionId, labId], references: [id, sopId, sopVersionId, labId], onDelete: Restrict, onUpdate: NoAction)
+  sopVersion     SopVersion    @relation(fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
+  lab            Lab           @relation(fields: [labId], references: [id], onDelete: Restrict)
+  user           User          @relation("SopAcknowledgementUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([assignmentId, userId])
+  @@index([sopId, sopVersionId])
+  @@index([labId, acknowledgedAt])
+  @@index([userId, acknowledgedAt])
+}
+
+model UserInvitation {
+  id             String             @id
+  email          String
+  name           String?
+  tokenHash      String             @unique
+  status         InvitationStatus   @default(pending)
+  targetRole     UserRole
+  labId          String?
+  membershipRole LabMembershipRole?
+  invitedById    String
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime           @default(now())
+  invitedBy      User               @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
+  lab            Lab?               @relation(fields: [labId], references: [id], onDelete: Restrict)
+
+  @@index([email, status])
+  @@index([labId, status])
+  @@index([expiresAt, status])
+}
+
+model PrivilegedRoleChangeRequest {
+  id            String                     @id
+  targetUserId  String
+  requestedRole UserRole
+  status        PrivilegedRoleChangeStatus @default(pending)
+  reason        String
+  requestedById String
+  requestedByAuthzVersion Int
+  requestedActive Boolean?
+  approvedById  String?
+  expiresAt     DateTime
+  approvedAt    DateTime?
+  rejectedAt    DateTime?
+  createdAt     DateTime                   @default(now())
+  targetUser    User                       @relation("PrivilegedChangeTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  requestedBy   User                       @relation("PrivilegedChangeRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy    User?                      @relation("PrivilegedChangeApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+
+  @@index([targetUserId, status])
+  @@index([requestedById, status])
+  @@index([expiresAt, status])
+}
+
+model LabMembership {
+  id                   String               @id
+  labId                String
+  userId               String
+  role                 LabMembershipRole
+  active               Boolean              @default(true)
+  createdAt            DateTime             @default(now())
+  lab                  Lab                  @relation(fields: [labId], references: [id], onDelete: Cascade)
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cageResponsibilities CageUserAssignment[]
+
+  @@unique([labId, userId])
+  @@index([userId])
 }
 
 model Facility {
-  id        String   @id
-  name      String
-  notes     String?
-  rooms     Room[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String   @id
+  name              String
+  cageBarcodePrefix String   @unique @default("CM")
+  maxCageOccupancy  Int      @default(6)
+  notes             String?
+  rooms             Room[]
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 model Room {
@@ -184,63 +676,109 @@ model Room {
 }
 
 model Rack {
-  id         String @id
+  id         String  @id
   roomId     String
   rackNumber String
   notes      String?
-  room       Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  room       Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
   cages      Cage[]
 
   @@unique([roomId, rackNumber])
 }
 
 model Cage {
-  id            String      @id
-  roomId        String
-  rackId        String
-  cageNumber    String
-  barcode       String      @unique
-  status        CageStatus
-  notes         String?
-  active        Boolean     @default(true)
-  welfareFlags  Json?
-  lastUpdatedAt DateTime    @default(now())
-  room          Room        @relation(fields: [roomId], references: [id], onDelete: Restrict)
-  rack          Rack        @relation(fields: [rackId], references: [id], onDelete: Restrict)
-  animals       Animal[]
-  healthNotes   HealthNote[]
-  cageMovements CageMovement[]
-  attachments   Attachment[]
+  id                          String               @id
+  facilityCageId              String               @unique
+  labId                       String
+  roomId                      String
+  rackId                      String
+  cageNumber                  String
+  barcode                     String               @unique
+  capacityOverride            Int?
+  status                      CageStatus
+  notes                       String?
+  active                      Boolean              @default(true)
+  welfareFlags                Json?
+  lastUpdatedAt               DateTime             @default(now())
+  version                     Int                  @default(1)
+  lab                         Lab                  @relation(fields: [labId], references: [id], onDelete: Restrict)
+  room                        Room                 @relation(fields: [roomId], references: [id], onDelete: Restrict)
+  rack                        Rack                 @relation(fields: [rackId], references: [id], onDelete: Restrict)
+  animals                     Animal[]
+  healthNotes                 HealthNote[]
+  cageMovements               CageMovement[]
+  chargePeriods               CageChargePeriod[]
+  labTransfers                CageLabTransfer[]
+  invoiceLines                InvoiceLineItem[]
+  attachments                 Attachment[]
+  quarantineCases             QuarantineCase[]
+  closure                     CageClosure?
+  sourceTransferRequests      LabTransferRequest[] @relation("LabTransferSourceCage")
+  destinationTransferRequests LabTransferRequest[] @relation("LabTransferDestinationCage")
+  transferItems               LabTransferItem[]
+  userAssignments             CageUserAssignment[]
 
   @@unique([rackId, cageNumber])
+  @@unique([id, labId])
+  @@index([labId])
+}
+
+model CageUserAssignment {
+  id           String        @id
+  cageId       String
+  labId        String
+  userId       String
+  assignedById String
+  assignedAt   DateTime      @default(now())
+  endedAt      DateTime?
+  endedById    String?
+  endReason    String?
+  version      Int           @default(1)
+  reason       String
+  cage         Cage          @relation(fields: [cageId], references: [id], onDelete: Restrict)
+  membership   LabMembership @relation(fields: [labId, userId], references: [labId, userId], onDelete: Restrict, onUpdate: NoAction)
+  user         User          @relation("CageResponsibleUser", fields: [userId], references: [id], onDelete: Restrict)
+  assignedBy   User          @relation("CageResponsibilityActor", fields: [assignedById], references: [id], onDelete: Restrict)
+  endedBy      User?         @relation("CageResponsibilityEndActor", fields: [endedById], references: [id], onDelete: Restrict)
+
+  @@unique([cageId, userId, assignedAt])
+  @@index([labId, userId, endedAt])
+  @@index([cageId, endedAt])
+  @@index([assignedById, assignedAt])
+  @@index([endedById, endedAt])
 }
 
 model Strain {
-  id               String   @id
-  name             String   @unique
-  background       String?
-  notes            String?
-  maintenanceRules Json?
-  animals          Animal[]
-  cryostorageRecords CryostorageRecord[]
+  id                  String               @id
+  name                String               @unique
+  background          String?
+  notes               String?
+  maintenanceRules    Json?
+  animals             Animal[]
+  cryostorageRecords  CryostorageRecord[]
+  cryostorageRequests CryostorageRequest[]
 }
 
 model Allele {
-  id                String          @id
-  name              String          @unique
-  gene              String
-  type              String
-  notes             String?
-  harmfulHomozygous Boolean         @default(false)
-  maintainAsHet     Boolean         @default(false)
+  id                 String         @id
+  name               String         @unique
+  gene               String
+  type               String
+  notes              String?
+  harmfulHomozygous  Boolean        @default(false)
+  maintainAsHet      Boolean        @default(false)
   prohibitedPairings Json?
-  animalAlleles     AnimalAllele[]
+  animalAlleles      AnimalAllele[]
 }
 
 model Animal {
-  id                    String                  @id
-  animalId              String                  @unique
-  labId                 String                  @unique
+  id                    String                    @id
+  facilityAnimalId      String                    @unique
+  animalId              String                    @unique
+  labId                 String                    @unique
+  owningLabId           String
+  intakeBatchId         String?
+  sourceAnimalId        String?
   sex                   Sex
   dob                   DateTime
   strainId              String
@@ -253,16 +791,19 @@ model Animal {
   healthStatus          String?
   projectSummary        String?
   experimentalStatus    String?
-  outcomeStatus         OutcomeStatus           @default(alive)
+  outcomeStatus         OutcomeStatus             @default(alive)
   deathDate             DateTime?
   deathReason           String?
   notes                 String?
-  strain                Strain                  @relation(fields: [strainId], references: [id], onDelete: Restrict)
-  currentCage           Cage?                   @relation(fields: [currentCageId], references: [id], onDelete: SetNull)
-  sire                  Animal?                 @relation("AnimalSire", fields: [sireId], references: [id], onDelete: SetNull)
-  dam                   Animal?                 @relation("AnimalDam", fields: [damId], references: [id], onDelete: SetNull)
-  siredOffspring        Animal[]                @relation("AnimalSire")
-  dammedOffspring       Animal[]                @relation("AnimalDam")
+  version               Int                       @default(1)
+  owningLab             Lab                       @relation(fields: [owningLabId], references: [id], onDelete: Restrict)
+  intakeBatch           AnimalIntakeBatch?        @relation(fields: [intakeBatchId], references: [id], onDelete: SetNull)
+  strain                Strain                    @relation(fields: [strainId], references: [id], onDelete: Restrict)
+  currentCage           Cage?                     @relation(fields: [currentCageId, owningLabId], references: [id, labId], onDelete: NoAction, onUpdate: NoAction)
+  sire                  Animal?                   @relation("AnimalSire", fields: [sireId], references: [id], onDelete: SetNull)
+  dam                   Animal?                   @relation("AnimalDam", fields: [damId], references: [id], onDelete: SetNull)
+  siredOffspring        Animal[]                  @relation("AnimalSire")
+  dammedOffspring       Animal[]                  @relation("AnimalDam")
   alleles               AnimalAllele[]
   genotypingRecords     GenotypingRecord[]
   breedingAdults        BreedingAdult[]
@@ -274,10 +815,92 @@ model Animal {
   sampleRecords         SampleRecord[]
   statusEvents          AnimalStatusEvent[]
   animalMovements       AnimalMovement[]
+  labTransfers          AnimalLabTransfer[]
+  transferRequestItems  LabTransferItem[]
+  procedureOccurrences  ProcedureOccurrence[]
 
+  @@unique([intakeBatchId, sourceAnimalId])
   @@index([status])
   @@index([sex])
+  @@index([owningLabId])
+  @@index([intakeBatchId])
   @@index([currentCageId])
+}
+
+model AnimalIntakeBatch {
+  id              String                  @id
+  labId           String
+  vendor          String
+  orderReference  String
+  arrivalDate     DateTime
+  disposition     AnimalIntakeDisposition
+  notes           String?
+  createdById     String
+  createdAt       DateTime                @default(now())
+  version         Int                     @default(1)
+  lab             Lab                     @relation(fields: [labId], references: [id], onDelete: Restrict)
+  createdBy       User                    @relation("AnimalIntakeBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  animals         Animal[]
+  quarantineCases QuarantineCase[]
+
+  @@unique([id, labId])
+  @@index([labId])
+  @@index([arrivalDate])
+}
+
+model QuarantineCase {
+  id                   String                  @id
+  labId                String
+  cageId               String
+  intakeBatchId        String?
+  status               QuarantineCaseStatus    @default(admitted)
+  admittedAt           DateTime
+  minimumReleaseAt     DateTime
+  admissionReason      String
+  admittedById         String
+  releaseRequestedAt   DateTime?
+  releaseRequestedById String?
+  releaseRequestReason String?
+  releasedAt           DateTime?
+  releasedById         String?
+  releaseReason        String?
+  cancelledAt          DateTime?
+  version              Int                     @default(1)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  lab                  Lab                     @relation(fields: [labId], references: [id], onDelete: Restrict)
+  cage                 Cage                    @relation(fields: [cageId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  intakeBatch          AnimalIntakeBatch?      @relation(fields: [intakeBatchId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  admittedBy           User                    @relation("QuarantineAdmissionActor", fields: [admittedById], references: [id], onDelete: Restrict)
+  releaseRequestedBy   User?                   @relation("QuarantineReleaseRequester", fields: [releaseRequestedById], references: [id], onDelete: Restrict)
+  releasedBy           User?                   @relation("QuarantineReleaseActor", fields: [releasedById], references: [id], onDelete: Restrict)
+  observations         QuarantineObservation[]
+
+  @@unique([id, labId])
+  @@index([labId, status])
+  @@index([cageId, status])
+  @@index([minimumReleaseAt, status])
+  @@index([intakeBatchId])
+}
+
+model QuarantineObservation {
+  id               String                      @id
+  caseId           String
+  labId            String
+  observedAt       DateTime
+  observedById     String
+  result           QuarantineObservationResult
+  severity         AlertSeverity
+  note             String
+  followupRequired Boolean                     @default(false)
+  createdAt        DateTime                    @default(now())
+  quarantineCase   QuarantineCase              @relation(fields: [caseId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab              Lab                         @relation(fields: [labId], references: [id], onDelete: Restrict)
+  observedBy       User                        @relation("QuarantineObservationActor", fields: [observedById], references: [id], onDelete: Restrict)
+
+  @@index([labId, observedAt])
+  @@index([caseId, observedAt])
+  @@index([result, observedAt])
 }
 
 model AnimalAllele {
@@ -293,40 +916,48 @@ model AnimalAllele {
 }
 
 model GenotypingRecord {
-  id             String             @id
-  animalId       String
-  sourceType     String
-  assayType      String
-  sampleId       String?
-  markerTested   String
-  resultText     String
-  attachmentUrl  String?
-  sampleDate     DateTime
-  resultDate     DateTime
-  operatorId     String?
-  provider       String?
-  verifiedById   String?
-  finalCall      String
-  status         GenotypeCallStatus @default(pending)
-  confidence     String?
-  animal         Animal              @relation(fields: [animalId], references: [id], onDelete: Cascade)
-  operator       User?               @relation("GenotypeOperator", fields: [operatorId], references: [id], onDelete: SetNull)
-  verifiedBy     User?               @relation("GenotypeVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
-  attachments    Attachment[]
+  id            String             @id
+  labId         String
+  animalId      String
+  sourceType    String
+  assayType     String
+  sampleId      String?
+  markerTested  String
+  resultText    String
+  attachmentUrl String?
+  sampleDate    DateTime
+  resultDate    DateTime
+  operatorId    String?
+  provider      String?
+  verifiedById  String?
+  finalCall     String
+  status        GenotypeCallStatus @default(pending)
+  confidence    String?
+  animal        Animal             @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  lab           Lab                @relation(fields: [labId], references: [id], onDelete: Restrict)
+  operator      User?              @relation("GenotypeOperator", fields: [operatorId], references: [id], onDelete: SetNull)
+  verifiedBy    User?              @relation("GenotypeVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  attachments   Attachment[]
 
   @@index([animalId])
+  @@index([labId])
 }
 
 model BreedingSetup {
-  id             String         @id
+  id             String          @id
+  labId          String
   startDate      DateTime
   endDate        DateTime?
   status         BreedingStatus
   targetGenotype String
   targetSex      Sex?
   notes          String?
+  version        Int             @default(1)
   adults         BreedingAdult[]
   litters        Litter[]
+  lab            Lab             @relation(fields: [labId], references: [id], onDelete: Restrict)
+
+  @@index([labId])
 }
 
 model BreedingAdult {
@@ -338,16 +969,18 @@ model BreedingAdult {
   animal          Animal            @relation(fields: [animalId], references: [id], onDelete: Cascade)
 
   @@unique([breedingSetupId, animalId])
+  @@index([animalId])
 }
 
 model Litter {
-  id              String        @id
+  id              String         @id
   breedingSetupId String
   birthDate       DateTime
   litterSizeBirth Int
   litterSizeWean  Int?
   notes           String?
-  breedingSetup   BreedingSetup @relation(fields: [breedingSetupId], references: [id], onDelete: Cascade)
+  version         Int            @default(1)
+  breedingSetup   BreedingSetup  @relation(fields: [breedingSetupId], references: [id], onDelete: Cascade)
   litterAnimals   LitterAnimal[]
 }
 
@@ -362,67 +995,183 @@ model LitterAnimal {
 }
 
 model Project {
-  id                String                   @id
-  projectCode       String                   @unique
-  title             String
-  ownerId           String
-  notes             String?
-  owner             User                     @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  animalAllocations AnimalProjectAllocation[]
-  experiments       Experiment[]
-  sampleRecords     SampleRecord[]
-  cryostorageRecords CryostorageRecord[]
+  id                  String                    @id
+  labId               String
+  projectCode         String                    @unique
+  title               String
+  ownerId             String
+  notes               String?
+  owner               User                      @relation("ProjectOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  lab                 Lab                       @relation(fields: [labId], references: [id], onDelete: Restrict)
+  animalAllocations   AnimalProjectAllocation[]
+  experiments         Experiment[]
+  sampleRecords       SampleRecord[]
+  cryostorageRecords  CryostorageRecord[]
+  cryostorageRequests CryostorageRequest[]
+
+  @@unique([id, labId])
+  @@index([labId])
 }
 
 model AnimalProjectAllocation {
-  id         String   @id
+  id         String    @id
   animalId   String
   projectId  String
   startedAt  DateTime
   endedAt    DateTime?
-  chargeable Boolean  @default(true)
+  chargeable Boolean   @default(true)
   notes      String?
-  animal     Animal   @relation(fields: [animalId], references: [id], onDelete: Cascade)
-  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  animal     Animal    @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([animalId])
   @@index([projectId])
 }
 
 model Experiment {
-  id             String             @id
-  experimentCode String             @unique
-  projectId      String
-  title          String
-  ownerId        String
-  status         ExperimentStatus
-  notes          String?
-  owner          User               @relation("ExperimentOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  project        Project            @relation(fields: [projectId], references: [id], onDelete: Restrict)
-  assignments    ExperimentAssignment[]
+  id                   String                 @id
+  labId                String
+  experimentCode       String                 @unique
+  projectId            String
+  title                String
+  ownerId              String
+  status               ExperimentStatus
+  plannedStartAt       DateTime?
+  plannedEndAt         DateTime?
+  operationalContact   String?
+  procedureSummary     String?
+  treatmentSummary     String?
+  welfareRisks         String?
+  scheduleNotes        String?
+  operationalNotes     String?
+  notes                String?
+  resultSummary        String?
+  version              Int                    @default(1)
+  owner                User                   @relation("ExperimentOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  lab                  Lab                    @relation(fields: [labId], references: [id], onDelete: Restrict)
+  project              Project                @relation(fields: [projectId, labId], references: [id, labId], onDelete: NoAction, onUpdate: NoAction)
+  assignments          ExperimentAssignment[]
+  sampleRecords        SampleRecord[]
+  procedurePlans       ProcedurePlan[]
+  procedureOccurrences ProcedureOccurrence[]
+
+  @@unique([id, labId])
+  @@index([labId])
 }
 
 model ExperimentAssignment {
-  id             String           @id
-  animalId       String
-  experimentId   String
-  status         AssignmentStatus
-  startDate      DateTime
-  endDate        DateTime?
-  treatmentGroup String?
-  notes          String?
-  isPrimary      Boolean          @default(false)
-  animal         Animal           @relation(fields: [animalId], references: [id], onDelete: Cascade)
-  experiment     Experiment       @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  id                   String                @id
+  animalId             String
+  experimentId         String
+  status               AssignmentStatus
+  startDate            DateTime
+  endDate              DateTime?
+  treatmentGroup       String?
+  notes                String?
+  isPrimary            Boolean               @default(false)
+  version              Int                   @default(1)
+  animal               Animal                @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  experiment           Experiment            @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  procedurePlans       ProcedurePlan[]
+  procedureOccurrences ProcedureOccurrence[]
 
+  @@unique([experimentId, animalId])
+  @@unique([id, experimentId])
   @@index([animalId])
   @@index([experimentId])
 }
 
+model ProcedurePlan {
+  id                        String                @id
+  labId                     String
+  experimentId              String
+  assignmentId              String
+  procedureCode             String
+  title                     String
+  scheduledAt               DateTime
+  status                    ProcedurePlanStatus   @default(planned)
+  sopId                     String
+  sopVersionId              String
+  sopVersionNumber          Int
+  sopContentHash            String
+  sopAssignmentId           String
+  assignmentContextSnapshot Json
+  experimentContextSnapshot Json
+  createdById               String
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  version                   Int                   @default(1)
+  lab                       Lab                   @relation(fields: [labId], references: [id], onDelete: Restrict)
+  experiment                Experiment            @relation(fields: [experimentId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  assignment                ExperimentAssignment  @relation(fields: [assignmentId, experimentId], references: [id, experimentId], onDelete: Restrict, onUpdate: NoAction)
+  sop                       SopDocument           @relation("ProcedurePlanSop", fields: [sopId], references: [id], onDelete: Restrict)
+  sopVersion                SopVersion            @relation("ProcedurePlanSopVersion", fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
+  sopAssignment             SopAssignment         @relation("ProcedurePlanSopAssignment", fields: [sopAssignmentId, sopId, sopVersionId, labId], references: [id, sopId, sopVersionId, labId], onDelete: Restrict, onUpdate: NoAction)
+  createdBy                 User                  @relation("ProcedurePlanCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  occurrences               ProcedureOccurrence[]
+
+  @@unique([id, labId])
+  @@index([labId, status, scheduledAt])
+  @@index([experimentId, scheduledAt])
+  @@index([assignmentId, status])
+  @@index([sopId, sopVersionId])
+  @@index([sopAssignmentId])
+}
+
+model ProcedureOccurrence {
+  id                        String                    @id
+  planId                    String
+  occurrenceKey             String
+  labId                     String
+  experimentId              String
+  assignmentId              String
+  animalId                  String
+  experimentCodeSnapshot    String
+  animalFacilityIdSnapshot  String
+  cageBarcodeSnapshot       String?
+  roomNumberSnapshot        String?
+  rackNumberSnapshot        String?
+  cageNumberSnapshot        String?
+  procedureCode             String
+  title                     String
+  plannedAt                 DateTime
+  occurredAt                DateTime
+  status                    ProcedureOccurrenceStatus
+  outcomeNote               String?
+  planVersion               Int
+  sopId                     String
+  sopVersionId              String
+  sopVersionNumber          Int
+  sopContentHash            String
+  sopAssignmentId           String
+  assignmentContextSnapshot Json
+  experimentContextSnapshot Json
+  executedById              String
+  recordedAt                DateTime                  @default(now())
+  plan                      ProcedurePlan             @relation(fields: [planId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab                       Lab                       @relation(fields: [labId], references: [id], onDelete: Restrict)
+  experiment                Experiment                @relation(fields: [experimentId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  assignment                ExperimentAssignment      @relation(fields: [assignmentId, experimentId], references: [id, experimentId], onDelete: Restrict, onUpdate: NoAction)
+  animal                    Animal                    @relation(fields: [animalId], references: [id], onDelete: Restrict)
+  sop                       SopDocument               @relation("ProcedureOccurrenceSop", fields: [sopId], references: [id], onDelete: Restrict)
+  sopVersion                SopVersion                @relation("ProcedureOccurrenceSopVersion", fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
+  sopAssignment             SopAssignment             @relation("ProcedureOccurrenceSopAssignment", fields: [sopAssignmentId, sopId, sopVersionId, labId], references: [id, sopId, sopVersionId, labId], onDelete: Restrict, onUpdate: NoAction, map: "ProcedureOccurrence_sopAssignmentId_sopId_sopVersionId_labId_fk")
+  executedBy                User                      @relation("ProcedureOccurrenceExecutor", fields: [executedById], references: [id], onDelete: Restrict)
+
+  @@unique([planId, occurrenceKey])
+  @@index([labId, occurredAt])
+  @@index([animalId, occurredAt])
+  @@index([planId, occurredAt])
+  @@index([sopId, sopVersionId])
+  @@index([sopAssignmentId])
+}
+
 model SampleRecord {
   id              String       @id
+  labId           String
   animalId        String
   projectId       String?
+  experimentId    String?
   sampleLabel     String       @unique
   sampleType      String
   status          SampleStatus @default(stored)
@@ -430,46 +1179,142 @@ model SampleRecord {
   storageLocation String?
   quantityLabel   String?
   notes           String?
+  version         Int          @default(1)
   createdById     String?
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
   animal          Animal       @relation(fields: [animalId], references: [id], onDelete: Cascade)
-  project         Project?     @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  lab             Lab          @relation(fields: [labId], references: [id], onDelete: Restrict)
+  project         Project?     @relation(fields: [projectId, labId], references: [id, labId], onDelete: NoAction, onUpdate: NoAction)
+  experiment      Experiment?  @relation(fields: [experimentId, labId], references: [id, labId], onDelete: NoAction, onUpdate: NoAction)
   createdBy       User?        @relation("SampleRecordCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([animalId])
+  @@index([labId])
   @@index([projectId])
+  @@index([experimentId])
   @@index([status])
   @@index([collectedAt])
 }
 
 model CryostorageRecord {
-  id               String            @id
-  strainId         String
-  projectId        String?
-  sampleLabel      String            @unique
-  materialType     String
-  status           CryostorageStatus @default(stored)
-  storedAt         DateTime
-  storageLocation  String?
-  quantityLabel    String?
-  recoveryNotes    String?
-  notes            String?
-  createdById      String?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  strain           Strain            @relation(fields: [strainId], references: [id], onDelete: Cascade)
-  project          Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  createdBy        User?             @relation("CryostorageRecordCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  id              String                 @id
+  labId           String
+  strainId        String
+  projectId       String?
+  sampleLabel     String                 @unique
+  materialType    String
+  status          CryostorageStatus      @default(stored)
+  storedAt        DateTime
+  storageLocation String?
+  quantityLabel   String?
+  recoveryNotes   String?
+  notes           String?
+  version         Int                    @default(1)
+  createdById     String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  strain          Strain                 @relation(fields: [strainId], references: [id], onDelete: Cascade)
+  lab             Lab                    @relation(fields: [labId], references: [id], onDelete: Restrict)
+  project         Project?               @relation(fields: [projectId, labId], references: [id, labId], onDelete: NoAction, onUpdate: NoAction)
+  createdBy       User?                  @relation("CryostorageRecordCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  requests        CryostorageRequest[]
+  operations      CryostorageOperation[]
 
+  @@unique([id, labId])
   @@index([strainId])
+  @@index([labId])
   @@index([projectId])
   @@index([status])
   @@index([storedAt])
 }
 
+model CryostorageRequest {
+  id                       String                    @id
+  labId                    String
+  requestType              CryostorageRequestType
+  status                   CryostorageRequestStatus  @default(submitted)
+  targetRecordId           String?
+  targetRecordVersion      Int?
+  strainId                 String?
+  projectId                String?
+  sampleLabel              String?
+  materialType             String?
+  requestedQuantityLabel   String?
+  requestedStorageLocation String?
+  requestedFor             DateTime
+  notes                    String?
+  requestedById            String
+  requestedAt              DateTime                  @default(now())
+  decidedById              String?
+  decidedAt                DateTime?
+  decisionReason           String?
+  version                  Int                       @default(1)
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  lab                      Lab                       @relation(fields: [labId], references: [id], onDelete: Restrict)
+  targetRecord             CryostorageRecord?        @relation(fields: [targetRecordId, labId], references: [id, labId], onDelete: NoAction, onUpdate: NoAction)
+  strain                   Strain?                   @relation(fields: [strainId], references: [id], onDelete: Restrict)
+  project                  Project?                  @relation(fields: [projectId, labId], references: [id, labId], onDelete: NoAction, onUpdate: NoAction)
+  requestedBy              User                      @relation("CryostorageRequestCreator", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy                User?                     @relation("CryostorageRequestDecisionActor", fields: [decidedById], references: [id], onDelete: Restrict)
+  events                   CryostorageRequestEvent[]
+  operation                CryostorageOperation?
+
+  @@index([labId, status, requestedAt])
+  @@index([requestedById, requestedAt])
+  @@index([targetRecordId])
+  @@index([projectId])
+  @@index([strainId])
+}
+
+model CryostorageRequestEvent {
+  id         String                      @id
+  requestId  String
+  eventType  CryostorageRequestEventType
+  actorId    String
+  actorRole  UserRole
+  actorLabId String?
+  reason     String?
+  metadata   Json?
+  createdAt  DateTime                    @default(now())
+  request    CryostorageRequest          @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  actor      User                        @relation("CryostorageRequestEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+  actorLab   Lab?                        @relation(fields: [actorLabId], references: [id], onDelete: Restrict)
+
+  @@unique([requestId, eventType])
+  @@index([requestId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([actorLabId, createdAt])
+}
+
+model CryostorageOperation {
+  id              String                   @id
+  requestId       String                   @unique
+  recordId        String
+  labId           String
+  operationType   CryostorageOperationType
+  previousStatus  CryostorageStatus?
+  resultingStatus CryostorageStatus
+  performedAt     DateTime
+  performedById   String
+  storageLocation String?
+  quantityLabel   String?
+  notes           String?
+  createdAt       DateTime                 @default(now())
+  request         CryostorageRequest       @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  record          CryostorageRecord        @relation(fields: [recordId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab             Lab                      @relation(fields: [labId], references: [id], onDelete: Restrict)
+  performedBy     User                     @relation("CryostorageOperationActor", fields: [performedById], references: [id], onDelete: Restrict)
+
+  @@index([recordId, performedAt])
+  @@index([labId, performedAt])
+  @@index([performedById, performedAt])
+}
+
 model HealthNote {
   id               String         @id
+  labId            String
   animalId         String?
   cageId           String?
   noteType         HealthNoteType
@@ -481,13 +1326,17 @@ model HealthNote {
   createdById      String
   createdAt        DateTime       @default(now())
   animal           Animal?        @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  lab              Lab            @relation(fields: [labId], references: [id], onDelete: Restrict)
   cage             Cage?          @relation(fields: [cageId], references: [id], onDelete: Cascade)
   createdBy        User           @relation("HealthNoteCreator", fields: [createdById], references: [id], onDelete: Restrict)
   attachments      Attachment[]
+
+  @@index([labId])
 }
 
 model Attachment {
   id                 String            @id
+  labId              String
   animalId           String?
   cageId             String?
   healthNoteId       String?
@@ -497,33 +1346,51 @@ model Attachment {
   fileType           String
   storageUrl         String
   animal             Animal?           @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  lab                Lab               @relation(fields: [labId], references: [id], onDelete: Restrict)
   cage               Cage?             @relation(fields: [cageId], references: [id], onDelete: Cascade)
   healthNote         HealthNote?       @relation(fields: [healthNoteId], references: [id], onDelete: Cascade)
   genotypingRecord   GenotypingRecord? @relation(fields: [genotypingRecordId], references: [id], onDelete: Cascade)
+
+  @@index([labId])
 }
 
 model AnimalStatusEvent {
-  id         String       @id
-  animalId   String
-  fromStatus AnimalStatus?
-  toStatus   AnimalStatus
-  happenedAt DateTime
-  actorId    String?
-  reason     String?
-  animal     Animal       @relation(fields: [animalId], references: [id], onDelete: Cascade)
-  actor      User?        @relation("StatusEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+  id               String         @id
+  animalId         String
+  fromStatus       AnimalStatus?
+  toStatus         AnimalStatus
+  happenedAt       DateTime
+  actorId          String?
+  reason           String?
+  sopId            String?
+  sopVersionId     String?
+  sopVersionNumber Int?
+  sopContentHash   String?
+  sopAssignmentId  String?
+  animal           Animal         @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  actor            User?          @relation("StatusEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+  sop              SopDocument?   @relation("AnimalStatusEventSop", fields: [sopId], references: [id], onDelete: Restrict)
+  sopVersion       SopVersion?    @relation("AnimalStatusEventSopVersion", fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
+  sopAssignment    SopAssignment? @relation("AnimalStatusEventSopAssignment", fields: [sopAssignmentId], references: [id], onDelete: Restrict)
+
+  @@index([sopId, sopVersionId])
+  @@index([sopAssignmentId])
 }
 
 model AnimalMovement {
-  id         String  @id
+  id         String              @id
+  requestId  String?
   animalId   String
   fromCageId String?
   toCageId   String?
   movedById  String?
   movedAt    DateTime
   reason     String?
-  animal     Animal  @relation(fields: [animalId], references: [id], onDelete: Cascade)
-  movedBy    User?   @relation("AnimalMoveActor", fields: [movedById], references: [id], onDelete: SetNull)
+  request    LabTransferRequest? @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  animal     Animal              @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  movedBy    User?               @relation("AnimalMoveActor", fields: [movedById], references: [id], onDelete: SetNull)
+
+  @@index([requestId])
 }
 
 model CageMovement {
@@ -536,6 +1403,283 @@ model CageMovement {
   reason       String?
   cage         Cage     @relation(fields: [cageId], references: [id], onDelete: Cascade)
   movedBy      User?    @relation("CageMoveActor", fields: [movedById], references: [id], onDelete: SetNull)
+}
+
+model CageChargeCategory {
+  id             String             @id
+  name           String
+  code           String             @unique
+  dailyRateCents Int
+  currencyCode   String             @default("USD")
+  active         Boolean            @default(true)
+  notes          String?
+  version        Int                @default(1)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  chargePeriods  CageChargePeriod[]
+  invoiceLines   InvoiceLineItem[]
+}
+
+model CageChargePeriod {
+  id             String             @id
+  cageId         String
+  labId          String
+  categoryId     String
+  dailyRateCents Int
+  currencyCode   String             @default("USD")
+  startedAt      DateTime
+  endedAt        DateTime?
+  notes          String?
+  cage           Cage               @relation(fields: [cageId], references: [id], onDelete: Cascade)
+  lab            Lab                @relation(fields: [labId], references: [id], onDelete: Restrict)
+  category       CageChargeCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  invoiceLines   InvoiceLineItem[]
+  closure        CageClosure?
+
+  @@unique([id, cageId, labId])
+  @@unique([id, cageId, categoryId])
+  @@index([cageId])
+  @@index([labId])
+  @@index([categoryId])
+  @@index([startedAt])
+}
+
+model CageClosure {
+  id               String                  @id
+  cageId           String                  @unique
+  labId            String
+  chargePeriodId   String                  @unique
+  reviewSnapshotId String?                 @unique
+  closedAt         DateTime
+  billingCutoffAt  DateTime
+  reason           String
+  closedById       String?
+  createdAt        DateTime                @default(now())
+  cage             Cage                    @relation(fields: [cageId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab              Lab                     @relation(fields: [labId], references: [id], onDelete: Restrict)
+  chargePeriod     CageChargePeriod        @relation(fields: [chargePeriodId, cageId, labId], references: [id, cageId, labId], onDelete: Restrict, onUpdate: NoAction)
+  reviewSnapshot   WorkflowReviewSnapshot? @relation(fields: [reviewSnapshotId], references: [id], onDelete: Restrict)
+  closedBy         User?                   @relation("CageClosureActor", fields: [closedById], references: [id], onDelete: SetNull)
+
+  @@unique([cageId, labId])
+  @@unique([chargePeriodId, cageId, labId])
+  @@index([labId, closedAt])
+  @@index([closedAt])
+}
+
+model CageLabTransfer {
+  id        String             @id
+  requestId String             @unique
+  cageId    String
+  fromLabId String
+  toLabId   String
+  movedById String?
+  movedAt   DateTime
+  reason    String?
+  request   LabTransferRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  cage      Cage               @relation(fields: [cageId], references: [id], onDelete: Cascade)
+  fromLab   Lab                @relation("CageTransferFromLab", fields: [fromLabId], references: [id], onDelete: Restrict)
+  toLab     Lab                @relation("CageTransferToLab", fields: [toLabId], references: [id], onDelete: Restrict)
+  movedBy   User?              @relation("CageLabTransferActor", fields: [movedById], references: [id], onDelete: SetNull)
+
+  @@index([cageId])
+  @@index([fromLabId])
+  @@index([toLabId])
+}
+
+model AnimalLabTransfer {
+  id        String             @id
+  requestId String
+  animalId  String
+  fromLabId String
+  toLabId   String
+  movedById String?
+  movedAt   DateTime
+  reason    String?
+  request   LabTransferRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  animal    Animal             @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  fromLab   Lab                @relation("AnimalTransferFromLab", fields: [fromLabId], references: [id], onDelete: Restrict)
+  toLab     Lab                @relation("AnimalTransferToLab", fields: [toLabId], references: [id], onDelete: Restrict)
+  movedBy   User?              @relation("AnimalLabTransferActor", fields: [movedById], references: [id], onDelete: SetNull)
+
+  @@unique([requestId, animalId])
+  @@index([animalId])
+  @@index([requestId])
+  @@index([fromLabId])
+  @@index([toLabId])
+}
+
+model LabTransferRequest {
+  id                      String                   @id
+  subjectType             LabTransferSubjectType
+  sourceLabId             String
+  destinationLabId        String
+  sourceCageId            String?
+  destinationCageId       String?
+  reason                  String
+  sourcePrivateNote       String?
+  requestedEffectiveAt    DateTime
+  status                  LabTransferRequestStatus @default(requested)
+  packetVersion           Int                      @default(1)
+  acceptedPacketVersion   Int?
+  acceptedPacketHash      String?
+  requestedById           String
+  requestedAt             DateTime                 @default(now())
+  destinationDecisionById String?
+  destinationDecisionAt   DateTime?
+  destinationDecisionNote String?
+  finalizedById           String?
+  finalizedAt             DateTime?
+  overrideApprovedById    String?
+  overrideApprovedAt      DateTime?
+  overrideReason          String?
+  version                 Int                      @default(1)
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  sourceLab               Lab                      @relation("LabTransferSourceLab", fields: [sourceLabId], references: [id], onDelete: Restrict)
+  destinationLab          Lab                      @relation("LabTransferDestinationLab", fields: [destinationLabId], references: [id], onDelete: Restrict)
+  sourceCage              Cage?                    @relation("LabTransferSourceCage", fields: [sourceCageId], references: [id], onDelete: Restrict)
+  destinationCage         Cage?                    @relation("LabTransferDestinationCage", fields: [destinationCageId], references: [id], onDelete: Restrict)
+  requestedBy             User                     @relation("LabTransferRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  destinationDecisionBy   User?                    @relation("LabTransferDestinationDecision", fields: [destinationDecisionById], references: [id], onDelete: Restrict)
+  finalizedBy             User?                    @relation("LabTransferFinalizer", fields: [finalizedById], references: [id], onDelete: Restrict)
+  overrideApprovedBy      User?                    @relation("LabTransferOverrideApprover", fields: [overrideApprovedById], references: [id], onDelete: Restrict)
+  items                   LabTransferItem[]
+  packets                 LabTransferPacket[]
+  events                  LabTransferEvent[]
+  cageTransfers           CageLabTransfer[]
+  animalTransfers         AnimalLabTransfer[]
+  animalMovements         AnimalMovement[]
+
+  @@index([sourceLabId, status])
+  @@index([destinationLabId, status])
+  @@index([status, requestedAt])
+  @@index([sourceCageId])
+  @@index([destinationCageId])
+}
+
+model LabTransferItem {
+  id           String             @id
+  requestId    String
+  animalId     String
+  sourceCageId String?
+  active       Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  request      LabTransferRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  animal       Animal             @relation(fields: [animalId], references: [id], onDelete: Restrict)
+  sourceCage   Cage?              @relation(fields: [sourceCageId], references: [id], onDelete: Restrict)
+
+  @@unique([requestId, animalId])
+  @@index([animalId])
+  @@index([sourceCageId])
+}
+
+model LabTransferPacket {
+  id                 String             @id
+  requestId          String
+  version            Int
+  destinationPayload Json
+  payloadHash        String
+  createdById        String
+  createdAt          DateTime           @default(now())
+  request            LabTransferRequest @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  createdBy          User               @relation("LabTransferPacketCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@unique([requestId, version])
+  @@index([createdById, createdAt])
+}
+
+model LabTransferEvent {
+  id            String               @id
+  requestId     String
+  eventType     LabTransferEventType
+  actorId       String
+  actorRole     UserRole
+  actorLabId    String?
+  packetVersion Int
+  reason        String?
+  metadata      Json?
+  createdAt     DateTime             @default(now())
+  request       LabTransferRequest   @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  actor         User                 @relation("LabTransferEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+  actorLab      Lab?                 @relation(fields: [actorLabId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([actorLabId, createdAt])
+}
+
+model Invoice {
+  id                   String              @id
+  invoiceNumber        String              @unique
+  finalNumber          String?             @unique
+  labId                String
+  status               InvoiceStatus       @default(draft)
+  periodStart          DateTime
+  periodEnd            DateTime
+  currencyCode         String              @default("USD")
+  subtotalCents        Int                 @default(0)
+  adjustmentTotalCents Int                 @default(0)
+  totalCents           Int                 @default(0)
+  finalizedAt          DateTime?
+  finalizedById        String?
+  voidedAt             DateTime?
+  voidedById           String?
+  voidReason           String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  version              Int                 @default(1)
+  lab                  Lab                 @relation(fields: [labId], references: [id], onDelete: Restrict)
+  finalizedBy          User?               @relation("InvoiceFinalizer", fields: [finalizedById], references: [id], onDelete: SetNull)
+  voidedBy             User?               @relation("InvoiceVoider", fields: [voidedById], references: [id], onDelete: SetNull)
+  lineItems            InvoiceLineItem[]
+  adjustments          InvoiceAdjustment[]
+
+  @@index([labId])
+  @@index([status])
+  @@index([periodStart, periodEnd])
+}
+
+model InvoiceAdjustment {
+  id                   String                @id
+  invoiceId            String
+  labId                String
+  adjustmentType       InvoiceAdjustmentType
+  amountCents          Int
+  reason               String
+  createdById          String
+  reversesAdjustmentId String?               @unique
+  createdAt            DateTime              @default(now())
+  invoice              Invoice               @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  lab                  Lab                   @relation(fields: [labId], references: [id], onDelete: Restrict)
+  createdBy            User                  @relation("InvoiceAdjustmentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reversesAdjustment   InvoiceAdjustment?    @relation("InvoiceAdjustmentReversal", fields: [reversesAdjustmentId], references: [id], onDelete: Restrict)
+  reversedByAdjustment InvoiceAdjustment?    @relation("InvoiceAdjustmentReversal")
+
+  @@index([invoiceId, createdAt])
+  @@index([labId, createdAt])
+  @@index([createdById, createdAt])
+}
+
+model InvoiceLineItem {
+  id             String             @id
+  invoiceId      String
+  cageId         String
+  chargePeriodId String
+  categoryId     String
+  description    String
+  serviceStart   DateTime
+  serviceEnd     DateTime
+  dayCount       Int
+  dailyRateCents Int
+  amountCents    Int
+  invoice        Invoice            @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  cage           Cage               @relation(fields: [cageId], references: [id], onDelete: Restrict)
+  chargePeriod   CageChargePeriod   @relation(fields: [chargePeriodId, cageId, categoryId], references: [id, cageId, categoryId], onDelete: Restrict, onUpdate: NoAction)
+  category       CageChargeCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@index([cageId])
 }
 
 model RuleConfig {
@@ -552,6 +1696,7 @@ model RuleConfig {
 
 model Alert {
   id          String        @id
+  labId       String?
   entityType  String
   entityId    String
   alertType   String
@@ -561,16 +1706,410 @@ model Alert {
   status      AlertStatus   @default(open)
   generatedAt DateTime
   resolvedAt  DateTime?
+  lab         Lab?          @relation(fields: [labId], references: [id], onDelete: Cascade)
+
+  @@index([labId, status])
+}
+
+model NotificationEvent {
+  id          String                  @id
+  sourceKey   String                  @unique
+  source      String
+  labId       String?
+  categoryKey String
+  severity    AlertSeverity
+  message     String
+  entityType  String
+  entityId    String
+  deepLink    String
+  actionLabel String
+  urgent      Boolean                 @default(false)
+  status      AlertStatus             @default(open)
+  occurredAt  DateTime
+  resolvedAt  DateTime?
+  version     Int                     @default(1)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  lab         Lab?                    @relation(fields: [labId], references: [id], onDelete: Restrict)
+  audiences   NotificationAudience[]
+  recipients  NotificationRecipient[]
+
+  @@index([labId, status, occurredAt])
+  @@index([categoryKey, status, occurredAt])
+  @@index([entityType, entityId])
+}
+
+model NotificationAudience {
+  id           String                   @id
+  eventId      String
+  audienceType NotificationAudienceType
+  audienceKey  String
+  userId       String?
+  labId        String?
+  facilityRole UserRole?
+  createdAt    DateTime                 @default(now())
+  event        NotificationEvent        @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  user         User?                    @relation("NotificationAudienceUser", fields: [userId], references: [id], onDelete: Restrict)
+  lab          Lab?                     @relation(fields: [labId], references: [id], onDelete: Restrict)
+  recipients   NotificationRecipient[]
+
+  @@unique([eventId, audienceKey])
+  @@index([userId, eventId])
+  @@index([labId, eventId])
+  @@index([facilityRole, eventId])
+}
+
+model NotificationRecipient {
+  id                      String                      @id
+  eventId                 String
+  audienceId              String
+  userId                  String
+  labId                   String?
+  recipientAuthzVersion   Int
+  recipientRole           UserRole
+  recipientMembershipRole LabMembershipRole?
+  status                  NotificationRecipientStatus @default(active)
+  materializedAt          DateTime                    @default(now())
+  revokedAt               DateTime?
+  revokeReason            String?
+  readAt                  DateTime?
+  acknowledgedAt          DateTime?
+  resolvedAt              DateTime?
+  version                 Int                         @default(1)
+  event                   NotificationEvent           @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  audience                NotificationAudience        @relation(fields: [audienceId], references: [id], onDelete: Restrict)
+  user                    User                        @relation("NotificationRecipientUser", fields: [userId], references: [id], onDelete: Restrict)
+  lab                     Lab?                        @relation(fields: [labId], references: [id], onDelete: Restrict)
+  deliveries              NotificationDelivery[]
+
+  @@index([eventId, userId])
+  @@index([userId, status, materializedAt])
+  @@index([labId, status, materializedAt])
+  @@index([audienceId])
+}
+
+model NotificationPreference {
+  id              String                @id
+  userId          String
+  categoryKey     String
+  inAppEnabled    Boolean               @default(true)
+  emailMode       NotificationEmailMode @default(off)
+  digestHourUtc   Int                   @default(8)
+  digestDayOfWeek Int                   @default(1)
+  version         Int                   @default(1)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  user            User                  @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, categoryKey])
+  @@index([userId, updatedAt])
+}
+
+model NotificationDelivery {
+  id                        String                     @id
+  recipientId               String
+  recipientVersion          Int
+  preferenceVersion         Int                        @default(0)
+  eventVersion              Int?
+  outboxMessageId           String                     @unique
+  kind                      NotificationDeliveryKind
+  status                    NotificationDeliveryStatus @default(queued)
+  scheduledFor              DateTime
+  deliveredTo               String?
+  providerMessageId         String?
+  providerStatus            Int?
+  providerRequestBody       String?
+  providerRequestHash       String?
+  providerIdempotencyKey    String?
+  providerRequestTo         String?
+  providerAdapter           String?
+  providerEndpoint          String?
+  providerAccount           String?
+  providerRequestPreparedAt DateTime?
+  attemptCount              Int                        @default(0)
+  lastError                 String?
+  deliveredAt               DateTime?
+  failedAt                  DateTime?
+  cancelledAt               DateTime?
+  version                   Int                        @default(1)
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  recipient                 NotificationRecipient      @relation(fields: [recipientId], references: [id], onDelete: Restrict)
+  outboxMessage             OutboxMessage              @relation(fields: [outboxMessageId], references: [id], onDelete: Restrict)
+
+  @@unique([recipientId, kind, preferenceVersion, eventVersion], map: "NotificationDelivery_recipient_kind_preference_event_key")
+  @@index([status, scheduledFor])
+  @@index([recipientId, createdAt])
+}
+
+enum SecurityEventSeverity {
+  info
+  warning
+  critical
+}
+
+enum SecurityEventOutcome {
+  succeeded
+  denied
+  failed
 }
 
 model AuditLog {
-  id           String   @id
-  actorId      String?
-  entityType   String
-  entityId     String
-  action       String
-  previousValue Json?
-  newValue     Json?
-  timestamp    DateTime
-  actor        User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  id                   String          @id
+  actorId              String?
+  actorRole            String?
+  labId                String?
+  requestId            String?
+  commandReceiptId     String?
+  commandType          String?
+  commandAggregateType String?
+  commandAggregateId   String?
+  entityType           String
+  entityId             String
+  action               String
+  previousValue        Json?
+  newValue             Json?
+  timestamp            DateTime
+  actor                User?           @relation("AuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+  lab                  Lab?            @relation(fields: [labId], references: [id], onDelete: Restrict)
+  commandReceipt       CommandReceipt? @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict)
+
+  @@index([timestamp])
+  @@index([labId, timestamp])
+  @@index([entityType, entityId, timestamp])
+  @@index([requestId])
+}
+
+model SecurityEvent {
+  id            String                @id
+  eventType     String
+  severity      SecurityEventSeverity @default(info)
+  outcome       SecurityEventOutcome
+  actorId       String?
+  actorRole     String                @default("system")
+  scopeLabId    String?
+  correlationId String?
+  dedupeKey     String?               @unique
+  subjectType   String?
+  subjectId     String?
+  source        String
+  summary       String
+  occurredAt    DateTime              @default(now())
+  actor         User?                 @relation("SecurityEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+  scopeLab      Lab?                  @relation(fields: [scopeLabId], references: [id], onDelete: Restrict)
+
+  @@index([occurredAt])
+  @@index([eventType, occurredAt])
+  @@index([severity, occurredAt])
+  @@index([actorId, occurredAt])
+  @@index([scopeLabId, occurredAt])
+  @@index([correlationId])
+}
+
+model WorkflowDraft {
+  id              String                   @id
+  workflowType    String
+  actorId         String
+  labId           String?
+  status          WorkflowDraftStatus      @default(draft)
+  version         Int                      @default(1)
+  payload         Json
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  expiresAt       DateTime?
+  submittedAt     DateTime?
+  committedAt     DateTime?
+  cancelledAt     DateTime?
+  actor           User                     @relation("WorkflowDraftActor", fields: [actorId], references: [id], onDelete: Restrict)
+  lab             Lab?                     @relation(fields: [labId], references: [id], onDelete: Restrict)
+  reviewSnapshots WorkflowReviewSnapshot[]
+  commandReceipts CommandReceipt[]
+
+  @@index([actorId, status])
+  @@index([labId, status])
+  @@index([workflowType, status])
+  @@index([expiresAt, status])
+}
+
+model WorkflowReviewSnapshot {
+  id           String        @id
+  draftId      String
+  draftVersion Int
+  payload      Json
+  payloadHash  String
+  createdById  String
+  createdAt    DateTime      @default(now())
+  draft        WorkflowDraft @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  createdBy    User          @relation("WorkflowSnapshotActor", fields: [createdById], references: [id], onDelete: Restrict)
+  cageClosure  CageClosure?
+
+  @@unique([draftId, draftVersion])
+  @@index([createdById, createdAt])
+}
+
+model CommandReceipt {
+  id                String               @id
+  actorId           String
+  actorAuthzVersion Int                  @default(0)
+  databasePrincipal String               @default(dbgenerated("SESSION_USER"))
+  labId             String?
+  workflowDraftId   String?
+  commandType       String
+  idempotencyKey    String
+  requestHash       String
+  requestId         String
+  transactionId     BigInt               @default(dbgenerated("txid_current()"))
+  status            CommandReceiptStatus @default(processing)
+  aggregateType     String?
+  aggregateId       String?
+  expectedVersion   Int?
+  resultingVersion  Int?
+  result            Json?
+  errorCode         String?
+  errorMessage      String?
+  startedAt         DateTime             @default(now())
+  completedAt       DateTime?
+  actor             User                 @relation("CommandReceiptActor", fields: [actorId], references: [id], onDelete: Restrict)
+  lab               Lab?                 @relation(fields: [labId], references: [id], onDelete: Restrict)
+  workflowDraft     WorkflowDraft?       @relation(fields: [workflowDraftId], references: [id], onDelete: SetNull)
+  auditLogs          AuditLog[]
+
+  @@unique([actorId, commandType, idempotencyKey])
+  @@index([requestId])
+  @@index([labId, startedAt])
+  @@index([aggregateType, aggregateId])
+}
+
+model OutboxMessage {
+  id                          String                  @id
+  topic                       String
+  dedupeKey                   String?                 @unique
+  aggregateType               String
+  aggregateId                 String
+  actorId                     String?
+  actorAuthzVersion           Int?
+  labId                       String?
+  requiredCapability          String?
+  payload                     Json
+  status                      OutboxMessageStatus     @default(pending)
+  attemptCount                Int                     @default(0)
+  maxAttempts                 Int                     @default(8)
+  availableAt                 DateTime                @default(now())
+  leaseOwner                  String?
+  leaseToken                  String?                 @unique
+  workerType                  String?
+  leasedAt                    DateTime?
+  leaseExpiresAt              DateTime?
+  authorizedAt                DateTime?
+  authorizedCapability        String?
+  authorizedActorAuthzVersion Int?
+  deliveredAt                 DateTime?
+  deadLetteredAt              DateTime?
+  lastError                   String?
+  createdAt                   DateTime                @default(now())
+  updatedAt                   DateTime                @updatedAt
+  actor                       User?                   @relation("OutboxActor", fields: [actorId], references: [id], onDelete: SetNull)
+  lab                         Lab?                    @relation(fields: [labId], references: [id], onDelete: Restrict)
+  attempts                    OutboxDeliveryAttempt[]
+  notificationDelivery        NotificationDelivery?
+
+  @@index([status, availableAt])
+  @@index([topic, status])
+  @@index([labId, status])
+  @@index([leaseExpiresAt])
+}
+
+model OutboxDeliveryAttempt {
+  id                   String              @id
+  messageId            String
+  attemptNumber        Int
+  workerId             String
+  workerType           String
+  leaseToken           String              @unique
+  status               OutboxAttemptStatus @default(processing)
+  authorizedAt         DateTime
+  authorizedCapability String
+  startedAt            DateTime            @default(now())
+  completedAt          DateTime?
+  errorMessage         String?
+  message              OutboxMessage       @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, attemptNumber])
+  @@index([workerId, startedAt])
+}
+
+model FacilityIdentitySequence {
+  entityType   FacilityIdentifierType         @id
+  nextValue    Int
+  minimumValue Int
+  maximumValue Int
+  width        Int                            @default(4)
+  updatedAt    DateTime                       @updatedAt
+  assignments  FacilityIdentifierAssignment[]
+}
+
+model FacilityIdentifierAssignment {
+  id            String                   @id
+  entityType    FacilityIdentifierType
+  sequenceValue Int
+  displayId     String
+  entityId      String
+  issuedAt      DateTime                 @default(now())
+  sequence      FacilityIdentitySequence @relation(fields: [entityType], references: [entityType], onDelete: Restrict)
+
+  @@unique([entityType, sequenceValue])
+  @@unique([entityType, displayId])
+  @@unique([entityType, entityId])
+  @@index([entityId])
+}
+
+model LegacyIdentifierAlias {
+  id                 String                 @id
+  entityType         FacilityIdentifierType
+  entityId           String
+  alias              String
+  canonicalDisplayId String
+  source             String
+  createdAt          DateTime               @default(now())
+
+  @@unique([entityType, alias])
+  @@index([entityType, entityId])
+}
+
+model MigrationRun {
+  id            String               @id
+  runKey        String               @unique
+  migrationType String
+  status        MigrationRunStatus   @default(planned)
+  initiatedById String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  summary       Json?
+  errorMessage  String?
+  createdAt     DateTime             @default(now())
+  initiatedBy   User?                @relation("MigrationRunActor", fields: [initiatedById], references: [id], onDelete: SetNull)
+  exceptions    OwnershipException[]
+
+  @@index([migrationType, status])
+}
+
+model OwnershipException {
+  id             String                   @id
+  migrationRunId String?
+  entityType     String
+  entityId       String
+  fieldName      String
+  currentValue   Json?
+  candidates     Json?
+  reason         String
+  status         OwnershipExceptionStatus @default(open)
+  resolution     Json?
+  resolvedById   String?
+  createdAt      DateTime                 @default(now())
+  resolvedAt     DateTime?
+  migrationRun   MigrationRun?            @relation(fields: [migrationRunId], references: [id], onDelete: Restrict)
+  resolvedBy     User?                    @relation("OwnershipExceptionResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([migrationRunId, status])
+  @@index([entityType, entityId, status])
 }

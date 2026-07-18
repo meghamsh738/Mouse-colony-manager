@@ -1,11 +1,5 @@
-import { NextResponse } from "next/server";
-
 import { buildItemResponse, requireApiUser } from "@/lib/api-route";
 import { buildNotificationDeliveryBatch, deliverNotificationDigest } from "@/lib/notification-delivery";
-
-function canDeliver(role: string) {
-  return role === "admin" || role === "colony_manager";
-}
 
 async function parseDeliveryRequest(request: Request) {
   try {
@@ -22,27 +16,23 @@ async function parseDeliveryRequest(request: Request) {
 }
 
 export async function GET() {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("notifications:deliver");
 
   if ("response" in auth) {
     return auth.response;
   }
 
-  return buildItemResponse(await buildNotificationDeliveryBatch());
+  return buildItemResponse(await buildNotificationDeliveryBatch(auth.user));
 }
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("notifications:deliver");
 
   if ("response" in auth) {
     return auth.response;
-  }
-
-  if (!canDeliver(auth.user.role)) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const input = await parseDeliveryRequest(request);
 
-  return buildItemResponse(await deliverNotificationDigest(input));
+  return buildItemResponse(await deliverNotificationDigest(input, auth.user));
 }

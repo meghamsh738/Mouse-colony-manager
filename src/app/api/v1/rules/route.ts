@@ -17,14 +17,14 @@ const updateRuleApiSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("rules:manage");
 
   if ("response" in auth) {
     return auth.response;
   }
 
   const filters = parseRuleApiFilters(new URL(request.url).searchParams);
-  const result = await getRuleApiList(filters);
+  const result = await getRuleApiList(filters, auth.user);
 
   return buildCollectionResponse(result.data, {
     total: result.total,
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("rules:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -56,13 +56,13 @@ export async function PATCH(request: Request) {
     return buildApiErrorResponse("Invalid rule update payload.", 400, parsed.error.flatten().fieldErrors);
   }
 
-  const resolved = await resolveRuleApiReference(parsed.data);
+  const resolved = await resolveRuleApiReference(parsed.data, auth.user);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
   }
 
-  const existingRule = await getRuleApiRecordById(resolved.value.ruleId);
+  const existingRule = await getRuleApiRecordById(resolved.value.ruleId, auth.user);
 
   if (!existingRule) {
     return buildApiErrorResponse("Rule was resolved but could not be read back.", 500);
@@ -74,7 +74,7 @@ export async function PATCH(request: Request) {
       valueInput: parsed.data.valueInput,
       criticalBlock: parsed.data.criticalBlock ?? existingRule.criticalBlock,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok) {
@@ -83,7 +83,7 @@ export async function PATCH(request: Request) {
     return buildApiErrorResponse(result.message, status);
   }
 
-  const rule = await getRuleApiRecordById(resolved.value.ruleId);
+  const rule = await getRuleApiRecordById(resolved.value.ruleId, auth.user);
 
   if (!rule) {
     return buildApiErrorResponse("Rule was updated but could not be read back.", 500);

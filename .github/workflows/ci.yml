@@ -31,8 +31,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/colony_maintenance?schema=public&sslmode=disable&pgbouncer=true
-      DIRECT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/colony_maintenance?schema=public&sslmode=disable
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/colony_maintenance?schema=mcm_test_ci&sslmode=disable&pgbouncer=true
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/colony_maintenance?schema=mcm_test_ci&sslmode=disable
       AUTH_SECRET: colony-maintenance-ci-secret
       AUTH_URL: http://localhost:3000
       NEXTAUTH_URL: http://localhost:3000
@@ -76,8 +76,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/colony_maintenance?schema=public&sslmode=disable&pgbouncer=true
-      DIRECT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/colony_maintenance?schema=public&sslmode=disable
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/colony_maintenance?schema=mcm_e2e_ci&sslmode=disable&pgbouncer=true
+      DIRECT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/colony_maintenance?schema=mcm_e2e_ci&sslmode=disable
       AUTH_SECRET: colony-maintenance-ci-secret
       AUTH_URL: http://localhost:3005
       NEXTAUTH_URL: http://localhost:3005

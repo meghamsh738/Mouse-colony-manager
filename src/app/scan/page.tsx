@@ -6,8 +6,8 @@ import { getCageListView } from "@/lib/cages-read";
 import { requireUser } from "@/lib/session";
 
 export default async function ScanPage() {
-  const user = await requireUser();
-  const cages = await getCageListView();
+  const user = await requireUser({ capability: "scan:use" });
+  const cages = await getCageListView(user);
   const quickCages = [...cages]
     .sort((left, right) => right.warningCount - left.warningCount || right.occupantCount - left.occupantCount || left.barcode.localeCompare(right.barcode))
     .slice(0, 6)
@@ -25,8 +25,7 @@ export default async function ScanPage() {
       <div className="space-y-8">
         <PageHeader
           eyebrow="Barcode scan"
-          title="Fast cage lookup for mobile rounds."
-          description="Scan a QR or barcode when the device supports it, or paste a barcode manually. The result opens a cage workspace optimized for quick welfare and husbandry actions."
+          title="Scan cage"
         />
         <Surface>
           <ScanLauncher quickCages={quickCages} />

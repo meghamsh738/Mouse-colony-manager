@@ -2,7 +2,7 @@ import { buildCollectionResponse, requireApiUser } from "@/lib/api-route";
 import { getIntegrationExportCatalog } from "@/lib/integration-api";
 
 export async function GET(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("workbook:read");
 
   if ("response" in auth) {
     return auth.response;

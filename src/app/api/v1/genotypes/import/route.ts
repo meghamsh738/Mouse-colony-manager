@@ -10,7 +10,7 @@ const genotypeImportApiSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("animals:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       csvText: parsedRequest.value.csvText,
       fileName: parsedRequest.value.fileName,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok) {

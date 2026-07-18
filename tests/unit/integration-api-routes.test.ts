@@ -1,8 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 
 import { getAnimalDetailView } from "@/lib/animals-read";
+import { getActorCapabilities } from "@/lib/capabilities";
+import { allocateFacilityIdentifiers } from "@/lib/command-foundation";
 import { SEEDED_DEV_EMAILS } from "@/lib/seed-metadata";
 import { prisma } from "@/lib/prisma";
+import type { ResolvedActor } from "@/lib/session";
+import {
+  executeAssignSopVersionCommand,
+  executeCreateSopCommand,
+  executeDecideSopVersionCommand,
+} from "@/lib/sop-write";
 import { seedDatabase } from "../../prisma/seed-database";
 
 const { authMock } = vi.hoisted(() => ({
@@ -12,6 +21,9 @@ const { authMock } = vi.hoisted(() => ({
 vi.mock("@/auth", () => ({
   auth: authMock,
 }));
+vi.mock("next/headers", () => ({
+  cookies: vi.fn(async () => ({ get: vi.fn(() => undefined) })),
+}));
 
 function authenticatedSession() {
   return {
@@ -20,6 +32,7 @@ function authenticatedSession() {
       email: SEEDED_DEV_EMAILS.admin,
       name: "Colony Admin",
       role: "admin" as const,
+      authzVersion: 1,
     },
   };
 }
@@ -31,8 +44,98 @@ function readOnlySession() {
       email: SEEDED_DEV_EMAILS.readonly,
       name: "Readonly User",
       role: "read_only" as const,
+      authzVersion: 1,
     },
   };
+}
+
+async function createApiWeaningCage() {
+  await prisma.$transaction(async (tx) => {
+    const [facilityCageId] = await allocateFacilityIdentifiers(tx, "cage", 1);
+    await tx.cage.create({
+      data: {
+        id: "cage-api-weaning-males",
+        facilityCageId,
+        labId: "lab-microglia",
+        roomId: "room-a101",
+        rackId: "rack-a101-2",
+        cageNumber: "098",
+        barcode: "CM-API-WEAN-MALE",
+        status: "active",
+      },
+    });
+  });
+}
+
+function systemActor(input: {
+  id: string;
+  role: "facility_admin" | "cmu_staff";
+}): ResolvedActor {
+  return {
+    id: input.id,
+    email: input.role === "facility_admin" ? SEEDED_DEV_EMAILS.admin : SEEDED_DEV_EMAILS.manager,
+    name: input.role === "facility_admin" ? "Colony Admin" : "Colony Manager",
+    role: input.role === "facility_admin" ? "admin" : "colony_manager",
+    databaseRole: input.role,
+    canonicalRole: input.role,
+    authzVersion: 1,
+    activeLabId: null,
+    activeMembership: null,
+    memberships: [],
+    capabilities: [...getActorCapabilities({ canonicalRole: input.role, activeMembership: null })],
+  };
+}
+
+async function createApiEuthanasiaSopAssignment() {
+  const cmu = systemActor({ id: "user-manager", role: "cmu_staff" });
+  const facility = systemActor({ id: "user-admin", role: "facility_admin" });
+  const created = await executeCreateSopCommand({
+    actor: cmu,
+    command: {
+      scope: "facility",
+      code: "FAC-EUTH-API-001",
+      title: "Humane euthanasia API test",
+      category: "Welfare",
+      contentMarkdown: "Confirm the approved endpoint, identify the animal, perform the controlled procedure, and record the outcome.",
+      changeSummary: "Controlled integration API test version",
+    },
+    idempotencyKey: "api-euthanasia-sop-create",
+    requestId: "api-euthanasia-sop-create-request",
+  });
+  expect(created.ok, JSON.stringify(created)).toBe(true);
+  if (!created.ok) throw new Error(created.message);
+  const createdResult = created.result as { documentId: string; versionId: string };
+  const pendingDocument = await prisma.sopDocument.findUniqueOrThrow({ where: { id: createdResult.documentId } });
+  const decided = await executeDecideSopVersionCommand({
+    actor: facility,
+    command: {
+      sopId: createdResult.documentId,
+      versionId: createdResult.versionId,
+      decision: "approved",
+      note: "Approved for external lifecycle integration verification.",
+    },
+    expectedVersion: pendingDocument.version,
+    idempotencyKey: "api-euthanasia-sop-approve",
+    requestId: "api-euthanasia-sop-approve-request",
+  });
+  expect(decided.ok, JSON.stringify(decided)).toBe(true);
+  if (!decided.ok) throw new Error(decided.message);
+  const approvedDocument = await prisma.sopDocument.findUniqueOrThrow({ where: { id: createdResult.documentId } });
+  const assigned = await executeAssignSopVersionCommand({
+    actor: cmu,
+    command: {
+      sopId: createdResult.documentId,
+      versionId: createdResult.versionId,
+      labId: "lab-microglia",
+      reason: "Required for humane endpoint records created through the integration API.",
+    },
+    expectedVersion: approvedDocument.version,
+    idempotencyKey: "api-euthanasia-sop-assign",
+    requestId: "api-euthanasia-sop-assign-request",
+  });
+  expect(assigned.ok, JSON.stringify(assigned)).toBe(true);
+  if (!assigned.ok) throw new Error(assigned.message);
+  return (assigned.result as { assignmentId: string }).assignmentId;
 }
 
 describe("integration API routes", () => {
@@ -70,6 +173,46 @@ describe("integration API routes", () => {
     expect(payload.data.every((animal) => animal.sex === "male" && animal.availableForExperiment)).toBe(true);
   });
 
+  it("filters animal lists to the lab user's active lab", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { GET } = await import("@/app/api/v1/animals/route");
+    const response = await GET(new Request("http://localhost:3000/api/v1/animals"));
+    const payload = (await response.json()) as {
+      data: Array<{ animalId: string; owningLabId: string | null }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.data.length).toBeGreaterThan(0);
+    expect(payload.data.every((animal) => animal.owningLabId === "lab-neuroimmune")).toBe(true);
+    expect(payload.data.some((animal) => animal.animalId === "CM-24001")).toBe(false);
+  });
+
+  it("returns 404 for a foreign-lab direct animal lookup", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { GET } = await import("@/app/api/v1/animals/[animalId]/route");
+    const response = await GET(
+      new Request("http://localhost:3000/api/v1/animals/animal-001"),
+      { params: Promise.resolve({ animalId: "animal-001" }) },
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({ error: "Animal not found" });
+  });
+
+  it("does not resolve a foreign-lab cage through the scan lookup route", async () => {
+    authMock.mockResolvedValue(readOnlySession());
+
+    const { GET } = await import("@/app/scan/lookup/route");
+    const response = await GET(
+      new NextRequest("http://localhost:3000/scan/lookup?barcode=CM-A101-003"),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({ error: "Cage not found" });
+  });
+
   it("creates animal records through the external animal route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
 
@@ -84,7 +227,7 @@ describe("integration API routes", () => {
           dob: "2026-03-10",
           strainName: "C57BL/6J",
           cageBarcode: "CM-A101-003",
-          projectCode: "PRJ-NEURO-07",
+          projectCode: "PRJ-MICRO-24",
           notes: "Created by the authenticated animal intake route test.",
         }),
       }),
@@ -116,7 +259,7 @@ describe("integration API routes", () => {
       },
       cageLabel: "A101 / R2 / 003",
       strainName: "C57BL/6J",
-      projectCodes: ["PRJ-NEURO-07"],
+      projectCodes: ["PRJ-MICRO-24"],
     });
 
     await expect(
@@ -135,16 +278,25 @@ describe("integration API routes", () => {
 
   it("updates animal lifecycle state through the external animal route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    const sopAssignmentId = await createApiEuthanasiaSopAssignment();
+    const happenedAt = new Date().toISOString();
 
     const { PATCH } = await import("@/app/api/v1/animals/route");
+    const version = (await prisma.animal.findFirstOrThrow({
+      where: { animalId: "CM-26005" },
+      select: { version: true },
+    })).version;
     const response = await PATCH(
       new Request("http://localhost:3000/api/v1/animals", {
         method: "PATCH",
         body: JSON.stringify({
-          animalCode: "CM-26003",
+          animalCode: "CM-26005",
           targetStatus: "euthanized",
-          happenedAt: "2026-04-18",
+          happenedAt,
           reason: "External colony system recorded humane endpoint completion.",
+          sopAssignmentId,
+          expectedVersion: version,
+          confirmed: true,
         }),
       }),
     );
@@ -163,14 +315,37 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.meta.created).toBe(false);
-    expect(payload.meta.message).toContain("CM-26003 marked euthanized");
+    expect(payload.meta.message).toContain("CM-26005 marked euthanized");
     expect(payload.data.animal).toMatchObject({
-      animalId: "CM-26003",
+      animalId: "CM-26005",
       status: "euthanized",
       outcomeStatus: "euthanized",
       deathReason: "External colony system recorded humane endpoint completion.",
     });
-    expect(payload.data.cageLabel).toBe("Archived");
+    expect(payload.data.cageLabel).toBe("Not in cage");
+
+    const statusEvent = await prisma.animalStatusEvent.findFirstOrThrow({
+      where: { animal: { animalId: "CM-26005" }, toStatus: "euthanized" },
+      select: {
+        id: true,
+        sopAssignmentId: true,
+        sopId: true,
+        sopVersionId: true,
+        sopVersionNumber: true,
+        sopContentHash: true,
+      },
+    });
+    expect(statusEvent).toMatchObject({
+      sopAssignmentId,
+      sopVersionNumber: 1,
+    });
+    expect(statusEvent.sopId).toBeTruthy();
+    expect(statusEvent.sopVersionId).toBeTruthy();
+    expect(statusEvent.sopContentHash).toMatch(/^[0-9a-f]{64}$/);
+    await expect(prisma.animalStatusEvent.update({
+      where: { id: statusEvent.id },
+      data: { reason: "History mutation must be rejected." },
+    })).rejects.toThrow(/append-only history/i);
 
     await expect(
       prisma.auditLog.findFirst({
@@ -188,24 +363,40 @@ describe("integration API routes", () => {
 
   it("treats repeated terminal lifecycle sync as idempotent", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    const sopAssignmentId = await createApiEuthanasiaSopAssignment();
+    const happenedAt = new Date().toISOString();
 
     const { PATCH } = await import("@/app/api/v1/animals/route");
+    const lifecycleAnimal = await prisma.animal.findFirstOrThrow({
+      where: { animalId: "CM-26005" },
+      select: { id: true, version: true },
+    });
     const requestBody = {
-      animalCode: "CM-26003",
+      animalCode: "CM-26005",
       targetStatus: "euthanized",
-      happenedAt: "2026-04-18",
+      happenedAt,
       reason: "External colony system recorded humane endpoint completion.",
+      sopAssignmentId,
+      expectedVersion: lifecycleAnimal.version,
+      confirmed: true,
+    };
+    const headers = {
+      "content-type": "application/json",
+      "idempotency-key": "api-lifecycle-repeat-2026",
+      "x-workflow-id": "api-lifecycle-repeat-workflow-2026",
     };
 
     await PATCH(
       new Request("http://localhost:3000/api/v1/animals", {
         method: "PATCH",
+        headers,
         body: JSON.stringify(requestBody),
       }),
     );
     const response = await PATCH(
       new Request("http://localhost:3000/api/v1/animals", {
         method: "PATCH",
+        headers,
         body: JSON.stringify(requestBody),
       }),
     );
@@ -216,8 +407,116 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.meta.created).toBe(false);
-    expect(payload.meta.message).toContain("already marked euthanized");
+    expect(payload.meta.message).toContain("marked euthanized");
     expect(payload.data.animal.status).toBe("euthanized");
+    const resultingVersion = (await prisma.animal.findUniqueOrThrow({
+      where: { id: lifecycleAnimal.id },
+      select: { version: true },
+    })).version;
+    const conflictResponse = await PATCH(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "PATCH",
+        headers: { ...headers, "x-workflow-id": "api-lifecycle-conflicting-workflow-2026" },
+        body: JSON.stringify({
+          ...requestBody,
+          targetStatus: "archived",
+          happenedAt: "2026-04-19",
+          sopAssignmentId: undefined,
+          reason: "Conflicting reuse of the lifecycle idempotency key must fail.",
+          expectedVersion: resultingVersion,
+        }),
+      }),
+    );
+    expect(conflictResponse.status).toBe(409);
+    await expect(prisma.animal.findUniqueOrThrow({
+      where: { id: lifecycleAnimal.id },
+      select: { status: true },
+    })).resolves.toEqual({ status: "euthanized" });
+    await expect(prisma.commandReceipt.count({
+      where: {
+        aggregateType: "animal",
+        aggregateId: lifecycleAnimal.id,
+        commandType: "animal.lifecycle.update",
+      },
+    })).resolves.toBe(1);
+  });
+
+  it("returns external-transfer provenance through the animal API", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+    const animal = await prisma.animal.findFirstOrThrow({
+      where: { animalId: "CM-26005" },
+      select: { version: true },
+    });
+    const { PATCH } = await import("@/app/api/v1/animals/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          animalCode: "CM-26005",
+          targetStatus: "transferred_out",
+          happenedAt: "2026-04-18",
+          reason: "Transferred to the external partner after review.",
+          destination: "External Partner Facility",
+          transferReference: "EXT-26003",
+          expectedVersion: animal.version,
+          confirmed: true,
+        }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      data: {
+        animal: {
+          status: string;
+          externalTransfer: {
+            destination: string;
+            reference: string | null;
+            happenedAt: string;
+            reason: string;
+          } | null;
+        };
+        cageLabel: string;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.data.animal.status).toBe("transferred_out");
+    expect(payload.data.animal.externalTransfer).toEqual({
+      destination: "External Partner Facility",
+      reference: "EXT-26003",
+      happenedAt: "2026-04-18",
+      reason: "Transferred to the external partner after review.",
+    });
+    expect(payload.data.cageLabel).toBe("Not in cage");
+  });
+
+  it("rejects nonexistent lifecycle calendar dates without changing the animal", async () => {
+    authMock.mockResolvedValue(authenticatedSession());
+    const before = await prisma.animal.findFirstOrThrow({
+      where: { animalId: "CM-26003" },
+      select: { id: true, status: true, version: true },
+    });
+    const { PATCH } = await import("@/app/api/v1/animals/route");
+    const response = await PATCH(
+      new Request("http://localhost:3000/api/v1/animals", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          animalCode: "CM-26003",
+          targetStatus: "dead",
+          happenedAt: "2026-02-30",
+          reason: "This invalid date must not normalize.",
+          expectedVersion: before.version,
+          confirmed: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(prisma.animal.findUniqueOrThrow({
+      where: { id: before.id },
+      select: { status: true, version: true },
+    })).resolves.toEqual({ status: before.status, version: before.version });
   });
 
   it("treats repeated animal intake as idempotent", async () => {
@@ -231,7 +530,7 @@ describe("integration API routes", () => {
       dob: "2026-03-10",
       strainName: "C57BL/6J",
       cageBarcode: "CM-A101-003",
-      projectCode: "PRJ-NEURO-07",
+      projectCode: "PRJ-MICRO-24",
       notes: "Repeated by the authenticated animal intake route test.",
     };
 
@@ -271,13 +570,14 @@ describe("integration API routes", () => {
           targetStatus: "dead",
           happenedAt: "2026-04-18",
           reason: "Readonly user should not perform lifecycle sync.",
+          confirmed: true,
         }),
       }),
     );
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Your role cannot change terminal lifecycle states.",
+      error: "Forbidden",
     });
   });
 
@@ -301,7 +601,7 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Your role cannot create new animal records.",
+      error: "Forbidden",
     });
   });
 
@@ -565,11 +865,11 @@ describe("integration API routes", () => {
 
     expect(createResponse.status).toBe(403);
     await expect(createResponse.json()).resolves.toMatchObject({
-      error: "Your role cannot sync project records.",
+      error: "Forbidden",
     });
     expect(updateResponse.status).toBe(403);
     await expect(updateResponse.json()).resolves.toMatchObject({
-      error: "Your role cannot sync project records.",
+      error: "Forbidden",
     });
   });
 
@@ -653,8 +953,8 @@ describe("integration API routes", () => {
       new Request("http://localhost:3000/api/v1/breeding-setups", {
         method: "POST",
         body: JSON.stringify({
-          sireCode: "CM-22008",
-          damCode: "CM-25009",
+          sireCode: "CM-24001",
+          damCode: "CM-24002",
           startDate: "2026-04-18",
           targetGenotype: "CreER maintenance API",
           targetSex: "female",
@@ -676,7 +976,7 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(201);
     expect(payload.meta.created).toBe(true);
-    expect(payload.meta.message).toContain("Breeding setup created for CM-22008 and CM-25009");
+    expect(payload.meta.message).toContain("Breeding setup created for CM-24001 and CM-24002");
     expect(payload.data).toMatchObject({
       status: "active",
       targetGenotype: "CreER maintenance API",
@@ -684,8 +984,8 @@ describe("integration API routes", () => {
     });
     expect(payload.data.adults).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ role: "sire", animalCode: "CM-22008", status: "breeding", cageBarcode: "CM-A102-005" }),
-        expect.objectContaining({ role: "dam", animalCode: "CM-25009", status: "breeding", cageBarcode: "CM-A102-005" }),
+        expect.objectContaining({ role: "sire", animalCode: "CM-24001", status: "breeding", cageBarcode: "CM-A101-001" }),
+        expect.objectContaining({ role: "dam", animalCode: "CM-24002", status: "breeding", cageBarcode: "CM-A101-001" }),
       ]),
     );
 
@@ -708,8 +1008,8 @@ describe("integration API routes", () => {
 
     const { POST } = await import("@/app/api/v1/breeding-setups/route");
     const requestBody = {
-      sireCode: "CM-22008",
-      damCode: "CM-25009",
+      sireCode: "CM-24001",
+      damCode: "CM-24002",
       startDate: "2026-04-18",
       targetGenotype: "CreER maintenance API",
       targetSex: "female",
@@ -740,8 +1040,8 @@ describe("integration API routes", () => {
     expect(payload.data.status).toBe("active");
     expect(payload.data.adults).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ animalCode: "CM-22008" }),
-        expect.objectContaining({ animalCode: "CM-25009" }),
+        expect.objectContaining({ animalCode: "CM-24001" }),
+        expect.objectContaining({ animalCode: "CM-24002" }),
       ]),
     );
   });
@@ -839,14 +1139,15 @@ describe("integration API routes", () => {
 
   it("records litter weaning through the external weaning route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    await createApiWeaningCage();
 
     const { POST: createBreedingSetup } = await import("@/app/api/v1/breeding-setups/route");
     const breedingResponse = await createBreedingSetup(
       new Request("http://localhost:3000/api/v1/breeding-setups", {
         method: "POST",
         body: JSON.stringify({
-          sireCode: "CM-22008",
-          damCode: "CM-25009",
+          sireCode: "CM-24001",
+          damCode: "CM-24002",
           startDate: "2026-04-18",
           targetGenotype: "Weaning route verification",
           allowOverride: true,
@@ -879,7 +1180,7 @@ describe("integration API routes", () => {
           femaleCount: 2,
           maleCount: 3,
           femaleCageBarcode: "CM-A101-003",
-          maleCageBarcode: "CM-A101-002",
+          maleCageBarcode: "CM-API-WEAN-MALE",
           strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
         }),
       }),
@@ -908,12 +1209,12 @@ describe("integration API routes", () => {
       maleCount: 3,
       strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
       femaleCage: { cageBarcode: "CM-A101-003" },
-      maleCage: { cageBarcode: "CM-A101-002" },
+      maleCage: { cageBarcode: "CM-API-WEAN-MALE" },
     });
     expect(payload.data.progeny).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ sex: "female", cageBarcode: "CM-A101-003", strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato" }),
-        expect.objectContaining({ sex: "male", cageBarcode: "CM-A101-002", strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato" }),
+        expect.objectContaining({ sex: "male", cageBarcode: "CM-API-WEAN-MALE", strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato" }),
       ]),
     );
 
@@ -933,14 +1234,15 @@ describe("integration API routes", () => {
 
   it("treats repeated weaning sync as idempotent", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    await createApiWeaningCage();
 
     const { POST: createBreedingSetup } = await import("@/app/api/v1/breeding-setups/route");
     const breedingResponse = await createBreedingSetup(
       new Request("http://localhost:3000/api/v1/breeding-setups", {
         method: "POST",
         body: JSON.stringify({
-          sireCode: "CM-22008",
-          damCode: "CM-25009",
+          sireCode: "CM-24001",
+          damCode: "CM-24002",
           startDate: "2026-04-18",
           targetGenotype: "Repeated weaning verification",
           allowOverride: true,
@@ -970,7 +1272,7 @@ describe("integration API routes", () => {
       femaleCount: 2,
       maleCount: 3,
       femaleCageBarcode: "CM-A101-003",
-      maleCageBarcode: "CM-A101-002",
+      maleCageBarcode: "CM-API-WEAN-MALE",
       strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
     };
 
@@ -1071,7 +1373,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot move cages." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("rejects read-only breeding setup intake requests", async () => {
@@ -1091,7 +1393,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot create breeding setups." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("rejects read-only litter intake requests", async () => {
@@ -1110,7 +1412,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record litters." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("rejects read-only weaning sync requests", async () => {
@@ -1128,12 +1430,13 @@ describe("integration API routes", () => {
           femaleCageBarcode: "CM-A101-003",
           maleCageBarcode: "CM-A101-002",
           strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
+          projectCode: "PRJ-MICRO-24",
         }),
       }),
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record litter weaning." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("treats repeated cage welfare event ingestion as idempotent", async () => {
@@ -1237,7 +1540,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot add cage health notes." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("returns filtered sample inventory from the authenticated sample route", async () => {
@@ -1364,6 +1667,7 @@ describe("integration API routes", () => {
         method: "POST",
         body: JSON.stringify({
           strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
+          projectCode: "PRJ-MICRO-24",
           sampleLabel: "CRYO-API-LIFECYCLE",
           materialType: "Frozen embryos",
           status: "stored",
@@ -1486,6 +1790,7 @@ describe("integration API routes", () => {
       sampleType: "Serum",
       status: "stored",
       collectedAt: "2026-04-05",
+      storageLocation: "Freezer API / Box repeat",
     };
 
     await POST(
@@ -1527,12 +1832,14 @@ describe("integration API routes", () => {
     );
 
     expect(createResponse.status).toBe(201);
+    const created = (await createResponse.json()) as { data: { version: number } };
 
     const updateResponse = await PATCH(
       new Request("http://localhost:3000/api/v1/samples", {
         method: "PATCH",
         body: JSON.stringify({
           sampleLabel: "LIMS-API-LIFECYCLE",
+          expectedVersion: created.data.version,
           status: "allocated",
           storageLocation: "Study allocation rack 4",
           quantityLabel: "10 uL remaining",
@@ -1594,7 +1901,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record new sample inventory." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("rejects read-only cryostorage intake requests", async () => {
@@ -1615,7 +1922,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record cryostorage inventory." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("rejects read-only sample lifecycle update requests", async () => {
@@ -1633,7 +1940,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot update sample inventory." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("rejects read-only cryostorage lifecycle update requests", async () => {
@@ -1651,7 +1958,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot update cryostorage inventory." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("creates genotype records through the external genotype intake route", async () => {
@@ -1824,7 +2131,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot record genotyping results." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("returns filtered rule summaries and updates rule config through the external rules route", async () => {
@@ -1922,7 +2229,10 @@ describe("integration API routes", () => {
       preflightErrorCount: 0,
     });
 
-    const [animal009, animal011] = await Promise.all([getAnimalDetailView("animal-009"), getAnimalDetailView("animal-011")]);
+    const [animal009, animal011] = await Promise.all([
+      getAnimalDetailView("animal-009", { id: "user-admin", role: "admin" }),
+      getAnimalDetailView("animal-011", { id: "user-admin", role: "admin" }),
+    ]);
 
     expect(animal009?.genotypeSummary).toContain("CreER +/-");
     expect(animal011?.genotypeSummary).toContain("CreER WT/WT");
@@ -2340,7 +2650,7 @@ describe("integration API routes", () => {
     );
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toMatchObject({ error: "Your role cannot sync experiment assignments." });
+    await expect(response.json()).resolves.toMatchObject({ error: "Forbidden" });
   });
 
   it("rejects read-only experiment assignment status sync requests", async () => {
@@ -2359,7 +2669,7 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Your role cannot sync experiment assignment status.",
+      error: "Forbidden",
     });
   });
 
@@ -2380,7 +2690,7 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Your role cannot sync experiment reservations.",
+      error: "Forbidden",
     });
   });
 
@@ -2401,7 +2711,7 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Only admins can update rule settings.",
+      error: "Forbidden",
     });
   });
 
@@ -2421,7 +2731,7 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
-      error: "Your role cannot import genotyping results.",
+      error: "Forbidden",
     });
   });
 
@@ -2460,7 +2770,7 @@ describe("integration API routes", () => {
 
     expect(updateResponse.status).toBe(403);
     await expect(updateResponse.json()).resolves.toMatchObject({
-      error: "Your role cannot edit planned cohorts.",
+      error: "Forbidden",
     });
 
     const deleteResponse = await DELETE(
@@ -2472,7 +2782,7 @@ describe("integration API routes", () => {
 
     expect(deleteResponse.status).toBe(403);
     await expect(deleteResponse.json()).resolves.toMatchObject({
-      error: "Your role cannot remove planned cohorts.",
+      error: "Forbidden",
     });
   });
 });

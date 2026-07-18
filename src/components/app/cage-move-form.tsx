@@ -102,9 +102,6 @@ export function CageMoveForm({
           data-testid="cage-move-reason"
         />
       </label>
-      <p className="text-sm leading-6 text-[var(--muted)]">
-        The cage barcode stays the same. This updates the operational location and records a dated movement entry for audit history.
-      </p>
       <FormFeedback state={state} />
       <div className="border-t border-[var(--line)] pt-4">
         <Button className="relative z-10 w-full sm:w-auto" disabled={pending} type="submit" data-testid="cage-move-submit">

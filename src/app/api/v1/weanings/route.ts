@@ -2,7 +2,12 @@ import { z } from "zod";
 
 import { buildApiErrorResponse, buildMutationResponse, requireApiUser } from "@/lib/api-route";
 import { weanLitterToCages } from "@/lib/colony-write";
-import { getWeaningApiRecordByLitterId, resolveCageByApiReference, resolveStrainByApiReference } from "@/lib/integration-api";
+import {
+  getLitterApiRecordById,
+  getWeaningApiRecordByLitterId,
+  resolveCageByApiReference,
+  resolveStrainByApiReference,
+} from "@/lib/integration-api";
 
 const createWeaningApiSchema = z.object({
   litterId: z.string().trim().min(1),
@@ -18,7 +23,7 @@ const createWeaningApiSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("breeding:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -35,21 +40,26 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Invalid weaning payload.", 400, parsed.error.flatten().fieldErrors);
   }
 
-  const [strain, femaleCage, maleCage] = await Promise.all([
-    resolveStrainByApiReference(parsed.data),
+  const [litter, strain, femaleCage, maleCage] = await Promise.all([
+    getLitterApiRecordById(parsed.data.litterId, auth.user),
+    resolveStrainByApiReference(parsed.data, auth.user),
     parsed.data.femaleCount > 0
       ? resolveCageByApiReference({
           cageId: parsed.data.femaleCageId,
           cageBarcode: parsed.data.femaleCageBarcode,
-        })
+        }, auth.user)
       : Promise.resolve(null),
     parsed.data.maleCount > 0
       ? resolveCageByApiReference({
           cageId: parsed.data.maleCageId,
           cageBarcode: parsed.data.maleCageBarcode,
-        })
+        }, auth.user)
       : Promise.resolve(null),
   ]);
+
+  if (!litter) {
+    return buildApiErrorResponse("Litter not found.", 404);
+  }
 
   if (!strain.ok) {
     return buildApiErrorResponse(strain.message, strain.status);
@@ -63,6 +73,13 @@ export async function POST(request: Request) {
     return buildApiErrorResponse(maleCage.message, maleCage.status);
   }
 
+  if (
+    (femaleCage?.ok && femaleCage.value.labId !== litter.labId) ||
+    (maleCage?.ok && maleCage.value.labId !== litter.labId)
+  ) {
+    return buildApiErrorResponse("Destination cage not found.", 404);
+  }
+
   const result = await weanLitterToCages(
     {
       litterId: parsed.data.litterId,
@@ -73,7 +90,7 @@ export async function POST(request: Request) {
       maleCageId: maleCage?.value.cageId,
       strainId: strain.value.strainId,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok) {
@@ -81,7 +98,7 @@ export async function POST(request: Request) {
       result.message.includes("already has a recorded weaning outcome") ||
       result.message.includes("already has linked progeny records")
     ) {
-      const existingRecord = await getWeaningApiRecordByLitterId(parsed.data.litterId);
+      const existingRecord = await getWeaningApiRecordByLitterId(parsed.data.litterId, auth.user);
 
       if (existingRecord && matchesWeaningInput(existingRecord, parsed.data, strain.value.strainId, femaleCage?.value.cageId, maleCage?.value.cageId)) {
         return buildMutationResponse(existingRecord, {
@@ -105,7 +122,7 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Litter weaning was recorded but could not be read back.", 500);
   }
 
-  const record = await getWeaningApiRecordByLitterId(result.entityId);
+  const record = await getWeaningApiRecordByLitterId(result.entityId, auth.user);
 
   if (!record) {
     return buildApiErrorResponse("Litter weaning was recorded but could not be read back.", 500);

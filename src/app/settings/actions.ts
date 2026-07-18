@@ -18,7 +18,7 @@ export async function updateRuleConfigAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "rules:manage" });
   const parsed = updateRuleSchema.safeParse({
     ruleId: formData.get("ruleId"),
     valueInput: formData.get("valueInput") ?? "",
@@ -38,7 +38,7 @@ export async function updateRuleConfigAction(
       valueInput: parsed.data.valueInput,
       criticalBlock: parsed.data.criticalBlock === "on",
     },
-    { id: user.id, role: user.role },
+    { id: user.id, role: user.role, activeLabId: user.activeLabId },
   );
 
   if (!result.ok) {

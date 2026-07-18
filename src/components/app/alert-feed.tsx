@@ -1,5 +1,7 @@
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
-import { Surface } from "@/components/app/surface";
 import type { Alert } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -15,27 +17,55 @@ function severityVariant(severity: Alert["severity"]) {
   return "info";
 }
 
+function getAlertHref(alert: Alert) {
+  if (alert.entityType === "animal") {
+    return `/animals/${alert.entityId}`;
+  }
+
+  if (alert.entityType === "cage") {
+    return `/cages/${alert.entityId}`;
+  }
+
+  if (alert.entityType === "experiment") {
+    return "/experiments";
+  }
+
+  if (alert.entityType === "litter") {
+    return "/breeding";
+  }
+
+  return "/notifications";
+}
+
 export function AlertFeed({ alerts, title }: { alerts: Alert[]; title: string }) {
   return (
-    <Surface className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="font-display text-2xl font-semibold tracking-[-0.04em]">{title}</h2>
-        <Badge variant="neutral">{alerts.length} items</Badge>
+    <section className="dashboard-lane">
+      <div className="dashboard-lane-header">
+        <div className="flex min-w-0 items-center gap-2">
+          <h2>{title}</h2>
+          <span className="lane-count">{alerts.length}</span>
+        </div>
+        <Link href="/notifications">View all</Link>
       </div>
-      <div className="space-y-3">
-        {alerts.map((alert) => (
-          <article key={alert.id} className="rounded-2xl border border-[var(--line)] bg-white/70 p-4">
-            <div className="flex flex-wrap items-center gap-2">
+      <div className="dashboard-row-list">
+        {alerts.length ? (
+          alerts.map((alert) => (
+            <Link className="dashboard-alert-row" data-severity={alert.severity} href={getAlertHref(alert)} key={alert.id}>
+              <span className="dashboard-row-priority" aria-hidden="true" />
               <Badge variant={severityVariant(alert.severity)}>{alert.severity}</Badge>
-              <Badge variant="neutral">{alert.alertType.replaceAll("_", " ")}</Badge>
-            </div>
-            <p className="mt-3 text-sm leading-7 text-[var(--ink)]">{alert.message}</p>
-            <p className="mt-2 text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
-              {alert.entityType} · {formatDate(alert.generatedAt)}
-            </p>
-          </article>
-        ))}
+              <div className="min-w-0">
+                <p className="dashboard-row-title">{alert.message}</p>
+                <p className="dashboard-row-meta">
+                  {alert.alertType.replaceAll("_", " ")} · {alert.entityType} · {formatDate(alert.generatedAt)}
+                </p>
+              </div>
+              <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" aria-hidden="true" />
+            </Link>
+          ))
+        ) : (
+          <p className="dashboard-empty-row">No priority alerts.</p>
+        )}
       </div>
-    </Surface>
+    </section>
   );
 }

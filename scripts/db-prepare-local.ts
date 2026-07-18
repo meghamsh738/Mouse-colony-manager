@@ -46,9 +46,14 @@ export async function runLocalDbPrepare(cwd = process.cwd(), runtimeEnv: NodeJS.
   const directDatabaseEnv = buildDirectDatabaseEnv(fileEnv, runtimeEnv);
   const childEnv = { ...runtimeEnv, ...directDatabaseEnv };
 
-  await run("npm", ["run", "db:push"], childEnv, cwd);
-  await run("npm", ["run", "db:seed"], childEnv, cwd);
+  for (const [command, args] of LOCAL_DB_PREPARE_STEPS) {
+    await run(command, args, childEnv, cwd);
+  }
 }
+
+export const LOCAL_DB_PREPARE_STEPS: ReadonlyArray<readonly [string, string[]]> = [
+  ["npm", ["run", "db:migrate"]],
+];
 
 async function readDotEnv(envFilePath: string) {
   try {

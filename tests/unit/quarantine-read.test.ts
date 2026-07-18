@@ -5,12 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { seedDatabase } from "../../prisma/seed-database";
 
 describe("quarantine sentinel tracking", () => {
+  const actor = { id: "quarantine-test-admin", role: "facility_admin" as const };
   beforeEach(async () => {
     await seedDatabase();
   }, 120_000);
 
   it("summarizes quarantine cages and unresolved sentinel concerns", async () => {
-    const view = await getQuarantineSentinelView();
+    const view = await getQuarantineSentinelView(actor);
     const quarantineCage = view.cages.find((cage) => cage.id === "cage-a102-005");
 
     expect(view.summary.quarantineCages).toBeGreaterThan(0);
@@ -27,7 +28,7 @@ describe("quarantine sentinel tracking", () => {
       data: { value: 1 },
     });
 
-    const view = await getQuarantineSentinelView();
+    const view = await getQuarantineSentinelView(actor);
     const quarantineCage = view.cages.find((cage) => cage.id === "cage-a102-005");
 
     expect(view.summary.sentinelDue).toBeGreaterThan(0);

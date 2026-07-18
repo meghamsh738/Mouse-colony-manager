@@ -165,7 +165,7 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
             <option value="reserved">Reserved</option>
             <option value="in_experiment">In experiment</option>
           </select>
-          <label className="flex min-w-0 items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--muted)]">
+          <label className="flex min-h-11 min-w-0 items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--muted)]">
             <input
               checked={availabilityFilter}
               onChange={(event) => setAvailabilityFilter(event.target.checked)}
@@ -189,7 +189,7 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
             <Link
               href={currentViewExportHref}
               prefetch={false}
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
+              className="inline-flex h-11 items-center justify-center rounded-lg bg-[var(--accent)] px-3 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)] md:h-9"
               data-testid="animal-export-current"
             >
               Export current view
@@ -197,7 +197,7 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
             <Link
               href="/api/exports/animals"
               prefetch={false}
-              className="inline-flex h-9 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
+              className="inline-flex h-11 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)] md:h-9"
               data-testid="animal-export-all"
             >
               Export all animals

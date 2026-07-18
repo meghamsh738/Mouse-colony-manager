@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import {
@@ -7,7 +8,9 @@ import {
   compactApiMeta,
   requireApiUser,
 } from "@/lib/api-route";
-import { createAnimalRecord, updateAnimalLifecycleStatus } from "@/lib/colony-write";
+import { createAnimalRecord, executeUpdateAnimalLifecycleCommand } from "@/lib/colony-write";
+import { canonicalJsonHash, prepareWorkflowReview } from "@/lib/command-foundation";
+import { parseExactLifecycleTimestamp } from "@/lib/lifecycle-provenance";
 import {
   getAnimalApiList,
   getAnimalApiRecordById,
@@ -37,19 +40,45 @@ const updateAnimalLifecycleApiSchema = z.object({
   animalId: z.string().trim().min(1).optional(),
   animalCode: z.string().trim().min(1).optional(),
   targetStatus: z.enum(["euthanized", "dead", "transferred_out", "archived"]),
-  happenedAt: z.string().trim().min(1),
+  happenedAt: z.string().trim().min(1).max(40),
   reason: z.string().trim().min(3).max(400),
+  destination: z.string().trim().max(160).optional(),
+  transferReference: z.string().trim().max(120).optional(),
+  sopAssignmentId: z.string().trim().min(1).optional(),
+  expectedVersion: z.coerce.number().int().min(1),
+  confirmed: z.literal(true),
+}).superRefine((value, context) => {
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value.happenedAt);
+  const exactDateTime = Boolean(parseExactLifecycleTimestamp(value.happenedAt));
+  if (value.targetStatus === "euthanized" && !exactDateTime) {
+    context.addIssue({ code: "custom", path: ["happenedAt"], message: "Euthanasia requires an exact date and time with a timezone." });
+  }
+  if (value.targetStatus !== "euthanized" && !dateOnly) {
+    context.addIssue({ code: "custom", path: ["happenedAt"], message: "Choose a lifecycle date." });
+  }
+  if (value.targetStatus === "transferred_out" && !value.destination) {
+    context.addIssue({ code: "custom", path: ["destination"], message: "A receiving facility is required." });
+  }
+  if (value.targetStatus !== "transferred_out" && (value.destination || value.transferReference)) {
+    context.addIssue({ code: "custom", path: ["destination"], message: "Transfer fields only apply to a transferred-out disposition." });
+  }
+  if (value.targetStatus === "euthanized" && !value.sopAssignmentId) {
+    context.addIssue({ code: "custom", path: ["sopAssignmentId"], message: "An approved assigned SOP is required for euthanasia." });
+  }
+  if (value.targetStatus !== "euthanized" && value.sopAssignmentId) {
+    context.addIssue({ code: "custom", path: ["sopAssignmentId"], message: "SOP provenance only applies to euthanasia." });
+  }
 });
 
 export async function GET(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("animals:read");
 
   if ("response" in auth) {
     return auth.response;
   }
 
   const filters = parseAnimalApiFilters(new URL(request.url).searchParams);
-  const result = await getAnimalApiList(filters);
+  const result = await getAnimalApiList(filters, auth.user);
 
   return buildCollectionResponse(result.data, {
     total: result.total,
@@ -67,7 +96,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("animals:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -85,9 +114,11 @@ export async function POST(request: Request) {
   }
 
   const [cage, strain, project] = await Promise.all([
-    resolveCageByApiReference(parsed.data),
-    resolveStrainByApiReference(parsed.data),
-    parsed.data.projectId || parsed.data.projectCode ? resolveProjectByApiReference(parsed.data) : Promise.resolve(null),
+    resolveCageByApiReference(parsed.data, auth.user),
+    resolveStrainByApiReference(parsed.data, auth.user),
+    parsed.data.projectId || parsed.data.projectCode
+      ? resolveProjectByApiReference(parsed.data, auth.user)
+      : Promise.resolve(null),
   ]);
 
   if (!cage.ok) {
@@ -102,13 +133,17 @@ export async function POST(request: Request) {
     return buildApiErrorResponse(project.message, project.status);
   }
 
+  if (project?.ok && project.value.labId !== cage.value.labId) {
+    return buildApiErrorResponse("Project not found for the supplied projectId or projectCode.", 404);
+  }
+
   const existingAnimal = await getExistingAnimalApiRecord({
     animalCode: parsed.data.animalCode,
     labId: parsed.data.labId,
     cageId: cage.value.cageId,
     strainId: strain.value.strainId,
     projectId: project?.value.projectId,
-  });
+  }, auth.user);
 
   if (existingAnimal) {
     return buildMutationResponse(existingAnimal, {
@@ -129,7 +164,7 @@ export async function POST(request: Request) {
       projectId: project?.value.projectId,
       notes: parsed.data.notes,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok) {
@@ -146,7 +181,7 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Animal record was created but could not be read back.", 500);
   }
 
-  const animal = await getAnimalApiRecordById(result.entityId);
+  const animal = await getAnimalApiRecordById(result.entityId, auth.user);
 
   if (!animal) {
     return buildApiErrorResponse("Animal record was created but could not be read back.", 500);
@@ -160,7 +195,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("animals:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -177,46 +212,83 @@ export async function PATCH(request: Request) {
     return buildApiErrorResponse("Invalid animal lifecycle payload.", 400, parsed.error.flatten().fieldErrors);
   }
 
-  const resolved = await resolveAnimalByApiReference(parsed.data);
+  const resolved = await resolveAnimalByApiReference(parsed.data, auth.user);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
   }
 
-  const result = await updateAnimalLifecycleStatus(
-    {
-      animalId: resolved.value.animalId,
-      targetStatus: parsed.data.targetStatus,
-      happenedAt: parsed.data.happenedAt,
-      reason: parsed.data.reason,
-    },
-    { id: auth.user.id, role: auth.user.role },
-  );
+  const current = await getAnimalApiRecordById(resolved.value.animalId, auth.user);
+  if (!current) return buildApiErrorResponse("Animal not found.", 404);
+  const command = {
+    animalId: resolved.value.animalId,
+    targetStatus: parsed.data.targetStatus,
+    happenedAt: parsed.data.happenedAt,
+    reason: parsed.data.reason,
+    destination: parsed.data.destination,
+    transferReference: parsed.data.transferReference,
+    sopAssignmentId: parsed.data.sopAssignmentId,
+  };
+  const expectedVersion = parsed.data.expectedVersion;
+  const idempotencyKey = request.headers.get("idempotency-key")?.trim()
+    || canonicalJsonHash({ actorId: auth.user.id, command, expectedVersion });
+  const workflowDraftId = request.headers.get("x-workflow-id")?.trim() || `lifecycle-${idempotencyKey}`;
+  const review = await prepareWorkflowReview({
+    actor: auth.user,
+    draftId: workflowDraftId,
+    workflowType: "animal.lifecycle.api",
+    requiredCapability: "animals:manage",
+    labId: auth.user.canonicalRole === "lab_user" ? auth.user.activeLabId : null,
+    payload: { command, expectedVersion } as unknown as Prisma.InputJsonValue,
+    allowCommittedReplay: true,
+  });
+  if (!review.ok) return buildApiErrorResponse(review.message, 409);
+  const result = await executeUpdateAnimalLifecycleCommand({
+    actor: auth.user,
+    command,
+    expectedVersion,
+    idempotencyKey,
+    requestId: request.headers.get("x-request-id")?.trim() || review.snapshot.id,
+    workflowDraftId: review.draft.id,
+    reviewSnapshotId: review.snapshot.id,
+  });
 
   if (!result.ok) {
-    const status = result.message.includes("role cannot")
+    const errorMessage = result.message ?? "Animal lifecycle state could not be changed.";
+    const status = result.code === "idempotency_conflict" || result.code === "stale_conflict"
+      ? 409
+      : errorMessage.includes("role cannot")
       ? 403
-      : result.message.includes("not found")
+      : errorMessage.includes("not found")
         ? 404
         : 400;
 
-    return buildApiErrorResponse(result.message, status);
+    return buildApiErrorResponse(errorMessage, status);
   }
 
-  if (!result.entityId) {
+  const commandResult = result.result && typeof result.result === "object" && !Array.isArray(result.result)
+    ? result.result
+    : null;
+  const entityId = commandResult && "entityId" in commandResult && typeof commandResult.entityId === "string"
+    ? commandResult.entityId
+    : null;
+  const resultMessage = commandResult && "message" in commandResult && typeof commandResult.message === "string"
+    ? commandResult.message
+    : "Animal lifecycle state changed.";
+  if (!entityId) {
     return buildApiErrorResponse("Animal lifecycle state changed but could not be read back.", 500);
   }
 
-  const animal = await getAnimalApiRecordById(result.entityId);
+  const animal = await getAnimalApiRecordById(entityId, auth.user);
 
   if (!animal) {
     return buildApiErrorResponse("Animal lifecycle state changed but could not be read back.", 500);
   }
 
   return buildMutationResponse(animal, {
-    status: result.message.includes("already") ? 200 : 200,
+    status: 200,
     created: false,
-    message: result.message,
+    message: resultMessage,
   });
 }
 

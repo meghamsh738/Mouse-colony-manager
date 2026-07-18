@@ -1,9 +1,20 @@
 export type UserRole =
+  | "it_head"
+  | "facility_admin"
+  | "cmu_staff"
+  | "lab_user"
   | "admin"
   | "colony_manager"
   | "animal_staff"
   | "researcher"
   | "read_only";
+
+export type CanonicalUserRole = "it_head" | "facility_admin" | "cmu_staff" | "lab_user";
+
+export type LabMembershipRole = "owner" | "manager" | "staff" | "viewer";
+export type InvitationStatus = "pending" | "accepted" | "revoked" | "expired";
+export type PrivilegedRoleChangeStatus = "pending" | "approved" | "rejected" | "expired";
+export type InvoiceStatus = "draft" | "finalized" | "void";
 
 export type Sex = "male" | "female" | "unknown";
 
@@ -65,6 +76,7 @@ export type GenotypeCallStatus = "pending" | "provisional" | "confirmed" | "conf
 export type SampleStatus = "collected" | "stored" | "allocated" | "consumed" | "discarded";
 export type CryostorageStatus = "stored" | "reserved" | "recovered" | "depleted" | "discarded";
 export type BreedingStatus = "planned" | "active" | "paused" | "retired" | "failed";
+export type AnimalIntakeDisposition = "holding" | "quarantine";
 export type BreedingAdultRole = "sire" | "dam" | "support";
 export type RuleCategory =
   | "breeding"
@@ -86,7 +98,12 @@ export type NotificationCategoryKey =
   | "weaning_due"
   | "breeder_age"
   | "welfare"
-  | "reservation_drift";
+  | "reservation_drift"
+  | "invoice"
+  | "sop"
+  | "transfer"
+  | "cryostorage"
+  | "system";
 export type NotificationDeliveryChannel = "in_app";
 
 export interface SeedUser {
@@ -98,9 +115,28 @@ export interface SeedUser {
   active: boolean;
 }
 
+export interface Lab {
+  id: string;
+  name: string;
+  code: string;
+  billingContact?: string;
+  notes?: string;
+  active?: boolean;
+}
+
+export interface LabMembership {
+  id: string;
+  labId: string;
+  userId: string;
+  role: LabMembershipRole;
+  active?: boolean;
+}
+
 export interface Facility {
   id: string;
   name: string;
+  cageBarcodePrefix?: string;
+  maxCageOccupancy?: number;
   notes?: string;
 }
 
@@ -120,10 +156,12 @@ export interface Rack {
 
 export interface Cage {
   id: string;
+  labId?: string;
   roomId: string;
   rackId: string;
   cageNumber: string;
   barcode: string;
+  capacityOverride?: number;
   status: CageStatus;
   notes?: string;
   welfareFlags: string[];
@@ -153,6 +191,9 @@ export interface Animal {
   id: string;
   animalId: string;
   labId: string;
+  owningLabId?: string;
+  intakeBatchId?: string;
+  sourceAnimalId?: string;
   sex: Sex;
   dob: string;
   strainId: string;
@@ -169,6 +210,106 @@ export interface Animal {
   deathDate?: string;
   deathReason?: string;
   notes?: string;
+}
+
+export interface AnimalIntakeBatch {
+  id: string;
+  labId: string;
+  vendor: string;
+  orderReference: string;
+  arrivalDate: string;
+  disposition: AnimalIntakeDisposition;
+  notes?: string;
+  createdById: string;
+  createdAt?: string;
+}
+
+export type CageDestinationRef =
+  | { kind: "existing"; cageId: string }
+  | { kind: "new"; clientId: string };
+
+export interface CageDraft {
+  clientId: string;
+  labId: string;
+  roomId: string;
+  rackId: string;
+  cageNumber: string;
+  barcode?: string;
+  capacityOverride?: number | null;
+  status: Exclude<CageStatus, "closed" | "retired">;
+  chargeCategoryId?: string;
+  startDate: string;
+  notes?: string;
+}
+
+export interface AnimalAssignmentDraft {
+  subjectId: string;
+  destination: CageDestinationRef;
+}
+
+export interface CageAssignmentPlan {
+  cages: CageDraft[];
+  assignments: AnimalAssignmentDraft[];
+  movedAt: string;
+  reason: string;
+}
+
+export interface AnimalIntakeRow {
+  rowId: string;
+  sourceAnimalId?: string;
+  sex: Sex;
+  strainId: string;
+  dob: string;
+  healthNotes?: string;
+  destination: CageDestinationRef;
+}
+
+export interface IntakeCageOption {
+  id: string;
+  barcode: string;
+  label: string;
+  labId: string;
+  status: CageStatus;
+  occupantCount: number;
+  capacity: number;
+  remainingCapacity: number;
+  sexComposition: string;
+  strainSummary: string;
+}
+
+export interface CageIntakeOptionsView {
+  labs: LabOption[];
+  facilities: Array<{
+    id: string;
+    name: string;
+    barcodePrefix: string;
+    maxCageOccupancy: number;
+  }>;
+  rooms: Array<{ id: string; facilityId: string; roomNumber: string }>;
+  racks: Array<{ id: string; roomId: string; rackNumber: string }>;
+  strains: Array<{ id: string; name: string }>;
+  chargeCategories: ChargeCategoryOption[];
+  existingCages: IntakeCageOption[];
+  movableAnimals: Array<{
+    id: string;
+    animalId: string;
+    labId: string;
+    owningLabId?: string | null;
+    sex: Sex;
+    strain: string;
+    currentCageId: string;
+    currentCageBarcode: string;
+  }>;
+  litter?: {
+    id: string;
+    version: number;
+    birthDate: string;
+    litterSizeBirth: number;
+    daysOld: number;
+    weaningDueDays: number;
+    suggestedWeanDate: string;
+    alreadyWeaned: boolean;
+  } | null;
 }
 
 export interface AnimalAllele {
@@ -202,6 +343,7 @@ export interface SampleRecord {
   id: string;
   animalId: string;
   projectId?: string;
+  experimentId?: string;
   sampleLabel: string;
   sampleType: string;
   status: SampleStatus;
@@ -211,6 +353,7 @@ export interface SampleRecord {
   notes?: string;
   createdById?: string;
   createdAt?: string;
+  version?: number;
 }
 
 export interface CryostorageRecord {
@@ -357,6 +500,81 @@ export interface CageMovement {
   reason?: string;
 }
 
+export interface CageChargeCategory {
+  id: string;
+  name: string;
+  code: string;
+  dailyRateCents: number;
+  currencyCode?: string;
+  active?: boolean;
+  notes?: string;
+}
+
+export interface CageChargePeriod {
+  id: string;
+  cageId: string;
+  labId: string;
+  categoryId: string;
+  dailyRateCents: number;
+  currencyCode?: string;
+  startedAt: string;
+  endedAt?: string;
+  notes?: string;
+}
+
+export interface CageLabTransfer {
+  id: string;
+  cageId: string;
+  fromLabId: string;
+  toLabId: string;
+  movedById?: string;
+  movedAt: string;
+  reason?: string;
+}
+
+export interface AnimalLabTransfer {
+  id: string;
+  animalId: string;
+  fromLabId: string;
+  toLabId: string;
+  movedById?: string;
+  movedAt: string;
+  reason?: string;
+}
+
+export interface Invoice {
+  id: string;
+  invoiceNumber: string;
+  finalNumber?: string;
+  labId: string;
+  status: InvoiceStatus;
+  periodStart: string;
+  periodEnd: string;
+  currencyCode?: string;
+  subtotalCents: number;
+  adjustmentTotalCents?: number;
+  totalCents?: number;
+  finalizedAt?: string;
+  finalizedById?: string;
+  voidedAt?: string;
+  voidedById?: string;
+  voidReason?: string;
+}
+
+export interface InvoiceLineItem {
+  id: string;
+  invoiceId: string;
+  cageId: string;
+  chargePeriodId: string;
+  categoryId: string;
+  description: string;
+  serviceStart: string;
+  serviceEnd: string;
+  dayCount: number;
+  dailyRateCents: number;
+  amountCents: number;
+}
+
 export interface RuleConfig {
   id: string;
   key: string;
@@ -370,7 +588,8 @@ export interface RuleConfig {
 
 export interface Alert {
   id: string;
-  entityType: "animal" | "cage" | "litter" | "experiment" | "project";
+  labId?: string | null;
+  entityType: "animal" | "cage" | "litter" | "experiment" | "project" | "invoice";
   entityId: string;
   alertType: string;
   severity: AlertSeverity;
@@ -378,20 +597,41 @@ export interface Alert {
   status: AlertStatus;
   generatedAt: string;
   resolvedAt?: string;
-  source: "rule" | "manual";
+  source: "rule" | "manual" | "billing";
 }
 
 export interface NotificationPreference {
+  id: string | null;
+  version: number;
   ruleKey: string;
   categoryKey: NotificationCategoryKey;
   categoryLabel: string;
   description: string;
   enabled: boolean;
+  inAppEnabled: boolean;
+  emailMode: "off" | "daily_digest" | "weekly_digest";
+  digestHourUtc: number;
+  digestDayOfWeek: number;
+  urgentAlwaysOn: boolean;
   matchingAlertCount: number;
+}
+
+export interface NotificationDeliveryHistoryItem {
+  id: string;
+  categoryKey: NotificationCategoryKey;
+  kind: "immediate" | "digest";
+  status: "queued" | "delivered" | "failed" | "cancelled";
+  scheduledFor: string;
+  deliveredAt: string | null;
+  attemptCount: number;
+  lastError: string | null;
 }
 
 export interface NotificationItem {
   id: string;
+  recipientId: string;
+  version: number;
+  labId: string | null;
   categoryKey: NotificationCategoryKey;
   categoryLabel: string;
   description: string;
@@ -399,19 +639,27 @@ export interface NotificationItem {
   severity: AlertSeverity;
   message: string;
   generatedAt: string;
-  source: "rule" | "manual";
+  source: "rule" | "manual" | "billing";
   alertType: string;
   entityType: string;
   entityId: string;
+  targetLabel: string;
   href: string;
   actionLabel: string;
+  urgent: boolean;
+  readAt: string | null;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
 }
 
 export interface NotificationInboxView {
   notifications: NotificationItem[];
   preferences: NotificationPreference[];
+  deliveryHistory: NotificationDeliveryHistoryItem[];
   summary: {
     total: number;
+    unread: number;
+    acknowledged: number;
     critical: number;
     warning: number;
     info: number;
@@ -434,6 +682,8 @@ export interface AuditLog {
 export interface SeedColonyData {
   today: string;
   users: SeedUser[];
+  labs: Lab[];
+  labMemberships: LabMembership[];
   facilities: Facility[];
   rooms: Room[];
   racks: Rack[];
@@ -441,6 +691,7 @@ export interface SeedColonyData {
   strains: Strain[];
   alleles: Allele[];
   animals: Animal[];
+  animalIntakeBatches: AnimalIntakeBatch[];
   animalAlleles: AnimalAllele[];
   genotypingRecords: GenotypingRecord[];
   breedingSetups: BreedingSetup[];
@@ -458,6 +709,12 @@ export interface SeedColonyData {
   animalStatusEvents: AnimalStatusEvent[];
   animalMovements: AnimalMovement[];
   cageMovements: CageMovement[];
+  cageChargeCategories: CageChargeCategory[];
+  cageChargePeriods: CageChargePeriod[];
+  cageLabTransfers: CageLabTransfer[];
+  animalLabTransfers: AnimalLabTransfer[];
+  invoices: Invoice[];
+  invoiceLineItems: InvoiceLineItem[];
   ruleConfigs: RuleConfig[];
   manualAlerts: Alert[];
   auditLogs: AuditLog[];
@@ -467,9 +724,13 @@ export interface AnimalListItem {
   id: string;
   animalId: string;
   labId: string;
+  owningLabId?: string | null;
+  owningLabName?: string | null;
   sex: Sex;
   ageDays: number;
   ageLabel: string;
+  dob: string;
+  healthStatus?: string | null;
   strain: string;
   genotypeSummary: string;
   cageLabel: string;
@@ -483,15 +744,124 @@ export interface AnimalListItem {
 
 export interface CageListItem {
   id: string;
+  roomId: string;
   cageNumber: string;
   roomNumber: string;
   rackNumber: string;
   barcode: string;
+  labId?: string | null;
+  labName?: string | null;
+  labCode?: string | null;
+  status: CageStatus;
+  active: boolean;
+  occupantCount: number;
+  capacity: number;
+  remainingCapacity: number;
+  capacityOverride?: number | null;
+  animalIdentifiers: string[];
+  animalLabIdentifiers: string[];
+  sexComposition: string;
+  strainSummary: string;
+  projectSummary: string;
+  chargeCategoryId?: string | null;
+  chargeCategoryName?: string | null;
+  dailyRateCents?: number | null;
+  currencyCode?: string | null;
+  chargeState: "chargeable" | "exited" | "unpriced";
+  billingCutoffAt?: string | null;
+  warningCount: number;
+  warningMessages: string[];
+  animals: Array<{
+    id: string;
+    animalId: string;
+    labAnimalId: string;
+    sex: string;
+    dob: string;
+    status: AnimalStatus;
+    healthStatus: string | null;
+    strain: string;
+    genotype: string;
+    projectCodes: string[];
+  }>;
+}
+
+export interface LabOption {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface ChargeCategoryOption {
+  id: string;
+  name: string;
+  code: string;
+  dailyRateCents: number;
+  currencyCode: string;
+  active: boolean;
+}
+
+export interface CageLabelPrintItem {
+  id: string;
+  barcode: string;
+  locationLabel: string;
   status: CageStatus;
   occupantCount: number;
   sexComposition: string;
   strainSummary: string;
   warningCount: number;
+}
+
+export interface CageLabelPrintView {
+  labels: CageLabelPrintItem[];
+  printedAt: string;
+  total: number;
+}
+
+export interface AnimalTransferOption {
+  id: string;
+  version: number;
+  animalId: string;
+  labId: string;
+  owningLabId: string;
+  owningLabName?: string | null;
+  owningLabCode?: string | null;
+  sex: Sex;
+  status: AnimalStatus;
+  healthStatus: string;
+  strain: string;
+  currentCageId: string;
+  currentCageBarcode: string;
+  currentCageLabel: string;
+}
+
+export interface CageTransferOption {
+  id: string;
+  labId: string;
+  barcode: string;
+  label: string;
+  status: CageStatus;
+  labName?: string | null;
+  labCode?: string | null;
+  occupantCount: number;
+  capacity: number;
+  remainingCapacity: number;
+  maleCount: number;
+  femaleCount: number;
+  sexComposition: string;
+  strainSummary: string;
+  warningCount: number;
+}
+
+export interface AnimalTransferWorkspaceView {
+  commandNonce: string;
+  defaultDestinationCageId: string;
+  defaultDate: string;
+  rules: {
+    cageMaxOccupancy: number;
+    mixedSexHoldingAllowed: boolean;
+  };
+  animalOptions: AnimalTransferOption[];
+  cageOptions: CageTransferOption[];
 }
 
 export interface BreedingSuggestion {
@@ -620,15 +990,21 @@ export interface SampleInventoryItem {
   collectedAt: string;
   animalId: string;
   animalCode: string;
+  animalLabCode?: string;
   labId: string;
   projectCode?: string | null;
+  experimentId?: string | null;
+  experimentCode?: string | null;
   storageLocation?: string | null;
   quantityLabel?: string | null;
   notes?: string | null;
+  version: number;
 }
 
 export interface CryostorageInventoryItem {
   id: string;
+  labId: string;
+  labLabel: string;
   sampleLabel: string;
   materialType: string;
   status: CryostorageStatus;
@@ -640,11 +1016,54 @@ export interface CryostorageInventoryItem {
   quantityLabel?: string | null;
   recoveryNotes?: string | null;
   notes?: string | null;
+  version: number;
+}
+
+export interface CryostorageRequestItem {
+  id: string;
+  labId: string;
+  labLabel: string;
+  requestType: "store" | "recover" | "discard";
+  status: "submitted" | "completed" | "rejected" | "cancelled";
+  version: number;
+  requestedFor: string;
+  requestedAt: string;
+  requestedById: string;
+  requestedByLabel: string;
+  targetRecordId: string | null;
+  targetRecordVersion: number | null;
+  targetRecordLabel: string | null;
+  targetRecordStatus: CryostorageStatus | null;
+  strainName: string | null;
+  projectCode: string | null;
+  sampleLabel: string | null;
+  materialType: string | null;
+  requestedQuantityLabel: string | null;
+  requestedStorageLocation: string | null;
+  notes: string | null;
+  decidedAt: string | null;
+  decidedByLabel: string | null;
+  decisionReason: string | null;
+  operation: {
+    recordId: string;
+    previousStatus: CryostorageStatus | null;
+    resultingStatus: CryostorageStatus;
+    performedAt: string;
+    storageLocation: string | null;
+    quantityLabel: string | null;
+    notes: string | null;
+  } | null;
 }
 
 export interface BreedingForecastItem {
   id: string;
+  labId: string;
+  labLabel: string;
   pairLabel: string;
+  cageIds: string[];
+  cageLabels: string[];
+  responsibleUserIds: string[];
+  responsibleUserNames: string[];
   targetGenotype: string;
   projectedNextLitterDate: string;
   projectedExperimentReadyDate: string;
@@ -658,6 +1077,8 @@ export interface BreedingForecastItem {
 
 export interface ForecastDemandItem {
   experimentId: string;
+  labId: string;
+  labLabel: string;
   experimentCode: string;
   projectCode: string;
   title: string;
@@ -667,6 +1088,10 @@ export interface ForecastDemandItem {
   reservedAnimals: number;
   activeAnimals: number;
   supplyGap: number;
+  cageIds: string[];
+  cageLabels: string[];
+  responsibleUserIds: string[];
+  responsibleUserNames: string[];
 }
 
 export interface SurplusMinimizationView {

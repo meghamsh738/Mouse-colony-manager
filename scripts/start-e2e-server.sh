@@ -9,6 +9,7 @@ E2E_DB_PREPARE_SCRIPT="${E2E_DB_PREPARE_SCRIPT:-}"
 
 export AUTH_URL="$E2E_BASE_URL"
 export NEXTAUTH_URL="$E2E_BASE_URL"
+export ALLOW_DESTRUCTIVE_SEED="true"
 
 if [[ -z "$E2E_DB_PREPARE_SCRIPT" ]]; then
   if [[ "${CI:-}" == "true" ]]; then
@@ -18,6 +19,7 @@ if [[ -z "$E2E_DB_PREPARE_SCRIPT" ]]; then
   fi
 fi
 
+npm run guard:test-db
 npm run "$E2E_DB_PREPARE_SCRIPT"
 npm run build
 exec npx next start --hostname "$E2E_HOST" --port "$E2E_PORT"

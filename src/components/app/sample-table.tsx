@@ -13,6 +13,8 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { RowActionMenu } from "@/components/app/worksheet-shell";
+import { SampleInlineEditForm } from "@/components/app/sample-inline-edit-form";
 import {
   INITIAL_VISIBLE_RECORDS,
   VISIBLE_RECORD_BATCH,
@@ -43,10 +45,26 @@ function statusVariant(status: SampleInventoryItem["status"]) {
   return "neutral";
 }
 
-export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
+type SampleTableProps = {
+  data: SampleInventoryItem[];
+  experimentOptions: Array<{ id: string; label: string; status: string }>;
+  canManage: boolean;
+};
+
+function editableExperimentOptions(
+  options: SampleTableProps["experimentOptions"],
+  currentExperimentId: string | null | undefined,
+) {
+  return options.filter(
+    (option) => option.status === "planned" || option.status === "active" || option.id === currentExperimentId,
+  );
+}
+
+export function SampleTable({ data, experimentOptions, canManage }: SampleTableProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | SampleInventoryItem["status"]>("all");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [experimentFilter, setExperimentFilter] = useState("all");
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_RECORDS);
   const deferredSearch = useDeferredValue(search);
 
@@ -64,6 +82,7 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
           record.animalCode,
           record.labId,
           record.projectCode ?? "",
+          record.experimentCode ?? "",
           record.storageLocation ?? "",
           record.quantityLabel ?? "",
           record.notes ?? "",
@@ -74,15 +93,20 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
         const matchesSearch = haystack.includes(deferredSearch.toLowerCase());
         const matchesStatus = statusFilter === "all" ? true : record.status === statusFilter;
         const matchesType = typeFilter === "all" ? true : record.sampleType === typeFilter;
+        const matchesExperiment = experimentFilter === "all"
+          ? true
+          : experimentFilter === "none"
+            ? !record.experimentId
+            : record.experimentId === experimentFilter;
 
-        return matchesSearch && matchesStatus && matchesType;
+        return matchesSearch && matchesStatus && matchesType && matchesExperiment;
       }),
-    [data, deferredSearch, statusFilter, typeFilter],
+    [data, deferredSearch, experimentFilter, statusFilter, typeFilter],
   );
 
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE_RECORDS);
-  }, [data.length, deferredSearch, statusFilter, typeFilter]);
+  }, [data.length, deferredSearch, experimentFilter, statusFilter, typeFilter]);
 
   const visibleData = useMemo(() => filteredData.slice(0, visibleCount), [filteredData, visibleCount]);
 
@@ -144,6 +168,10 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
         header: "Project",
         cell: (info) => info.getValue() ?? <span className="text-sm text-[var(--muted)]">None</span>,
       }),
+      columnHelper.accessor("experimentCode", {
+        header: "Experiment",
+        cell: (info) => info.getValue() ?? <span className="text-sm text-[var(--muted)]">None</span>,
+      }),
       columnHelper.accessor("storageLocation", {
         header: "Storage",
         cell: (info) => info.getValue() ?? <span className="text-sm text-[var(--muted)]">Pending</span>,
@@ -157,8 +185,20 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
             <span className="text-sm text-[var(--muted)]">None</span>
           ),
       }),
+      columnHelper.display({
+        id: "actions",
+        header: "Actions",
+        cell: (info) => canManage ? (
+          <RowActionMenu label="Edit">
+            <SampleInlineEditForm
+              experimentOptions={editableExperimentOptions(experimentOptions, info.row.original.experimentId)}
+              sample={info.row.original}
+            />
+          </RowActionMenu>
+        ) : <span className="text-xs text-[var(--muted)]">View only</span>,
+      }),
     ],
-    [],
+    [canManage, experimentOptions],
   );
 
   // TanStack Table owns stateful table instance creation here; disabling the
@@ -175,7 +215,7 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
   return (
     <div className="space-y-5" data-testid="sample-table">
       <div className="space-y-3">
-        <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto]">
+        <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto_auto]">
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -194,6 +234,18 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
             <option value="allocated">Allocated</option>
             <option value="consumed">Consumed</option>
             <option value="discarded">Discarded</option>
+          </select>
+          <select
+            value={experimentFilter}
+            onChange={(event) => setExperimentFilter(event.target.value)}
+            className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
+            aria-label="Filter biosamples by experiment"
+          >
+            <option value="all">All experiments</option>
+            <option value="none">No experiment</option>
+            {experimentOptions.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
           </select>
           <select
             value={typeFilter}
@@ -248,7 +300,17 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
                     <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{sample.quantityLabel}</p>
                   ) : null}
                 </div>
-                <Badge variant={statusVariant(sample.status)}>{sample.status}</Badge>
+                <div className="action-row justify-end">
+                  <Badge variant={statusVariant(sample.status)}>{sample.status}</Badge>
+                  {canManage ? (
+                    <RowActionMenu label="Edit">
+                      <SampleInlineEditForm
+                        experimentOptions={editableExperimentOptions(experimentOptions, sample.experimentId)}
+                        sample={sample}
+                      />
+                    </RowActionMenu>
+                  ) : null}
+                </div>
               </div>
               <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
                 <div>
@@ -258,6 +320,10 @@ export function SampleTable({ data }: { data: SampleInventoryItem[] }) {
                 <div>
                   <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Project</dt>
                   <dd className="mt-1 text-[var(--ink)]">{sample.projectCode ?? "None"}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Experiment</dt>
+                  <dd className="mt-1 text-[var(--ink)]">{sample.experimentCode ?? "None"}</dd>
                 </div>
                 <div className="col-span-2">
                   <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Animal</dt>

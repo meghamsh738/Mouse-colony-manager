@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import { buildApiErrorResponse, buildMutationResponse, requireApiUser } from "@/lib/api-route";
 import { recordBreedingLitter } from "@/lib/colony-write";
-import { getExistingLitterApiRecord, getLitterApiRecordById } from "@/lib/integration-api";
+import {
+  getBreedingSetupApiRecordById,
+  getExistingLitterApiRecord,
+  getLitterApiRecordById,
+} from "@/lib/integration-api";
 
 const createLitterApiSchema = z.object({
   breedingSetupId: z.string().trim().min(1),
@@ -12,7 +16,7 @@ const createLitterApiSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("breeding:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -29,7 +33,13 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Invalid litter payload.", 400, parsed.error.flatten().fieldErrors);
   }
 
-  const existingRecord = await getExistingLitterApiRecord(parsed.data);
+  const breedingSetup = await getBreedingSetupApiRecordById(parsed.data.breedingSetupId, auth.user);
+
+  if (!breedingSetup) {
+    return buildApiErrorResponse("Breeding setup not found.", 404);
+  }
+
+  const existingRecord = await getExistingLitterApiRecord(parsed.data, auth.user);
 
   if (existingRecord) {
     return buildMutationResponse(existingRecord, {
@@ -39,7 +49,7 @@ export async function POST(request: Request) {
     });
   }
 
-  const result = await recordBreedingLitter(parsed.data, { id: auth.user.id, role: auth.user.role });
+  const result = await recordBreedingLitter(parsed.data, { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId });
 
   if (!result.ok) {
     const status = result.message.includes("role cannot")
@@ -55,7 +65,7 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Litter was recorded but could not be read back.", 500);
   }
 
-  const record = await getLitterApiRecordById(result.entityId);
+  const record = await getLitterApiRecordById(result.entityId, auth.user);
 
   if (!record) {
     return buildApiErrorResponse("Litter was recorded but could not be read back.", 500);

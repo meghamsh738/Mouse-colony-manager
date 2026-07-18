@@ -36,7 +36,7 @@ export async function addCageHealthNoteAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "cages:manage" });
   const parsed = healthNoteSchema.safeParse({
     cageId: formData.get("cageId"),
     noteType: formData.get("noteType"),
@@ -69,7 +69,7 @@ export async function addCageHealthNoteAction(
           }
         : undefined,
     },
-    { id: user.id, role: user.role },
+    { id: user.id, role: user.role, activeLabId: user.activeLabId },
   );
 
   if (!result.ok) {
@@ -95,7 +95,7 @@ export async function moveCageFromScanAction(
   formData: FormData,
 ): Promise<FormActionState> {
   void previousState;
-  const user = await requireUser();
+  const user = await requireUser({ capability: "cages:manage" });
   const parsed = moveCageSchema.safeParse({
     cageId: formData.get("cageId"),
     roomId: formData.get("roomId"),
@@ -112,7 +112,7 @@ export async function moveCageFromScanAction(
     };
   }
 
-  const result = await moveCageLocation(parsed.data, { id: user.id, role: user.role });
+  const result = await moveCageLocation(parsed.data, { id: user.id, role: user.role, activeLabId: user.activeLabId });
 
   if (!result.ok) {
     return {

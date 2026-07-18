@@ -1,17 +1,27 @@
+import { randomUUID } from "node:crypto";
+
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AlertFeed } from "@/components/app/alert-feed";
 import { AnimalGenotypingForm } from "@/components/app/animal-genotyping-form";
 import { AnimalLifecycleForm } from "@/components/app/animal-lifecycle-form";
+import { AnimalPresenceForm } from "@/components/app/animal-presence-form";
 import { AttachmentList } from "@/components/app/attachment-list";
 import { AppShell } from "@/components/app/app-shell";
+import { CompactActionTray, type CompactActionItem } from "@/components/app/compact-action-tray";
 import { ExperimentReservationForm } from "@/components/app/experiment-reservation-form";
+import { HighImpactWorkflowShell } from "@/components/app/high-impact-workflow-shell";
+import { LabTransferRequestForm } from "@/components/app/lab-transfer-workflow";
 import { PageHeader } from "@/components/app/page-header";
 import { SampleCreateForm } from "@/components/app/sample-create-form";
 import { Surface } from "@/components/app/surface";
 import { Badge } from "@/components/ui/badge";
 import { getAnimalDetailView } from "@/lib/animals-read";
+import { getAnimalTransferWorkspaceView } from "@/lib/cages-read";
+import { getLabTransferRequestOptions } from "@/lib/lab-transfer-read";
 import { requireUser } from "@/lib/session";
+import { getCurrentOperationalSopOptions } from "@/lib/sop-read";
 import { formatDate } from "@/lib/utils";
 
 function genotypeStatusVariant(status: "pending" | "provisional" | "confirmed" | "conflict") {
@@ -38,6 +48,8 @@ function getLifecycleActions(
     return [];
   }
 
+  if (outcomeStatus === "missing") return [];
+
   if (outcomeStatus === "alive") {
     return [
       { value: "euthanized", label: "Mark euthanized" },
@@ -49,32 +61,202 @@ function getLifecycleActions(
   return [{ value: "archived", label: "Archive record" }];
 }
 
-export default async function AnimalDetailPage({ params }: { params: Promise<{ animalId: string }> }) {
-  const user = await requireUser();
+export default async function AnimalDetailPage({ params, searchParams }: { params: Promise<{ animalId: string }>; searchParams?: Promise<{ action?: string }> }) {
+  const user = await requireUser({ capability: "animals:read" });
   const { animalId } = await params;
-  const snapshot = await getAnimalDetailView(animalId);
+  const snapshot = await getAnimalDetailView(animalId, user);
 
   if (!snapshot) {
     notFound();
   }
 
-  const canReserveAnimal = user.role === "admin" || user.role === "colony_manager" || user.role === "researcher";
-  const canRecordGenotype = user.role !== "read_only" && snapshot.canRecordGenotype;
-  const canRecordSample = user.role !== "read_only" && snapshot.canRecordSample;
-  const canManageLifecycle = user.role === "admin" || user.role === "colony_manager" || user.role === "animal_staff";
+  const canReserveAnimal = user.capabilities.includes("experiments:manage");
+  const canRecordGenotype = user.capabilities.includes("animals:manage") && snapshot.canRecordGenotype;
+  const canRecordSample = user.capabilities.includes("biosamples:manage") && snapshot.canRecordSample;
+  const canManageLifecycle = user.capabilities.includes("animals:manage");
+  const presenceWorkspace = canManageLifecycle && snapshot.animal.outcomeStatus === "missing"
+    ? await getAnimalTransferWorkspaceView("", user)
+    : null;
   const lifecycleActions = getLifecycleActions(snapshot.animal.status, snapshot.animal.outcomeStatus);
+  const lifecycleSopOptions = canManageLifecycle && lifecycleActions.some((action) => action.value === "euthanized")
+    ? await getCurrentOperationalSopOptions(user, snapshot.animal.owningLabId)
+    : [];
+  const transferRequestOptions = snapshot.animal.outcomeStatus === "alive" && user.capabilities.includes("transfers:request")
+    ? await getLabTransferRequestOptions(user)
+    : null;
+  const requestedAction = (await searchParams)?.action;
+  if (requestedAction === "lifecycle") {
+    if (!canManageLifecycle) notFound();
+    return (
+      <AppShell currentPath="/animals" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
+        <HighImpactWorkflowShell
+          backHref={`/animals/${snapshot.animal.id}`}
+          backLabel="Animal detail"
+          context={[
+            { label: "Animal", value: `${snapshot.animal.animalId} · ${snapshot.animal.labId}` },
+            { label: "Current status", value: snapshot.animal.status },
+            { label: "Current cage", value: snapshot.cageLabel },
+            { label: "Open dependencies", value: `${snapshot.openBreedingCount} breeding · ${snapshot.openExperimentCount} experiments` },
+          ]}
+          description="Record a terminal disposition only after the event, dependencies, and exact SOP have been verified."
+          title="Record terminal disposition"
+        >
+          {lifecycleActions.length ? <AnimalLifecycleForm
+            animalId={snapshot.animal.id}
+            animalLabel={`${snapshot.animal.animalId} · ${snapshot.animal.labId}`}
+            allowedActions={lifecycleActions}
+            commandNonce={randomUUID()}
+            currentCageLabel={snapshot.cageLabel}
+            defaultDate={snapshot.defaultLifecycleDate}
+            openBreedingCount={snapshot.openBreedingCount}
+            openExperimentCount={snapshot.openExperimentCount}
+            sopOptions={lifecycleSopOptions}
+            version={snapshot.animal.version}
+          /> : snapshot.animal.status === "archived" ? <div className="worksheet-empty"><strong>Terminal disposition complete</strong><p>This animal is archived and has no further lifecycle action available.</p><Link className="table-action" href={`/animals/${snapshot.animal.id}`}>Return to animal detail</Link></div> : <div className="worksheet-empty"><strong>Resolve the missing-animal workflow first</strong><p>A missing animal cannot receive a terminal disposition until it is found or its status is resolved.</p><Link className="table-action" href={`/animals/${snapshot.animal.id}`}>Return to animal detail</Link></div>}
+        </HighImpactWorkflowShell>
+      </AppShell>
+    );
+  }
+  const actions: CompactActionItem[] = [
+    ...(canManageLifecycle && ["alive", "missing"].includes(snapshot.animal.outcomeStatus)
+      ? [{
+          id: "presence",
+          label: snapshot.animal.outcomeStatus === "missing" ? "Mark found" : "Mark missing",
+          description: "Location status",
+          tone: snapshot.animal.outcomeStatus === "missing" ? "default" as const : "danger" as const,
+          panel: (
+            <AnimalPresenceForm
+              animalId={snapshot.animal.id}
+              cages={presenceWorkspace?.cageOptions ?? []}
+              commandNonce={randomUUID()}
+              defaultDate={snapshot.defaultLifecycleDate}
+              isMissing={snapshot.animal.outcomeStatus === "missing"}
+              version={snapshot.animal.version}
+            />
+          ),
+        }]
+      : []),
+    ...(canManageLifecycle && lifecycleActions.length
+      ? [
+          {
+            id: "lifecycle",
+            label: "Record terminal disposition",
+            description: "Death, euthanasia, transfer, or archive",
+            href: `/animals/${snapshot.animal.id}?action=lifecycle`,
+            tone: "danger" as const,
+          },
+        ]
+      : []),
+    ...(canRecordGenotype
+      ? [
+          {
+            id: "genotype",
+            label: "Record genotype",
+            description: "Assay result",
+            tone: "primary" as const,
+            panel: (
+              <AnimalGenotypingForm
+                animalId={snapshot.animal.id}
+                alleleOptions={snapshot.alleleOptions}
+                defaultDate={snapshot.defaultGenotypeDate}
+              />
+            ),
+          },
+        ]
+      : []),
+    ...(canRecordSample
+      ? [
+          {
+            id: "sample",
+            label: "Record sample",
+            description: "Inventory",
+            panel: (
+              <SampleCreateForm
+                animalOptions={[
+                  {
+                    id: snapshot.animal.id,
+                    label: `${snapshot.animal.animalId} · ${snapshot.animal.labId}`,
+                  },
+                ]}
+                projectOptions={snapshot.projectOptions}
+                experimentOptions={snapshot.experimentOptions}
+                defaultAnimalId={snapshot.animal.id}
+                animalSelectDisabled
+                defaultCollectedAt={snapshot.defaultSampleDate}
+                defaultProjectId={snapshot.defaultSampleProjectId}
+              />
+            ),
+          },
+        ]
+      : []),
+    ...(canReserveAnimal && snapshot.canReserve
+      ? [
+          {
+            id: "reserve",
+            label: "Reserve",
+            description: "Experiment",
+            panel: (
+              <ExperimentReservationForm
+                animalId={snapshot.animal.id}
+                animalVersion={snapshot.animal.version}
+                commandNonce={randomUUID()}
+                defaultDate={snapshot.defaultLifecycleDate}
+                experimentOptions={snapshot.experimentOptions}
+              />
+            ),
+          },
+        ]
+      : []),
+    ...(transferRequestOptions?.canRequest
+      ? [
+          {
+            id: "request-lab-transfer",
+            label: "Request lab transfer",
+            description: "Destination approval",
+            tone: "financial" as const,
+            panel: (
+              <div className="space-y-4">
+                <div className="border-l-4 border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                  The animal remains in this lab until destination acceptance and CMU finalization.
+                </div>
+                <LabTransferRequestForm
+                  animalIds={[snapshot.animal.id]}
+                  destinationLabs={transferRequestOptions.destinationLabs}
+                  nonce={randomUUID()}
+                  subjectType="animals"
+                  today={snapshot.defaultLifecycleDate}
+                />
+              </div>
+            ),
+          },
+        ]
+      : []),
+  ];
 
   return (
     <AppShell currentPath="/animals" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
       <div className="space-y-8">
         <PageHeader
           eyebrow="Animal detail"
-          title={snapshot.animal.animalId}
-          description="Scientific view of one mouse with lineage, genotype history, experiment assignments, welfare notes, and audit-safe lifecycle context."
+          title={`Animal ${snapshot.animal.animalId}`}
           badgeLabel={snapshot.animal.status}
         />
-        <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-6">
+        {actions.length ? (
+          <CompactActionTray
+            actions={actions}
+            eyebrow="Actions"
+            summary={
+              <>
+                <span>{snapshot.animal.labId}</span>
+                <span>·</span>
+                <span>{snapshot.cageLabel}</span>
+              </>
+            }
+            title="Animal work"
+          />
+        ) : null}
+        {snapshot.alerts.length ? <AlertFeed alerts={snapshot.alerts} title="Animal alerts" /> : null}
+        <div className="space-y-6">
             <Surface className="space-y-5">
               <div className="grid gap-5 md:grid-cols-2">
                 <div>
@@ -114,8 +296,20 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Disposition note</p>
-                    <p className="mt-2">{snapshot.animal.deathReason ?? "Captured in timeline event."}</p>
+                    <p className="mt-2">{snapshot.animal.deathReason ?? snapshot.externalTransfer?.reason ?? "Captured in timeline event."}</p>
                   </div>
+                  {snapshot.externalTransfer ? (
+                    <>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">External destination</p>
+                        <p className="mt-2 wrap-value">{snapshot.externalTransfer.destination}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Transfer reference</p>
+                        <p className="mt-2 wrap-value">{snapshot.externalTransfer.reference ?? "Not recorded"}</p>
+                      </div>
+                    </>
+                  ) : null}
                 </div>
               ) : null}
               <div className="space-y-3 border-t border-[var(--line)] pt-4">
@@ -243,91 +437,6 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                 ))}
               </div>
             </Surface>
-          </div>
-          <div className="space-y-6">
-            <AlertFeed alerts={snapshot.alerts} title="Animal alerts" />
-            {canManageLifecycle ? (
-              <Surface className="space-y-4">
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Lifecycle control</p>
-                  <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
-                    Record terminal disposition without deleting the mouse.
-                  </h2>
-                  <p className="text-sm leading-7 text-[var(--muted)]">
-                    Lifecycle changes remove the animal from active colony views, clear cage occupancy, end open allocations,
-                    and preserve a full status-event trail for audits.
-                  </p>
-                </div>
-                {lifecycleActions.length ? (
-                  <AnimalLifecycleForm
-                    animalId={snapshot.animal.id}
-                    allowedActions={lifecycleActions}
-                    defaultDate={snapshot.defaultLifecycleDate}
-                  />
-                ) : (
-                  <p className="text-sm text-[var(--muted)]">This animal is already archived and cannot move to another lifecycle state.</p>
-                )}
-              </Surface>
-            ) : null}
-            {canRecordGenotype ? (
-              <Surface className="space-y-4">
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Genotype entry</p>
-                  <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
-                    Record one assay and update the active allele call.
-                  </h2>
-                  <p className="text-sm leading-7 text-[var(--muted)]">
-                    Each submission creates a full genotyping record, updates the current allele state, and clears pending
-                    genotype blockers once all active loci are confirmed.
-                  </p>
-                </div>
-                <AnimalGenotypingForm
-                  animalId={snapshot.animal.id}
-                  alleleOptions={snapshot.alleleOptions}
-                  defaultDate={snapshot.defaultGenotypeDate}
-                />
-              </Surface>
-            ) : null}
-            {canRecordSample ? (
-              <Surface className="space-y-4">
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Sample entry</p>
-                  <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
-                    Record tissue, DNA, or aliquot inventory against this mouse.
-                  </h2>
-                  <p className="text-sm leading-7 text-[var(--muted)]">
-                    Each sample stays linked to the source animal and optional project so downstream storage and usage remain traceable.
-                  </p>
-                </div>
-                <SampleCreateForm
-                  animalOptions={[
-                    {
-                      id: snapshot.animal.id,
-                      label: `${snapshot.animal.animalId} · ${snapshot.animal.labId}`,
-                    },
-                  ]}
-                  projectOptions={snapshot.projectOptions}
-                  defaultAnimalId={snapshot.animal.id}
-                  animalSelectDisabled
-                  defaultCollectedAt={snapshot.defaultSampleDate}
-                  defaultProjectId={snapshot.defaultSampleProjectId}
-                />
-              </Surface>
-            ) : null}
-            {canReserveAnimal && snapshot.canReserve ? (
-              <Surface className="space-y-4">
-                <div className="space-y-2">
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Experiment reservation</p>
-                  <h2 className="font-display text-2xl font-semibold tracking-[-0.04em] text-[var(--ink)]">
-                    Reserve this mouse for downstream study work.
-                  </h2>
-                  <p className="text-sm leading-7 text-[var(--muted)]">
-                    Reservation runs conflict checks against current status, genotype confirmation, and existing experiment assignments before saving.
-                  </p>
-                </div>
-                <ExperimentReservationForm animalId={snapshot.animal.id} experimentOptions={snapshot.experimentOptions} />
-              </Surface>
-            ) : null}
             <Surface className="space-y-4">
               <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Health notes</p>
               <div className="space-y-3">
@@ -348,7 +457,6 @@ export default async function AnimalDetailPage({ params }: { params: Promise<{ a
                 )}
               </div>
             </Surface>
-          </div>
         </div>
       </div>
     </AppShell>

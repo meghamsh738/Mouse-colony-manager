@@ -92,8 +92,20 @@ export function buildDatabaseTargets(env: NodeJS.ProcessEnv | DotEnvValues): {
     try {
       const url = new URL(rawUrl);
 
+      if (url.protocol === "prisma+postgres:") {
+        const target = buildPrismaPostgresTarget(envKey, rawUrl, url);
+
+        if (typeof target === "string") {
+          issues.push({ envKey, message: target });
+          continue;
+        }
+
+        targets.push(target);
+        continue;
+      }
+
       if (!["postgres:", "postgresql:"].includes(url.protocol)) {
-        issues.push({ envKey, message: `${envKey} must use a postgres:// or postgresql:// URL.` });
+        issues.push({ envKey, message: `${envKey} must use a postgres://, postgresql://, or prisma+postgres:// URL.` });
         continue;
       }
 
@@ -102,15 +114,7 @@ export function buildDatabaseTargets(env: NodeJS.ProcessEnv | DotEnvValues): {
         continue;
       }
 
-      targets.push({
-        database: decodeURIComponent(url.pathname.replace(/^\//, "")) || "(database not specified)",
-        envKey,
-        host: url.hostname,
-        port: Number(url.port || DEFAULT_POSTGRES_PORT),
-        rawUrl,
-        redactedUrl: redactDatabaseUrl(url),
-        user: decodeURIComponent(url.username) || "postgres",
-      });
+      targets.push(buildPostgresTarget(envKey, rawUrl, url, redactDatabaseUrl(url)));
     } catch {
       issues.push({ envKey, message: `${envKey} is not a valid URL.` });
     }
@@ -258,6 +262,53 @@ function redactDatabaseUrl(url: URL) {
   }
 
   return redacted.toString();
+}
+
+function buildPostgresTarget(envKey: DatabaseEnvKey, rawUrl: string, url: URL, redactedUrl: string): DatabaseTarget {
+  return {
+    database: decodeURIComponent(url.pathname.replace(/^\//, "")) || "(database not specified)",
+    envKey,
+    host: url.hostname,
+    port: Number(url.port || DEFAULT_POSTGRES_PORT),
+    rawUrl,
+    redactedUrl,
+    user: decodeURIComponent(url.username) || "postgres",
+  };
+}
+
+function buildPrismaPostgresTarget(envKey: DatabaseEnvKey, rawUrl: string, url: URL): DatabaseTarget | string {
+  const apiKey = url.searchParams.get("api_key");
+
+  if (!apiKey) {
+    return `${envKey} is missing the prisma+postgres api_key parameter.`;
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = JSON.parse(Buffer.from(apiKey, "base64url").toString("utf8"));
+  } catch {
+    return `${envKey} has an invalid prisma+postgres api_key parameter.`;
+  }
+
+  if (!payload || typeof payload !== "object" || !("databaseUrl" in payload) || typeof payload.databaseUrl !== "string") {
+    return `${envKey} has a prisma+postgres api_key without a databaseUrl.`;
+  }
+
+  try {
+    const targetUrl = new URL(payload.databaseUrl);
+
+    if (!["postgres:", "postgresql:"].includes(targetUrl.protocol)) {
+      return `${envKey} has a prisma+postgres api_key with an unsupported databaseUrl protocol.`;
+    }
+
+    const redactedUrl = new URL(rawUrl);
+    redactedUrl.searchParams.set("api_key", "REDACTED");
+
+    return buildPostgresTarget(envKey, rawUrl, targetUrl, redactedUrl.toString());
+  } catch {
+    return `${envKey} has a prisma+postgres api_key with an invalid databaseUrl.`;
+  }
 }
 
 function formatReachability(check: ReachabilityCheck | undefined) {

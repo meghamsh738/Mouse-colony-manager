@@ -6,12 +6,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(value?: string | null) {
+export function formatDate(value?: Date | string | null) {
   if (!value) {
     return "Not recorded";
   }
 
-  return format(parseISO(value), "dd MMM yyyy");
+  return format(value instanceof Date ? value : parseISO(value), "dd MMM yyyy");
 }
 
 export function getAgeInDays(value: string, referenceDate: string) {

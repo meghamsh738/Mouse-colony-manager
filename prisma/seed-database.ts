@@ -1,23 +1,196 @@
-import { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 import { clearStoredAttachments } from "../src/lib/attachment-storage";
+import { assertDestructiveSeedAllowed } from "../src/lib/destructive-seed-guard";
 import { seedColonyData } from "./seed-data";
 import { hashPassword } from "../src/lib/password";
-
-const prisma = new PrismaClient();
+import { prisma } from "../src/lib/prisma";
 
 const asDate = (value?: string) => (value ? new Date(value) : undefined);
 
-export async function seedDatabase() {
-  await clearStoredAttachments();
+export function requireExplicitSeedLabId(
+  value: string | null | undefined,
+  entityType: string,
+  entityId: string,
+  knownLabIds: ReadonlySet<string>,
+) {
+  if (!value) {
+    throw new Error(`Seed ${entityType} ${entityId} is missing explicit lab ownership.`);
+  }
+  if (!knownLabIds.has(value)) {
+    throw new Error(`Seed ${entityType} ${entityId} references unknown lab ${value}.`);
+  }
+  return value;
+}
+
+function requireSeedReference<T>(value: T | undefined, description: string): T {
+  if (value === undefined) {
+    throw new Error(`Seed ownership cannot be resolved: ${description}.`);
+  }
+  return value;
+}
+
+export async function seedDatabase(options: { clearAttachments?: boolean } = {}) {
+  assertDestructiveSeedAllowed();
+
+  const knownLabIds = new Set(seedColonyData.labs.map((lab) => lab.id));
+  const animalLabById = new Map(seedColonyData.animals.map((animal) => [
+    animal.id,
+    requireExplicitSeedLabId(animal.owningLabId, "animal", animal.id, knownLabIds),
+  ]));
+  const cageLabById = new Map(seedColonyData.cages.map((cage) => [
+    cage.id,
+    requireExplicitSeedLabId(cage.labId, "cage", cage.id, knownLabIds),
+  ]));
+  const projectLabById = new Map([
+    ["project-micro", "lab-microglia"],
+    ["project-neuro", "lab-neuroimmune"],
+  ]);
+  const experimentLabById = new Map(
+    seedColonyData.experiments.map((experiment) => [
+      experiment.id,
+      requireSeedReference(projectLabById.get(experiment.projectId), `experiment ${experiment.id} has no owned project`),
+    ]),
+  );
+  const breedingLabById = new Map(seedColonyData.breedingSetups.map((setup) => {
+    const adult = seedColonyData.breedingAdults.find((candidate) => candidate.breedingSetupId === setup.id);
+    const animalId = requireSeedReference(adult?.animalId, `breeding setup ${setup.id} has no adult`);
+    return [setup.id, requireSeedReference(animalLabById.get(animalId), `breeding setup ${setup.id} adult ${animalId} has no owner`)];
+  }));
+  const litterLabById = new Map(
+    seedColonyData.litters.map((litter) => [litter.id, breedingLabById.get(litter.breedingSetupId)!]),
+  );
+  const genotypeLabById = new Map(
+    seedColonyData.genotypingRecords.map((record) => [record.id, animalLabById.get(record.animalId)!]),
+  );
+  const healthNoteLabById = new Map(seedColonyData.healthNotes.map((note) => [
+    note.id,
+    (note.animalId ? animalLabById.get(note.animalId) : note.cageId ? cageLabById.get(note.cageId) : null)!,
+  ]));
+
+  for (const animal of seedColonyData.animals) {
+    if (animal.currentCageId && animalLabById.get(animal.id) !== cageLabById.get(animal.currentCageId)) {
+      throw new Error(`Seed animal ${animal.id} and current cage ${animal.currentCageId} belong to different labs.`);
+    }
+    if (animal.intakeBatchId) {
+      const batch = requireSeedReference(
+        seedColonyData.animalIntakeBatches.find((candidate) => candidate.id === animal.intakeBatchId),
+        `animal ${animal.id} references an unknown intake batch`,
+      );
+      if (batch.labId !== animalLabById.get(animal.id)) {
+        throw new Error(`Seed animal ${animal.id} and intake batch ${batch.id} belong to different labs.`);
+      }
+    }
+  }
+
+  for (const adult of seedColonyData.breedingAdults) {
+    if (breedingLabById.get(adult.breedingSetupId) !== animalLabById.get(adult.animalId)) {
+      throw new Error(`Seed breeding adult ${adult.id} crosses lab ownership.`);
+    }
+  }
+
+  for (const allocation of seedColonyData.projectAllocations) {
+    if (animalLabById.get(allocation.animalId) !== projectLabById.get(allocation.projectId)) {
+      throw new Error(`Seed project allocation ${allocation.id} crosses lab ownership.`);
+    }
+  }
+
+  for (const assignment of seedColonyData.experimentAssignments) {
+    if (animalLabById.get(assignment.animalId) !== experimentLabById.get(assignment.experimentId)) {
+      throw new Error(`Seed experiment assignment ${assignment.id} crosses lab ownership.`);
+    }
+  }
+
+  for (const record of seedColonyData.sampleRecords) {
+    const recordLabId = animalLabById.get(record.animalId);
+    if (!recordLabId || (record.projectId && projectLabById.get(record.projectId) !== recordLabId)) {
+      throw new Error(`Seed sample record ${record.id} crosses lab ownership.`);
+    }
+  }
+
+  for (const record of seedColonyData.cryostorageRecords) {
+    if (!record.projectId || !projectLabById.has(record.projectId)) {
+      throw new Error(`Seed cryostorage record ${record.id} has no owned project.`);
+    }
+  }
+
+  for (const note of seedColonyData.healthNotes) {
+    const noteLabId = healthNoteLabById.get(note.id);
+    if (
+      !noteLabId ||
+      (note.animalId && animalLabById.get(note.animalId) !== noteLabId) ||
+      (note.cageId && cageLabById.get(note.cageId) !== noteLabId)
+    ) {
+      throw new Error(`Seed health note ${note.id} crosses lab ownership.`);
+    }
+  }
+
+  for (const link of seedColonyData.litterAnimals) {
+    if (litterLabById.get(link.litterId) !== animalLabById.get(link.animalId)) {
+      throw new Error(`Seed litter animal ${link.id} crosses lab ownership.`);
+    }
+  }
+
+  for (const attachment of seedColonyData.attachments) {
+    const linkedLabIds = [
+      attachment.animalId ? animalLabById.get(attachment.animalId) : undefined,
+      attachment.cageId ? cageLabById.get(attachment.cageId) : undefined,
+      attachment.healthNoteId ? healthNoteLabById.get(attachment.healthNoteId) : undefined,
+      attachment.genotypingRecordId ? genotypeLabById.get(attachment.genotypingRecordId) : undefined,
+    ].filter((labId): labId is string => Boolean(labId));
+    if (linkedLabIds.length === 0 || new Set(linkedLabIds).size !== 1) {
+      throw new Error(`Seed attachment ${attachment.id} crosses lab ownership or has no owned parent.`);
+    }
+  }
 
   await prisma.$transaction([
+    prisma.$executeRawUnsafe("SET LOCAL mcm.allow_destructive_seed = 'true'"),
+    prisma.notificationDelivery.deleteMany(),
+    prisma.outboxDeliveryAttempt.deleteMany(),
+    prisma.outboxMessage.deleteMany(),
+    prisma.procedureOccurrence.deleteMany(),
+    prisma.procedurePlan.deleteMany(),
+    prisma.animalStatusEvent.deleteMany(),
+    prisma.cryostorageOperation.deleteMany(),
+    prisma.cryostorageRequestEvent.deleteMany(),
+    prisma.cryostorageRequest.deleteMany(),
+    prisma.commandReceipt.deleteMany(),
+    prisma.sopAcknowledgement.deleteMany(),
+    prisma.sopAssignment.deleteMany(),
+    prisma.sopVersionApproval.deleteMany(),
+    prisma.sopVersion.deleteMany(),
+    prisma.sopDocument.deleteMany(),
+    prisma.labTransferEvent.deleteMany(),
+    prisma.labTransferPacket.deleteMany(),
+    prisma.labTransferItem.deleteMany(),
+    prisma.cageUserAssignment.deleteMany(),
+    prisma.animalMovement.deleteMany(),
+    prisma.animalLabTransfer.deleteMany(),
+    prisma.cageLabTransfer.deleteMany(),
+    prisma.labTransferRequest.deleteMany(),
+    prisma.cageClosure.deleteMany(),
+    prisma.workflowReviewSnapshot.deleteMany(),
+    prisma.workflowDraft.deleteMany(),
+    prisma.quarantineObservation.deleteMany(),
+    prisma.quarantineCase.deleteMany(),
+    prisma.ownershipException.deleteMany(),
+    prisma.migrationRun.deleteMany(),
+    prisma.privilegedRoleChangeRequest.deleteMany(),
+    prisma.userInvitation.deleteMany(),
+    prisma.notificationPreference.deleteMany(),
+    prisma.notificationRecipient.deleteMany(),
+    prisma.notificationAudience.deleteMany(),
+    prisma.notificationEvent.deleteMany(),
+    prisma.securityEvent.deleteMany(),
     prisma.auditLog.deleteMany(),
     prisma.alert.deleteMany(),
     prisma.ruleConfig.deleteMany(),
+    prisma.invoiceAdjustment.deleteMany(),
+    prisma.invoiceLineItem.deleteMany(),
+    prisma.invoice.deleteMany(),
+    prisma.cageChargePeriod.deleteMany(),
+    prisma.cageChargeCategory.deleteMany(),
     prisma.cageMovement.deleteMany(),
-    prisma.animalMovement.deleteMany(),
-    prisma.animalStatusEvent.deleteMany(),
     prisma.attachment.deleteMany(),
     prisma.healthNote.deleteMany(),
     prisma.experimentAssignment.deleteMany(),
@@ -33,9 +206,15 @@ export async function seedDatabase() {
     prisma.genotypingRecord.deleteMany(),
     prisma.animalAllele.deleteMany(),
     prisma.animal.deleteMany(),
+    prisma.legacyIdentifierAlias.deleteMany(),
+    prisma.facilityIdentifierAssignment.deleteMany(),
+    prisma.facilityIdentitySequence.deleteMany(),
+    prisma.animalIntakeBatch.deleteMany(),
     prisma.allele.deleteMany(),
     prisma.strain.deleteMany(),
     prisma.cage.deleteMany(),
+    prisma.labMembership.deleteMany(),
+    prisma.lab.deleteMany(),
     prisma.rack.deleteMany(),
     prisma.room.deleteMany(),
     prisma.facility.deleteMany(),
@@ -53,20 +232,53 @@ export async function seedDatabase() {
     })),
   });
 
+  await prisma.lab.createMany({ data: seedColonyData.labs });
+  await prisma.labMembership.createMany({ data: seedColonyData.labMemberships });
   await prisma.facility.createMany({ data: seedColonyData.facilities });
+  await prisma.facilityIdentitySequence.createMany({
+    data: [
+      {
+        entityType: "animal",
+        nextValue: seedColonyData.animals.length + 1,
+        minimumValue: 1,
+        maximumValue: 9999,
+        width: 4,
+      },
+      {
+        entityType: "cage",
+        nextValue: 1000 + seedColonyData.cages.length,
+        minimumValue: 1000,
+        maximumValue: 9999,
+        width: 4,
+      },
+    ],
+  });
   await prisma.room.createMany({ data: seedColonyData.rooms });
   await prisma.rack.createMany({ data: seedColonyData.racks });
   await prisma.cage.createMany({
-    data: seedColonyData.cages.map((cage) => ({
+    data: seedColonyData.cages.map((cage, index) => ({
       ...cage,
+      facilityCageId: String(1000 + index).padStart(4, "0"),
+      labId: requireExplicitSeedLabId(cage.labId, "cage", cage.id, knownLabIds),
       lastUpdatedAt: new Date(cage.lastUpdatedAt),
     })),
   });
   await prisma.strain.createMany({ data: seedColonyData.strains });
   await prisma.allele.createMany({ data: seedColonyData.alleles });
+  if (seedColonyData.animalIntakeBatches.length > 0) {
+    await prisma.animalIntakeBatch.createMany({
+      data: seedColonyData.animalIntakeBatches.map((batch) => ({
+        ...batch,
+        arrivalDate: new Date(batch.arrivalDate),
+        createdAt: asDate(batch.createdAt),
+      })),
+    });
+  }
   await prisma.animal.createMany({
-    data: seedColonyData.animals.map((animal) => ({
+    data: seedColonyData.animals.map((animal, index) => ({
       ...animal,
+      facilityAnimalId: String(index + 1).padStart(4, "0"),
+      owningLabId: requireExplicitSeedLabId(animal.owningLabId, "animal", animal.id, knownLabIds),
       dob: new Date(animal.dob),
       deathDate: asDate(animal.deathDate),
     })),
@@ -75,6 +287,7 @@ export async function seedDatabase() {
   await prisma.genotypingRecord.createMany({
     data: seedColonyData.genotypingRecords.map((record) => ({
       ...record,
+      labId: genotypeLabById.get(record.id)!,
       sampleDate: new Date(record.sampleDate),
       resultDate: new Date(record.resultDate),
     })),
@@ -82,6 +295,7 @@ export async function seedDatabase() {
   await prisma.breedingSetup.createMany({
     data: seedColonyData.breedingSetups.map((setup) => ({
       ...setup,
+      labId: breedingLabById.get(setup.id)!,
       startDate: new Date(setup.startDate),
       endDate: asDate(setup.endDate),
     })),
@@ -94,7 +308,9 @@ export async function seedDatabase() {
     })),
   });
   await prisma.litterAnimal.createMany({ data: seedColonyData.litterAnimals });
-  await prisma.project.createMany({ data: seedColonyData.projects });
+  await prisma.project.createMany({
+    data: seedColonyData.projects.map((project) => ({ ...project, labId: projectLabById.get(project.id)! })),
+  });
   await prisma.animalProjectAllocation.createMany({
     data: seedColonyData.projectAllocations.map((allocation) => ({
       ...allocation,
@@ -102,7 +318,9 @@ export async function seedDatabase() {
       endedAt: asDate(allocation.endedAt),
     })),
   });
-  await prisma.experiment.createMany({ data: seedColonyData.experiments });
+  await prisma.experiment.createMany({
+    data: seedColonyData.experiments.map((experiment) => ({ ...experiment, labId: experimentLabById.get(experiment.id)! })),
+  });
   await prisma.experimentAssignment.createMany({
     data: seedColonyData.experimentAssignments.map((assignment) => ({
       ...assignment,
@@ -113,6 +331,7 @@ export async function seedDatabase() {
   await prisma.sampleRecord.createMany({
     data: seedColonyData.sampleRecords.map((record) => ({
       ...record,
+      labId: animalLabById.get(record.animalId)!,
       collectedAt: new Date(record.collectedAt),
       createdAt: asDate(record.createdAt),
     })),
@@ -120,6 +339,10 @@ export async function seedDatabase() {
   await prisma.cryostorageRecord.createMany({
     data: seedColonyData.cryostorageRecords.map((record) => ({
       ...record,
+      labId: requireSeedReference(
+        record.projectId ? projectLabById.get(record.projectId) : undefined,
+        `cryostorage record ${record.id} has no owned project`,
+      ),
       storedAt: new Date(record.storedAt),
       createdAt: asDate(record.createdAt),
     })),
@@ -127,10 +350,22 @@ export async function seedDatabase() {
   await prisma.healthNote.createMany({
     data: seedColonyData.healthNotes.map((note) => ({
       ...note,
+      labId: healthNoteLabById.get(note.id)!,
       createdAt: new Date(note.createdAt),
     })),
   });
-  await prisma.attachment.createMany({ data: seedColonyData.attachments });
+  await prisma.attachment.createMany({
+    data: seedColonyData.attachments.map((attachment) => ({
+      ...attachment,
+      labId: attachment.animalId
+        ? animalLabById.get(attachment.animalId)!
+        : attachment.cageId
+          ? cageLabById.get(attachment.cageId)!
+          : attachment.healthNoteId
+            ? healthNoteLabById.get(attachment.healthNoteId)!
+            : genotypeLabById.get(attachment.genotypingRecordId!)!,
+    })),
+  });
   await prisma.animalStatusEvent.createMany({
     data: seedColonyData.animalStatusEvents.map((event) => ({
       ...event,
@@ -149,10 +384,43 @@ export async function seedDatabase() {
       movedAt: new Date(movement.movedAt),
     })),
   });
+  await prisma.cageChargeCategory.createMany({ data: seedColonyData.cageChargeCategories });
+  await prisma.cageChargePeriod.createMany({
+    data: seedColonyData.cageChargePeriods.map((period) => ({
+      ...period,
+      startedAt: new Date(period.startedAt),
+      endedAt: asDate(period.endedAt),
+    })),
+  });
+  await prisma.$transaction(async (tx) => {
+    await tx.invoice.createMany({
+      data: seedColonyData.invoices.map((invoice) => ({
+        ...invoice,
+        periodStart: new Date(invoice.periodStart),
+        periodEnd: new Date(invoice.periodEnd),
+        finalizedAt: asDate(invoice.finalizedAt),
+        voidedAt: asDate(invoice.voidedAt),
+      })),
+    });
+    await tx.invoiceLineItem.createMany({
+      data: seedColonyData.invoiceLineItems.map((lineItem) => ({
+        ...lineItem,
+        serviceStart: new Date(lineItem.serviceStart),
+        serviceEnd: new Date(lineItem.serviceEnd),
+      })),
+    });
+  });
   await prisma.ruleConfig.createMany({ data: seedColonyData.ruleConfigs });
   await prisma.alert.createMany({
     data: seedColonyData.manualAlerts.map((alert) => ({
       ...alert,
+      labId: alert.entityType === "project"
+        ? projectLabById.get(alert.entityId)
+        : alert.entityType === "experiment"
+          ? experimentLabById.get(alert.entityId)
+          : alert.entityType === "litter"
+            ? litterLabById.get(alert.entityId)
+            : null,
       generatedAt: new Date(alert.generatedAt),
       resolvedAt: asDate(alert.resolvedAt),
     })),
@@ -165,6 +433,9 @@ export async function seedDatabase() {
       timestamp: new Date(log.timestamp),
     })),
   });
+  if (options.clearAttachments !== false) {
+    await clearStoredAttachments();
+  }
 }
 
 export async function disconnectSeedDatabase() {

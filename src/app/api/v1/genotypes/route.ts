@@ -28,7 +28,7 @@ const createGenotypeApiSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("animals:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -46,7 +46,7 @@ export async function POST(request: Request) {
 
   const parsed = parsedRequest.value;
 
-  const resolved = await resolveGenotypeApiInput(parsed);
+  const resolved = await resolveGenotypeApiInput(parsed, auth.user);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     resultDate: parsed.resultDate,
     finalCall,
     resultText: parsed.resultText,
-  });
+  }, auth.user);
 
   if (existingRecord && !parsedRequest.attachment) {
     return buildMutationResponse(existingRecord, {
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
           }
         : undefined,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok || !result.entityId) {
@@ -105,7 +105,7 @@ export async function POST(request: Request) {
     return buildApiErrorResponse(result.message, status);
   }
 
-  const genotype = await getGenotypeApiRecordById(result.entityId);
+  const genotype = await getGenotypeApiRecordById(result.entityId, auth.user);
 
   if (!genotype) {
     return buildApiErrorResponse("Genotype was recorded but could not be read back.", 500);

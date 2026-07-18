@@ -1,32 +1,53 @@
 import { NextResponse } from "next/server";
 
-import { auth } from "@/auth";
-import type { UserRole } from "@/lib/types";
+import { actorHasCapability, type Capability } from "@/lib/capabilities";
+import { recordSecurityEventBestEffort, securityEventTimeBucket } from "@/lib/security-event";
+import { resolveCurrentActor, type ResolvedActor } from "@/lib/session";
 
 type ApiMetaValue = string | number | boolean;
 
-export type ApiRouteUser = {
-  id: string;
-  email?: string | null;
-  name?: string | null;
-  role: UserRole;
-};
+export type ApiRouteUser = ResolvedActor;
 
-export async function requireApiUser(): Promise<{ user: ApiRouteUser } | { response: NextResponse }> {
-  const session = await auth();
+export async function requireApiUser(
+  capability: Capability,
+): Promise<{ user: ApiRouteUser } | { response: NextResponse }> {
+  const actor = await resolveCurrentActor();
 
-  if (!session?.user) {
+  if (!actor) {
+    const dedupeKey = `api:unauthenticated:${capability}:${securityEventTimeBucket()}`;
+    await recordSecurityEventBestEffort({
+      eventType: "authorization.api.unauthenticated",
+      outcome: "denied",
+      severity: "warning",
+      correlationId: dedupeKey,
+      dedupeKey,
+      subjectType: "capability",
+      subjectId: capability,
+      source: "api_guard",
+      summary: "Unauthenticated API access was denied.",
+    });
     return { response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
-  return {
-    user: {
-      id: session.user.id,
-      email: session.user.email,
-      name: session.user.name,
-      role: session.user.role,
-    },
-  };
+  if (!actorHasCapability(actor, capability)) {
+    const dedupeKey = `api:forbidden:${actor.id}:${capability}:${securityEventTimeBucket()}`;
+    await recordSecurityEventBestEffort({
+      eventType: "authorization.api.forbidden",
+      outcome: "denied",
+      severity: "warning",
+      actorId: actor.id,
+      scopeLabId: actor.activeLabId,
+      correlationId: dedupeKey,
+      dedupeKey,
+      subjectType: "capability",
+      subjectId: capability,
+      source: "api_guard",
+      summary: "Forbidden API access was denied.",
+    });
+    return { response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+
+  return { user: actor };
 }
 
 export function compactApiMeta(input: Record<string, ApiMetaValue | undefined>) {

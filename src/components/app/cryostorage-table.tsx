@@ -12,6 +12,8 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { CryostorageInlineEditForm } from "@/components/app/cryostorage-inline-edit-form";
+import { RowActionMenu } from "@/components/app/worksheet-shell";
 import {
   INITIAL_VISIBLE_RECORDS,
   VISIBLE_RECORD_BATCH,
@@ -38,7 +40,7 @@ function statusVariant(status: CryostorageInventoryItem["status"]) {
   return "danger";
 }
 
-export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] }) {
+export function CryostorageTable({ canManage, data }: { canManage: boolean; data: CryostorageInventoryItem[] }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | CryostorageInventoryItem["status"]>("all");
   const [strainFilter, setStrainFilter] = useState("all");
@@ -119,6 +121,10 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
         header: "Status",
         cell: (info) => <Badge variant={statusVariant(info.getValue())}>{info.getValue()}</Badge>,
       }),
+      columnHelper.accessor("labLabel", {
+        header: "Lab",
+        cell: (info) => <span className="wrap-value">{info.getValue()}</span>,
+      }),
       columnHelper.accessor("storedAt", {
         header: "Stored",
         cell: (info) => formatDate(info.getValue()),
@@ -144,8 +150,19 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
             <span className="text-sm text-[var(--muted)]">None</span>
           ),
       }),
+      ...(canManage
+        ? [columnHelper.display({
+          id: "actions",
+          header: "Actions",
+          cell: (info) => (
+            <RowActionMenu label="Edit">
+              <CryostorageInlineEditForm record={info.row.original} />
+            </RowActionMenu>
+          ),
+        })]
+        : []),
     ],
-    [],
+    [canManage],
   );
 
   // TanStack Table owns stateful table instance creation here; disabling the
@@ -235,7 +252,14 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
                     <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{record.quantityLabel}</p>
                   ) : null}
                 </div>
-                <Badge variant={statusVariant(record.status)}>{record.status}</Badge>
+                <div className="action-row justify-end">
+                  <Badge variant={statusVariant(record.status)}>{record.status}</Badge>
+                  {canManage ? (
+                    <RowActionMenu label="Edit">
+                      <CryostorageInlineEditForm record={record} />
+                    </RowActionMenu>
+                  ) : null}
+                </div>
               </div>
               <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
                 <div>
@@ -245,6 +269,10 @@ export function CryostorageTable({ data }: { data: CryostorageInventoryItem[] })
                 <div>
                   <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Project</dt>
                   <dd className="mt-1 text-[var(--ink)]">{record.projectCode ?? "None"}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Lab</dt>
+                  <dd className="mt-1 text-[var(--ink)]">{record.labLabel}</dd>
                 </div>
                 <div className="col-span-2">
                   <dt className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">Strain</dt>

@@ -17,10 +17,12 @@ type Option = {
 type SampleCreateFormProps = {
   animalOptions: Option[];
   projectOptions: Option[];
+  experimentOptions: Option[];
   defaultAnimalId?: string;
   animalSelectDisabled?: boolean;
   defaultCollectedAt: string;
   defaultProjectId?: string | null;
+  defaultExperimentId?: string | null;
 };
 
 const statusOptions = [
@@ -34,10 +36,12 @@ const statusOptions = [
 export function SampleCreateForm({
   animalOptions,
   projectOptions,
+  experimentOptions,
   defaultAnimalId,
   animalSelectDisabled = false,
   defaultCollectedAt,
   defaultProjectId,
+  defaultExperimentId,
 }: SampleCreateFormProps) {
   const formRef = useRef<HTMLFormElement | null>(null);
   const [state, formAction, pending] = useActionState(recordSampleAction, initialFormActionState);
@@ -124,6 +128,22 @@ export function SampleCreateForm({
           >
             <option value="">No project linked</option>
             {projectOptions.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-2 text-sm">
+          <span className="text-[var(--muted)]">Experiment</span>
+          <select
+            className="h-11 w-full rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-base text-[var(--ink)] md:text-sm"
+            defaultValue={defaultExperimentId ?? ""}
+            name="experimentId"
+            data-testid="sample-record-experiment"
+          >
+            <option value="">No experiment linked</option>
+            {experimentOptions.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.label}
               </option>

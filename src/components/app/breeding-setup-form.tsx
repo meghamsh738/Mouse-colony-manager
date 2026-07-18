@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 
 import { createBreedingAction } from "@/app/breeding/actions";
 import { FormFeedback } from "@/components/app/form-feedback";
@@ -18,6 +18,7 @@ type BreedingSetupFormProps = {
 export function BreedingSetupForm({ sireOptions, damOptions, allowOverride }: BreedingSetupFormProps) {
   const formRef = useRef<HTMLFormElement | null>(null);
   const [state, formAction, pending] = useActionState(createBreedingAction, initialFormActionState);
+  const [commandKey] = useState(() => crypto.randomUUID());
   const handleSubmit = useSubmitGuard(pending);
 
   useEffect(() => {
@@ -28,6 +29,8 @@ export function BreedingSetupForm({ sireOptions, damOptions, allowOverride }: Br
 
   return (
     <form ref={formRef} action={formAction} className="space-y-4" data-testid="breeding-create-form" onSubmit={handleSubmit}>
+      <input name="idempotencyKey" type="hidden" value={commandKey} />
+      <input name="requestId" type="hidden" value={commandKey} />
       <div className="grid gap-4 md:grid-cols-2">
         <label className="space-y-2 text-sm">
           <span className="text-[var(--muted)]">Sire</span>

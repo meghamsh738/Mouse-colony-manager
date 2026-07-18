@@ -43,14 +43,14 @@ const updateCryostorageApiSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("cryostorage:read");
 
   if ("response" in auth) {
     return auth.response;
   }
 
   const filters = parseCryostorageApiFilters(new URL(request.url).searchParams);
-  const result = await getCryostorageApiList(filters);
+  const result = await getCryostorageApiList(filters, auth.user);
 
   return buildCollectionResponse(result.data, {
     total: result.total,
@@ -65,7 +65,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("cryostorage:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -82,13 +82,13 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Invalid cryostorage payload.", 400, parsed.error.flatten().fieldErrors);
   }
 
-  const resolved = await resolveCryostorageApiInput(parsed.data);
+  const resolved = await resolveCryostorageApiInput(parsed.data, auth.user);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
   }
 
-  const existingRecord = await getCryostorageApiRecordByLabel(parsed.data.sampleLabel.trim());
+  const existingRecord = await getCryostorageApiRecordByLabel(parsed.data.sampleLabel.trim(), auth.user);
 
   if (existingRecord) {
     const sameProject = (existingRecord.projectCode ?? null) === (resolved.value.projectCode ?? null);
@@ -115,6 +115,7 @@ export async function POST(request: Request) {
     {
       strainId: resolved.value.strainId,
       projectId: resolved.value.projectId,
+      labId: resolved.value.labId,
       sampleLabel: parsed.data.sampleLabel,
       materialType: parsed.data.materialType,
       status: parsed.data.status,
@@ -124,7 +125,7 @@ export async function POST(request: Request) {
       recoveryNotes: parsed.data.recoveryNotes,
       notes: parsed.data.notes,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok || !result.entityId) {
@@ -133,7 +134,7 @@ export async function POST(request: Request) {
     return buildApiErrorResponse(result.message, status);
   }
 
-  const record = await getCryostorageApiRecordById(result.entityId);
+  const record = await getCryostorageApiRecordById(result.entityId, auth.user);
 
   if (!record) {
     return buildApiErrorResponse("Cryostorage record was created but could not be read back.", 500);
@@ -147,7 +148,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const auth = await requireApiUser();
+  const auth = await requireApiUser("cryostorage:manage");
 
   if ("response" in auth) {
     return auth.response;
@@ -164,7 +165,7 @@ export async function PATCH(request: Request) {
     return buildApiErrorResponse("Invalid cryostorage update payload.", 400, parsed.error.flatten().fieldErrors);
   }
 
-  const resolved = await resolveCryostorageApiRecordReference(parsed.data);
+  const resolved = await resolveCryostorageApiRecordReference(parsed.data, auth.user);
 
   if (!resolved.ok) {
     return buildApiErrorResponse(resolved.message, resolved.status);
@@ -179,7 +180,7 @@ export async function PATCH(request: Request) {
       recoveryNotes: parsed.data.recoveryNotes,
       notes: parsed.data.notes,
     },
-    { id: auth.user.id, role: auth.user.role },
+    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
   );
 
   if (!result.ok || !result.entityId) {
@@ -188,7 +189,7 @@ export async function PATCH(request: Request) {
     return buildApiErrorResponse(result.message, status);
   }
 
-  const record = await getCryostorageApiRecordById(result.entityId);
+  const record = await getCryostorageApiRecordById(result.entityId, auth.user);
 
   if (!record) {
     return buildApiErrorResponse("Cryostorage record was updated but could not be read back.", 500);

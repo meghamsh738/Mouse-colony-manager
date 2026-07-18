@@ -1,9 +1,10 @@
-import { compareDesc, differenceInDays, format } from "date-fns";
+import { compareDesc, differenceInDays } from "date-fns";
 
-import { getBreedingSuggestionSummaryView } from "@/lib/breeding-read";
+import { getBreedingSuggestionSummaryView as getUnscopedBreedingSuggestionSummaryView } from "@/lib/breeding-read";
+import { getActorLabAccess, type LabActor } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
 import type { Alert } from "@/lib/types";
-import { formatAgeLabel } from "@/lib/utils";
+import { formatAgeLabel, formatDate } from "@/lib/utils";
 
 type DashboardRuleContext = {
   breederMaxAgeDays: number;
@@ -41,6 +42,10 @@ function buildCageLabel(
   }
 
   return `${cage.room.roomNumber} / ${cage.rack.rackNumber} / ${cage.cageNumber}`;
+}
+
+function isActionableHealthNote(note: { severity: Alert["severity"]; followupRequired: boolean }) {
+  return note.followupRequired || note.severity === "warning" || note.severity === "critical";
 }
 
 async function getDashboardRuleContext(): Promise<DashboardRuleContext> {
@@ -81,12 +86,18 @@ async function getDashboardRuleContext(): Promise<DashboardRuleContext> {
   };
 }
 
-async function getDashboardData() {
+type DashboardAlert = Alert & { labId: string | null };
+
+async function getDashboardData(actor?: LabActor) {
   const rules = await getDashboardRuleContext();
+  const access = actor ? await getActorLabAccess(actor) : null;
+  const labIds = access?.memberLabIds ?? [];
+  const scopedLabWhere = access && !access.canViewAll ? { in: labIds } : undefined;
   const [animals, breedings, litters, cages, assignments, manualAlerts] = await prisma.$transaction([
     prisma.animal.findMany({
       where: {
         outcomeStatus: "alive",
+        ...(scopedLabWhere ? { owningLabId: scopedLabWhere } : {}),
       },
       orderBy: { animalId: "asc" },
       include: {
@@ -109,6 +120,7 @@ async function getDashboardData() {
           orderBy: { createdAt: "desc" },
           select: {
             id: true,
+            labId: true,
             note: true,
             severity: true,
             followupRequired: true,
@@ -139,21 +151,27 @@ async function getDashboardData() {
       },
     }),
     prisma.breedingSetup.findMany({
-      where: { status: "active" },
+      where: { status: "active", ...(scopedLabWhere ? { labId: scopedLabWhere } : {}) },
       select: {
         id: true,
+        labId: true,
         startDate: true,
       },
     }),
     prisma.litter.findMany({
-      where: { litterSizeWean: null },
+      where: {
+        litterSizeWean: null,
+        ...(scopedLabWhere ? { breedingSetup: { labId: scopedLabWhere } } : {}),
+      },
       select: {
         id: true,
         birthDate: true,
         breedingSetupId: true,
+        breedingSetup: { select: { labId: true } },
       },
     }),
     prisma.cage.findMany({
+      where: scopedLabWhere ? { labId: scopedLabWhere } : undefined,
       orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
       include: {
         room: { select: { roomNumber: true } },
@@ -169,37 +187,48 @@ async function getDashboardData() {
           orderBy: { createdAt: "desc" },
           select: {
             id: true,
+            labId: true,
             note: true,
             severity: true,
+            followupRequired: true,
             createdAt: true,
           },
         },
       },
     }),
     prisma.experimentAssignment.findMany({
-      where: { status: "reserved" },
+      where: {
+        status: "reserved",
+        ...(scopedLabWhere ? { experiment: { labId: scopedLabWhere } } : {}),
+      },
       include: {
-        experiment: { select: { experimentCode: true } },
+        experiment: { select: { experimentCode: true, labId: true } },
         animal: { select: { animalId: true } },
       },
     }),
     prisma.alert.findMany({
-      where: { status: "open" },
+      where: {
+        status: "open",
+        ...(scopedLabWhere ? { labId: scopedLabWhere } : {}),
+      },
       orderBy: { generatedAt: "desc" },
     }),
   ]);
 
-  const ruleAlerts: Alert[] = [];
+  const ruleAlerts: DashboardAlert[] = [];
 
   for (const animal of animals) {
     const ageDays = getAgeDays(animal.dob, rules.today);
-    const unresolvedHealthNote = animal.healthNotes.find((note) => note.followupRequired);
+    const unresolvedHealthNote = animal.healthNotes.find(
+      (note) => note.labId === animal.owningLabId && isActionableHealthNote(note),
+    );
     const pendingRecord = animal.genotypingRecords.find((record) => record.status === "pending");
     const hasPendingAllele = animal.alleles.some((allele) => allele.callStatus === "pending");
     const effectivePendingRecord = pendingRecord && (hasPendingAllele || animal.alleles.length === 0) ? pendingRecord : null;
 
     if (animal.status === "breeding" && ageDays > rules.breederMaxAgeDays) {
       ruleAlerts.push({
+        labId: animal.owningLabId,
         id: `rule-breeder-old-${animal.id}`,
         entityType: "animal",
         entityId: animal.id,
@@ -214,6 +243,7 @@ async function getDashboardData() {
 
     if (animal.status === "breeding" && ageDays < rules.breederMinAgeDays) {
       ruleAlerts.push({
+        labId: animal.owningLabId,
         id: `rule-breeder-young-${animal.id}`,
         entityType: "animal",
         entityId: animal.id,
@@ -231,6 +261,7 @@ async function getDashboardData() {
       differenceInDays(new Date(rules.today), effectivePendingRecord.sampleDate) > rules.genotypePendingDays
     ) {
       ruleAlerts.push({
+        labId: animal.owningLabId,
         id: `rule-genotype-pending-${animal.id}`,
         entityType: "animal",
         entityId: animal.id,
@@ -245,6 +276,7 @@ async function getDashboardData() {
 
     if (animal.status === "colony_holding" && ageDays > rules.projectAssignmentRequiredDays && animal.projectAllocations.length === 0) {
       ruleAlerts.push({
+        labId: animal.owningLabId,
         id: `rule-project-missing-${animal.id}`,
         entityType: "animal",
         entityId: animal.id,
@@ -259,6 +291,7 @@ async function getDashboardData() {
 
     if (unresolvedHealthNote) {
       ruleAlerts.push({
+        labId: animal.owningLabId,
         id: `rule-health-followup-${animal.id}`,
         entityType: "animal",
         entityId: animal.id,
@@ -275,6 +308,7 @@ async function getDashboardData() {
   for (const breeding of breedings) {
     if (differenceInDays(new Date(rules.today), breeding.startDate) > rules.breedingDurationMaxDays) {
       ruleAlerts.push({
+        labId: breeding.labId,
         id: `rule-breeding-duration-${breeding.id}`,
         entityType: "cage",
         entityId: breeding.id,
@@ -293,6 +327,7 @@ async function getDashboardData() {
 
     if (litterAge > rules.weaningDueDays) {
       ruleAlerts.push({
+        labId: litter.breedingSetup.labId,
         id: `rule-weaning-${litter.id}`,
         entityType: "litter",
         entityId: litter.id,
@@ -311,6 +346,7 @@ async function getDashboardData() {
 
     if (cage.animals.length > rules.cageMaxOccupancy) {
       ruleAlerts.push({
+        labId: cage.labId,
         id: `rule-cage-capacity-${cage.id}`,
         entityType: "cage",
         entityId: cage.id,
@@ -325,6 +361,7 @@ async function getDashboardData() {
 
     if (!rules.mixedSexHoldingAllowed && cage.status !== "breeding" && sexes.has("male") && sexes.has("female")) {
       ruleAlerts.push({
+        labId: cage.labId,
         id: `rule-mixed-sex-${cage.id}`,
         entityType: "cage",
         entityId: cage.id,
@@ -337,8 +374,11 @@ async function getDashboardData() {
       });
     }
 
-    for (const note of cage.healthNotes) {
+    for (const note of cage.healthNotes.filter(
+      (healthNote) => healthNote.labId === cage.labId && isActionableHealthNote(healthNote),
+    )) {
       ruleAlerts.push({
+        labId: cage.labId,
         id: `rule-cage-note-${note.id}`,
         entityType: "cage",
         entityId: cage.id,
@@ -355,6 +395,7 @@ async function getDashboardData() {
   for (const assignment of assignments) {
     if (differenceInDays(new Date(rules.today), assignment.startDate) > rules.reservationStartGraceDays) {
       ruleAlerts.push({
+        labId: assignment.experiment.labId,
         id: `rule-reserved-stale-${assignment.id}`,
         entityType: "experiment",
         entityId: assignment.experimentId,
@@ -368,8 +409,9 @@ async function getDashboardData() {
     }
   }
 
-  const normalizedManualAlerts: Alert[] = manualAlerts.map((alert) => ({
+  const normalizedManualAlerts: DashboardAlert[] = manualAlerts.map((alert) => ({
     id: alert.id,
+    labId: alert.labId,
     entityType: alert.entityType as Alert["entityType"],
     entityId: alert.entityId,
     alertType: alert.alertType,
@@ -385,6 +427,7 @@ async function getDashboardData() {
     rules,
     animals,
     litters,
+    cages,
     alerts: [...normalizedManualAlerts, ...ruleAlerts].sort((left, right) =>
       compareDesc(new Date(left.generatedAt), new Date(right.generatedAt)),
     ),
@@ -429,11 +472,17 @@ function buildColonyCompositionView({ animals }: DashboardData) {
   };
 }
 
-function buildDashboardHighlightsView({ rules, animals, litters, alerts }: DashboardData) {
+function buildDashboardHighlightsView({ rules, animals, litters, cages, alerts }: DashboardData) {
+  const staffFollowupTypes = new Set(["health_followup", "welfare_note", "welfare_followup"]);
+
   return {
+    quickCages: cages
+      .filter((cage) => cage.active && cage.status !== "closed" && cage.status !== "retired")
+      .slice(0, 2)
+      .map((cage) => ({ id: cage.id, barcode: cage.barcode })),
     upcomingWean: litters.map((litter) => ({
       litterId: litter.id,
-      dueDate: format(new Date(litter.birthDate.getTime() + rules.weaningDueDays * 86_400_000), "dd MMM yyyy"),
+      dueDate: formatDate(new Date(litter.birthDate.getTime() + rules.weaningDueDays * 86_400_000)),
       breedingId: litter.breedingSetupId,
     })),
     breeders: animals
@@ -444,11 +493,14 @@ function buildDashboardHighlightsView({ rules, animals, litters, alerts }: Dashb
         cageLabel: buildCageLabel(animal.currentCage),
       })),
     alerts: alerts.slice(0, 6),
+    staffFollowups: alerts
+      .filter((alert) => alert.status === "open" && staffFollowupTypes.has(alert.alertType))
+      .slice(0, 4),
   };
 }
 
-export async function getDashboardOverviewView() {
-  const data = await getDashboardData();
+export async function getDashboardOverviewView(actor?: LabActor) {
+  const data = await getDashboardData(actor);
 
   return {
     metrics: buildDashboardMetricsView(data),
@@ -457,28 +509,30 @@ export async function getDashboardOverviewView() {
   };
 }
 
-export async function getDashboardMetricsView() {
-  return buildDashboardMetricsView(await getDashboardData());
+export async function getDashboardMetricsView(actor?: LabActor) {
+  return buildDashboardMetricsView(await getDashboardData(actor));
 }
 
-export async function getColonyCompositionView() {
-  return buildColonyCompositionView(await getDashboardData());
+export async function getColonyCompositionView(actor?: LabActor) {
+  return buildColonyCompositionView(await getDashboardData(actor));
 }
 
-export async function getDashboardHighlightsView() {
-  return buildDashboardHighlightsView(await getDashboardData());
+export async function getDashboardHighlightsView(actor?: LabActor) {
+  return buildDashboardHighlightsView(await getDashboardData(actor));
 }
 
-export async function getDashboardAlertsView() {
-  const { alerts } = await getDashboardData();
+export async function getDashboardAlertsView(actor?: LabActor) {
+  const { alerts } = await getDashboardData(actor);
 
   return alerts;
 }
 
-export async function getDashboardOpenAlertCount() {
-  const metrics = await getDashboardMetricsView();
+export async function getDashboardOpenAlertCount(actor?: LabActor) {
+  const metrics = await getDashboardMetricsView(actor);
 
   return metrics.openAlerts;
 }
 
-export { getBreedingSuggestionSummaryView };
+export async function getBreedingSuggestionSummaryView(actor: LabActor) {
+  return getUnscopedBreedingSuggestionSummaryView(actor);
+}

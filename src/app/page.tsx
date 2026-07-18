@@ -1,163 +1,227 @@
 import Link from "next/link";
+import { ArrowRight, Stethoscope } from "lucide-react";
+import { redirect } from "next/navigation";
 
 import { AlertFeed } from "@/components/app/alert-feed";
 import { AppShell } from "@/components/app/app-shell";
-import { PageHeader } from "@/components/app/page-header";
+import { PersonaDashboard } from "@/components/app/persona-dashboard";
 import { StatStrip } from "@/components/app/stat-strip";
-import { Surface } from "@/components/app/surface";
+import { Badge } from "@/components/ui/badge";
+import { actorHasCapability } from "@/lib/capabilities";
 import {
   getBreedingSuggestionSummaryView,
   getDashboardOverviewView,
 } from "@/lib/dashboard-read";
-import { SEED_REFERENCE_DATE } from "@/lib/seed-metadata";
+import { getPersonaDashboardView, type PersonaQueueItem } from "@/lib/persona-dashboard-read";
 import { requireUser } from "@/lib/session";
+import type { Alert } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
+function getAlertHref(alert: Alert) {
+  if (alert.entityType === "animal") {
+    return `/animals/${alert.entityId}`;
+  }
+
+  if (alert.entityType === "cage") {
+    return `/cages/${alert.entityId}`;
+  }
+
+  if (alert.entityType === "experiment") {
+    return "/experiments";
+  }
+
+  if (alert.entityType === "litter") {
+    return "/breeding";
+  }
+
+  return "/notifications";
+}
+
+function severityVariant(severity: Alert["severity"]) {
+  if (severity === "critical") {
+    return "danger";
+  }
+
+  if (severity === "warning") {
+    return "warning";
+  }
+
+  return "info";
+}
+
 export default async function DashboardPage() {
-  const user = await requireUser();
-  const [{ metrics, composition, highlights }, suggestions] = await Promise.all([
-    getDashboardOverviewView(),
-    getBreedingSuggestionSummaryView(),
+  const user = await requireUser({ capability: "dashboard:view" });
+  if (user.canonicalRole === "it_head") {
+    redirect("/system");
+  }
+  const [{ metrics, composition, highlights }, persona, suggestions] = await Promise.all([
+    getDashboardOverviewView(user),
+    getPersonaDashboardView(user),
+    user.canonicalRole === "lab_user"
+      ? getBreedingSuggestionSummaryView(user).catch((error) => {
+          console.error("[dashboard] breeding suggestions unavailable", error);
+          return [];
+        })
+      : Promise.resolve([]),
   ]);
+  const welfareQueue: PersonaQueueItem = {
+    id: "welfare",
+    label: "Welfare follow-ups",
+    count: highlights.staffFollowups.length,
+    href: "/notifications",
+    tone: highlights.staffFollowups.length ? "danger" : "neutral",
+  };
+  const alertQueue: PersonaQueueItem = {
+    id: "alerts",
+    label: "Open alerts",
+    count: metrics.openAlerts,
+    href: "/notifications",
+    tone: metrics.openAlerts ? "warning" : "neutral",
+  };
+  const weaningQueue: PersonaQueueItem = {
+    id: "weaning",
+    label: "Litters to wean",
+    count: highlights.upcomingWean.length,
+    href: "/breeding",
+    tone: highlights.upcomingWean.length ? "warning" : "neutral",
+  };
+  const orderedQueue = user.canonicalRole === "facility_admin"
+    ? [...persona.queue, welfareQueue, alertQueue]
+    : user.canonicalRole === "cmu_staff"
+      ? [welfareQueue, ...persona.queue, weaningQueue, alertQueue]
+      : [welfareQueue, weaningQueue, ...persona.queue, alertQueue];
 
   return (
     <AppShell currentPath="/" role={user.role} userName={user.name ?? user.email ?? "Unknown user"}>
-      <div className="space-y-8">
-        <PageHeader
-          eyebrow="Dashboard"
-          title="Operational view of the live colony."
-          description="Start from alerts, age-sensitive workload, and the cages or animals that need attention first. This surface is tuned for daily staff rounds and experiment planning."
-          badgeLabel="postgres runtime"
+      <div className="dashboard-workspace">
+        <PersonaDashboard
+          activeLabName={user.activeMembership?.labName}
+          canManageColony={actorHasCapability(user, "cages:manage")}
+          onboarding={persona.onboarding}
+          queue={orderedQueue}
+          role={user.canonicalRole}
         />
+
+        {user.canonicalRole !== "facility_admin" ? <section className="dashboard-lane" data-testid="dashboard-staff-followups">
+          <div className="dashboard-lane-header">
+            <div className="flex min-w-0 items-center gap-2">
+              <Stethoscope className="h-4 w-4 text-[var(--danger)]" aria-hidden="true" />
+              <h2>Staff / Vet follow-ups</h2>
+              <span className="lane-count">{highlights.staffFollowups.length}</span>
+            </div>
+            <Link href="/notifications">View inbox</Link>
+          </div>
+          <div className="dashboard-row-list">
+            {highlights.staffFollowups.length ? (
+              highlights.staffFollowups.map((alert) => (
+                <Link
+                  className="dashboard-followup-row"
+                  data-severity={alert.severity}
+                  href={getAlertHref(alert)}
+                  key={alert.id}
+                >
+                  <span className="dashboard-row-priority" aria-hidden="true" />
+                  <div className="min-w-0">
+                    <p className="dashboard-row-title">{alert.message}</p>
+                    <p className="dashboard-row-meta">
+                      {alert.entityType} · {formatDate(alert.generatedAt)}
+                    </p>
+                  </div>
+                  <Badge variant={severityVariant(alert.severity)}>{alert.severity}</Badge>
+                  <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" aria-hidden="true" />
+                </Link>
+              ))
+            ) : (
+              <p className="dashboard-empty-row">No health or welfare follow-ups.</p>
+            )}
+          </div>
+        </section> : null}
+
         <StatStrip
           stats={[
-            { label: "Active mice", value: metrics.activeAnimals, hint: "Live animals in active views", emphasis: "success" },
-            { label: "Active breeders", value: metrics.activeBreeders, hint: "Animals marked in breeding", emphasis: "warning" },
-            { label: "Pending genotype", value: metrics.pendingGenotypes, hint: "Need verification or report upload", emphasis: "warning" },
-            {
-              label: "Experiment-ready",
-              value: metrics.availableForExperiment,
-              hint: "Genotype-confirmed holding animals",
-              emphasis: "info",
-            },
-            { label: "Open alerts", value: metrics.openAlerts, hint: "Rule and manual alerts combined", emphasis: "danger" },
-            { label: "Old breeders", value: metrics.oldBreeders, hint: "Above breeder age threshold", emphasis: "warning" },
+            { label: "Active mice", value: metrics.activeAnimals, emphasis: "success" },
+            { label: "Open alerts", value: metrics.openAlerts, emphasis: "danger" },
+            { label: "Experiment-ready", value: metrics.availableForExperiment, emphasis: "info" },
+            { label: "Pending genotype", value: metrics.pendingGenotypes, emphasis: "warning" },
+            { label: "Active breeders", value: metrics.activeBreeders, emphasis: "success" },
+            { label: "Old breeders", value: metrics.oldBreeders, emphasis: "warning" },
           ]}
         />
-        <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
-          <AlertFeed alerts={highlights.alerts} title="Priority alerts" />
-          <div className="space-y-6">
-            <Surface className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Upcoming wean</p>
-                  <h2 className="mt-2 font-display text-2xl font-semibold tracking-[-0.04em]">Litter queue</h2>
-                </div>
-                <Link className="text-sm text-[var(--accent)]" href="/breeding">
-                  Open breeding
-                </Link>
-              </div>
-              <div className="space-y-3">
-                {highlights.upcomingWean.map((item) => (
-                  <article key={item.litterId} className="rounded-2xl border border-[var(--line)] px-4 py-4">
-                    <p className="font-medium">{item.litterId}</p>
-                    <p className="mt-1 text-sm text-[var(--muted)]">
-                      Due {item.dueDate} · linked to {item.breedingId}
-                    </p>
-                  </article>
-                ))}
-              </div>
-            </Surface>
-            <Surface className="space-y-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Colony composition</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="font-display text-3xl font-semibold tracking-[-0.05em]">{composition.males}</p>
-                  <p className="text-sm text-[var(--muted)]">Male</p>
-                </div>
-                <div>
-                  <p className="font-display text-3xl font-semibold tracking-[-0.05em]">{composition.females}</p>
-                  <p className="text-sm text-[var(--muted)]">Female</p>
-                </div>
-                <div>
-                  <p className="font-display text-3xl font-semibold tracking-[-0.05em]">{composition.breeding}</p>
-                  <p className="text-sm text-[var(--muted)]">In breeding</p>
-                </div>
-                <div>
-                  <p className="font-display text-3xl font-semibold tracking-[-0.05em]">{composition.transgenic}</p>
-                  <p className="text-sm text-[var(--muted)]">Transgenic</p>
-                </div>
-              </div>
-            </Surface>
+
+        <AlertFeed alerts={highlights.alerts} title="Priority alerts" />
+
+        {user.canonicalRole !== "facility_admin" ? <section className="dashboard-lane">
+          <div className="dashboard-lane-header">
+            <div className="flex min-w-0 items-center gap-2">
+              <h2>Upcoming litter work</h2>
+              <span className="lane-count">{highlights.upcomingWean.length}</span>
+            </div>
+            <Link href="/breeding">Open breeding</Link>
           </div>
-        </div>
-        <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <Surface className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Breeding helper</p>
-                <h2 className="mt-2 font-display text-2xl font-semibold tracking-[-0.04em]">Suggested crosses</h2>
-              </div>
-              <Link className="text-sm text-[var(--accent)]" href="/breeding">
-                Planner
-              </Link>
+          <div className="dashboard-row-list">
+            {highlights.upcomingWean.length ? (
+              highlights.upcomingWean.map((item) => (
+                <Link className="dashboard-data-row" href="/breeding" key={item.litterId}>
+                  <span className="dashboard-row-id">{item.litterId}</span>
+                  <span className="dashboard-row-value">Due {item.dueDate}</span>
+                  <span className="dashboard-row-meta">Breeding {item.breedingId}</span>
+                  <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" aria-hidden="true" />
+                </Link>
+              ))
+            ) : (
+              <p className="dashboard-empty-row">No upcoming weaning work.</p>
+            )}
+          </div>
+        </section> : null}
+
+        {user.canonicalRole === "lab_user" ? <section className="dashboard-lane">
+          <div className="dashboard-lane-header">
+            <div className="flex min-w-0 items-center gap-2">
+              <h2>Suggested crosses</h2>
+              <span className="lane-count">{suggestions.length}</span>
             </div>
-            <div className="space-y-3">
-              {suggestions.slice(0, 3).map((suggestion) => (
-                <article key={suggestion.id} className="rounded-2xl border border-[var(--line)] p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{suggestion.sireLabel}</p>
-                      <p className="text-sm text-[var(--muted)]">{suggestion.damLabel}</p>
-                    </div>
-                    <p className="font-display text-2xl font-semibold tracking-[-0.05em]">{suggestion.probabilityLabel}</p>
+            <Link href="/breeding">Open planner</Link>
+          </div>
+          <div className="dashboard-row-list">
+            {suggestions.length ? (
+              suggestions.slice(0, 4).map((suggestion) => (
+                <Link className="dashboard-cross-row" href="/breeding" key={suggestion.id}>
+                  <div className="min-w-0">
+                    <p className="dashboard-row-title">{suggestion.sireLabel} × {suggestion.damLabel}</p>
+                    <p className="dashboard-row-meta">
+                      Expected usable pups {suggestion.expectedUsablePups} · {suggestion.expectedSexSplit}
+                    </p>
                   </div>
-                  <p className="mt-3 text-sm text-[var(--muted)]">
-                    Expected usable pups: {suggestion.expectedUsablePups} · Target sex split {suggestion.expectedSexSplit}
-                  </p>
-                  <p className="mt-2 text-sm text-amber-900">{suggestion.warnings[0] ?? "No immediate warning."}</p>
-                </article>
-              ))}
-            </div>
-          </Surface>
-          <Surface className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Operational quick links</p>
-                <h2 className="mt-2 font-display text-2xl font-semibold tracking-[-0.04em]">Common actions</h2>
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/scan/CM-A101-001">
-                <p className="font-medium">Open breeding cage</p>
-                <p className="mt-1 text-sm text-[var(--muted)]">Launch barcode workflow for CM-A101-001</p>
-              </Link>
-              <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/animals">
-                <p className="font-medium">Filter the colony</p>
-                <p className="mt-1 text-sm text-[var(--muted)]">Search by genotype, age, room, or assignment state</p>
-              </Link>
-              <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/experiments">
-                <p className="font-medium">Review reserved animals</p>
-                <p className="mt-1 text-sm text-[var(--muted)]">Check overlap conflicts and not-started reservations</p>
-              </Link>
-              <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/notifications">
-                <p className="font-medium">Open notification inbox</p>
-                <p className="mt-1 text-sm text-[var(--muted)]">Triages overdue genotypes, welfare follow-up, and stale reservations</p>
-              </Link>
-              <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/forecast">
-                <p className="font-medium">Open forecast</p>
-                <p className="mt-1 text-sm text-[var(--muted)]">Estimate breeder output, near-term runway, and frozen-backup coverage</p>
-              </Link>
-              <Link className="rounded-2xl border border-[var(--line)] p-4 transition hover:border-[var(--line-strong)] hover:bg-white" href="/settings">
-                <p className="font-medium">Tune rule thresholds</p>
-                <p className="mt-1 text-sm text-[var(--muted)]">Edit breeder age, occupancy, and genotype timing rules</p>
-              </Link>
-            </div>
-            <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface-2)] p-4 text-sm text-[var(--muted)]">
-              Seed dataset reference date: {formatDate(SEED_REFERENCE_DATE)}
-            </div>
-          </Surface>
-        </div>
+                  <span className="dashboard-probability">{suggestion.probabilityLabel}</span>
+                  <span className="dashboard-warning-text">{suggestion.warnings[0] ?? "No immediate warning"}</span>
+                  <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" aria-hidden="true" />
+                </Link>
+              ))
+            ) : (
+              <p className="dashboard-empty-row">Add breeding animals to generate cross suggestions.</p>
+            )}
+          </div>
+        </section> : null}
+
+        {user.canonicalRole === "lab_user" ? <section className="dashboard-composition" aria-label="Colony composition">
+          <div>
+            <span>{composition.males}</span>
+            <p>Male</p>
+          </div>
+          <div>
+            <span>{composition.females}</span>
+            <p>Female</p>
+          </div>
+          <div>
+            <span>{composition.breeding}</span>
+            <p>In breeding</p>
+          </div>
+          <div>
+            <span>{composition.transgenic}</span>
+            <p>Transgenic</p>
+          </div>
+          <Link href="/forecast">Open colony forecast <ArrowRight className="h-4 w-4" aria-hidden="true" /></Link>
+        </section> : null}
       </div>
     </AppShell>
   );
