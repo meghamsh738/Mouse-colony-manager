@@ -4,11 +4,14 @@ Recorded: 2026-07-18
 
 ## Workspace
 
-- Repository: `/Users/meghamsh/Documents/mouse colony manager`
-- Active implementation worktree: `/Users/meghamsh/Documents/mouse colony manager/.runtime-data/worktrees/empty-colony`
+- Repository: `/Volumes/Coding Projects/Active/mouse-colony-manager`
+- Active implementation worktree: `/Volumes/Coding Projects/Active/mouse-colony-manager/.runtime-data/worktrees/empty-colony`
 - Branch: `codex/empty-colony`
+- Expected migration commit: `fa251e9ffe663aaf61a356e338b898f2acebac3e`
 - Primary tracker: `IMPLEMENTATION_TRACKER.md`
-- The large dirty worktree is intentional. Preserve all current changes and do not reset or revert unrelated files.
+- The previously large dirty state was preserved in the migration commit and the
+  external worktree is expected to be clean. Do not reset, clean, or revert
+  unrelated files.
 
 ## Paused State
 
