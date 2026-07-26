@@ -3630,6 +3630,7 @@ textarea {
   position: relative;
   display: inline-flex;
   min-height: 2.75rem;
+  min-width: 2.75rem;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
