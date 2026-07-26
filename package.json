@@ -36,6 +36,7 @@
     "db:prepare:local": "tsx scripts/db-prepare-local.ts",
     "db:prepare:ci": "npm run db:migrate",
     "db:seed:empty": "tsx prisma/seed-empty.ts",
+    "db:seed:rehearsal": "tsx prisma/seed-rehearsal.ts",
     "check:db-workflows": "node --experimental-strip-types scripts/check-db-workflows.ts",
     "check:migration-chain": "tsx scripts/verify-migration-chain.ts",
     "check:cage-closure-migration": "tsx scripts/verify-cage-closure-migration.ts",
@@ -51,6 +52,7 @@
     "check:audit-index-health": "tsx scripts/check-audit-index-health.ts",
     "check:authorization-manifest": "node --experimental-strip-types scripts/check-authorization-manifest.ts",
     "db:adopt-populated-baseline": "node --experimental-strip-types scripts/adopt-populated-baseline.ts",
+    "db:rehearse-populated-backup": "tsx scripts/rehearse-populated-backup.ts",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "db:seed": "tsx prisma/seed.ts"

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const commandMocks = vi.hoisted(() => ({ execute: vi.fn() }));
 
@@ -33,8 +33,14 @@ beforeEach(() => {
   commandMocks.execute.mockResolvedValue({ ok: true, result: { message: "ok" } });
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("procedure command wiring", () => {
   it("binds planning to the exact assignment, experiment, lab, SOP assignment, and command identity", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T00:00:00.000Z"));
     await executeCreateProcedurePlanCommand({
       actor,
       command: {

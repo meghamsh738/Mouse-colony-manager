@@ -65,7 +65,53 @@ npm run db:adopt-populated-baseline -- --apply
 
 Any non-zero diff blocks adoption and requires the Milestone 9 expand/backfill reconciliation. The verification schema is retained for audit; the script never drops database objects.
 
-The current development machine does not have `pg_dump`/`pg_restore` installed. That is an explicit populated-rehearsal prerequisite, not a reason to substitute an application-level JSON export for a database backup.
+Postgres.app 2.9.5 supplies matching PostgreSQL 16.14 `pg_dump` and `pg_restore` tools on the current development machine. Set `PG_BIN_DIR` to its PostgreSQL 16 `bin` directory when those tools are not already on `PATH`. Never substitute an application-level JSON export for a database backup.
+
+## Synthetic Backup/Restore Harness
+
+Milestone 9 begins with a synthetic-only proof of the backup mechanics. It does not satisfy the production-shaped-data gate by itself. The harness:
+
+- accepts only two distinct loopback databases and a shared schema whose names begin with `mcm_test_`;
+- refuses production mode and any data class other than `synthetic`;
+- requires an empty restore database whose application schema does not yet exist and never drops or recreates a database;
+- requires the source database to enforce `default_transaction_read_only=on`;
+- inventories user and database-wide objects, rejects large objects and unsupported global objects, and archives only the exact application schema plus the allowlisted `pgcrypto` extension;
+- validates PostgreSQL cluster identity and matching server/client major versions;
+- performs restore in one transaction and derives the schema-only artifact from the completed custom archive;
+- writes mode-restricted backup artifacts under a canonical approved runtime root outside the source worktree;
+- captures custom and schema-only dump checksums, migration checksums, tool/server/application versions, exact table row counts, and backup/restore durations;
+- records the source write-freeze state, verifies source counts remain stable, and requires exact restored table-count parity.
+
+Create the source and empty restore databases explicitly, bind both Prisma URLs to the source, migrate the disposable source, set an ephemeral `MCM_REHEARSAL_ADMIN_PASSWORD`, and run `npm run db:seed:rehearsal`. This rehearsal fixture is additive-only: in one transaction it rejects other database clients, locks every application table, proves all non-migration fixture tables are empty, verifies the migration-managed identity-sequence baseline, and inserts a minimal synthetic lab/facility identity fixture. It never deletes, overwrites, or clears attachment files.
+
+```bash
+export PG_BIN_DIR='/Applications/Postgres.app/Contents/Versions/16/bin'
+"$PG_BIN_DIR/createdb" --host=127.0.0.1 --port=51422 --username=postgres --template=template0 mcm_test_m9_source
+"$PG_BIN_DIR/createdb" --host=127.0.0.1 --port=51422 --username=postgres --template=template0 mcm_test_m9_restore
+
+export MCM_REHEARSAL_SOURCE_URL='postgresql://postgres@127.0.0.1:51422/mcm_test_m9_source?schema=mcm_test_populated&sslmode=disable'
+export MCM_REHEARSAL_RESTORE_URL='postgresql://postgres@127.0.0.1:51422/mcm_test_m9_restore?schema=mcm_test_populated&sslmode=disable'
+export DATABASE_URL="$MCM_REHEARSAL_SOURCE_URL"
+export DIRECT_DATABASE_URL="$MCM_REHEARSAL_SOURCE_URL"
+export MCM_REHEARSAL_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+npm run db:migrate
+npm run db:seed:rehearsal
+unset MCM_REHEARSAL_ADMIN_PASSWORD
+
+"$PG_BIN_DIR/psql" 'postgresql://postgres@127.0.0.1:51422/mcm_test_m9_source?sslmode=disable' \
+  -X -v ON_ERROR_STOP=1 \
+  -c 'ALTER DATABASE mcm_test_m9_source SET default_transaction_read_only=on'
+
+export MCM_REHEARSAL_RUNTIME_ROOT='/absolute/project-runtime/path'
+export MCM_REHEARSAL_OUTPUT_DIR="$MCM_REHEARSAL_RUNTIME_ROOT/m9-rehearsals"
+export MCM_REHEARSAL_DATA_CLASS='synthetic'
+export MCM_POPULATED_REHEARSAL_CONFIRM='LOCAL_SYNTHETIC_DISPOSABLE_ONLY'
+npm run db:rehearse-populated-backup
+```
+
+The runtime root and output directory must already exist and must resolve outside the source worktree without symlink traversal. After populating the disposable source and closing writers, set the source database default to read-only before the harness starts. A failed restore is rolled back atomically and leaves `manifest.failed.json`; the harness never cleans or reuses the target automatically.
+
+The retained `manifest.json` is synthetic rehearsal evidence only. It records whether the source worktree was dirty and the exact rehearsal-script checksum. A sanitized production-shaped backup requires an approved artifact location, encryption/access-control policy, matching tool versions, and explicit authorization before it is accessed or restored.
 
 ## Interrupted Concurrent Audit Index
 
