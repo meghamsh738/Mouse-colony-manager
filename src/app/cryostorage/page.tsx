@@ -13,15 +13,16 @@ import { requireUser } from "@/lib/session";
 
 export default async function CryostoragePage({ searchParams }: { searchParams?: Promise<{ requestId?: string; action?: string }> }) {
   const user = await requireUser({ capability: "cryostorage:read" });
-  const [records, options, requests] = await Promise.all([
-    getCryostorageInventoryView(user),
-    getCryostoragePageOptions(user),
-    getCryostorageRequestView(user),
-  ]);
   const canRequest = actorHasCapability(user, "cryostorage:request");
   const canManage = actorHasCapability(user, "cryostorage:manage");
+  const [records, options, requests] = await Promise.all([
+    getCryostorageInventoryView(user),
+    canRequest ? getCryostoragePageOptions(user) : Promise.resolve(null),
+    getCryostorageRequestView(user),
+  ]);
+  const showRequestForm = canRequest && options !== null;
   const today = (process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString()).slice(0, 10);
-  const defaultLabId = user.activeLabId ?? options.labOptions[0]?.id ?? "";
+  const defaultLabId = user.activeLabId ?? options?.labOptions[0]?.id ?? "";
   const query = (await searchParams) ?? {};
   if (query.action === "process") {
     const request = requests.find((candidate) => candidate.id === query.requestId);
@@ -46,7 +47,7 @@ export default async function CryostoragePage({ searchParams }: { searchParams?:
       </AppShell>
     );
   }
-  const actions: CompactActionItem[] = canRequest
+  const actions: CompactActionItem[] = showRequestForm
     ? [
         {
           id: "request-cryostorage",
@@ -74,7 +75,7 @@ export default async function CryostoragePage({ searchParams }: { searchParams?:
           eyebrow="Cryostorage"
           title="Cryostorage"
         />
-        {canRequest ? (
+        {showRequestForm ? (
           <CompactActionTray
             actions={actions}
             eyebrow="Actions"

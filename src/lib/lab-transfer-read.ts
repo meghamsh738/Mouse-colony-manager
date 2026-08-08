@@ -116,7 +116,47 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
     return rows.filter((row) => subjects.has(row.animalId)).length;
   };
 
-  const projected = await Promise.all(requests.map(async (request) => {
+  const destinationLabIdsNeedingCages = [...new Set(
+    requests
+      .filter((request) => (
+        request.subjectType === "animals"
+        && request.status === "requested"
+        && canDecideLabTransfer(actor, request.destinationLabId)
+      ))
+      .map((request) => request.destinationLabId),
+  )];
+  const destinationCageRows = destinationLabIdsNeedingCages.length
+    ? await prisma.cage.findMany({
+      where: {
+        labId: { in: destinationLabIdsNeedingCages },
+        active: true,
+        status: { not: "closed" },
+        closure: null,
+        quarantineCases: {
+          none: { status: { in: ["admitted", "under_observation", "exception_open", "release_requested"] } },
+        },
+      },
+      orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
+      select: {
+        id: true,
+        barcode: true,
+        capacityOverride: true,
+        labId: true,
+        room: { select: { roomNumber: true, facility: { select: { maxCageOccupancy: true } } } },
+        rack: { select: { rackNumber: true } },
+        cageNumber: true,
+        _count: { select: { animals: { where: { outcomeStatus: "alive" } } } },
+      },
+    })
+    : [];
+  const destinationCagesByLabId = new Map<string, typeof destinationCageRows>();
+  for (const cage of destinationCageRows) {
+    const cages = destinationCagesByLabId.get(cage.labId) ?? [];
+    cages.push(cage);
+    destinationCagesByLabId.set(cage.labId, cages);
+  }
+
+  const projected = requests.map((request) => {
     const packetRow = request.packets[0];
     const rawPacket = packetRow && isDestinationTransferPacket(packetRow.destinationPayload)
       ? packetRow.destinationPayload
@@ -130,27 +170,7 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
       : null;
     const canDecide = canDecideLabTransfer(actor, request.destinationLabId) && request.status === "requested";
     const destinationCages = canDecide && request.subjectType === "animals"
-      ? await prisma.cage.findMany({
-          where: {
-            labId: request.destinationLabId,
-            active: true,
-            status: { not: "closed" },
-            closure: null,
-            quarantineCases: {
-              none: { status: { in: ["admitted", "under_observation", "exception_open", "release_requested"] } },
-            },
-          },
-          orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
-          select: {
-            id: true,
-            barcode: true,
-            capacityOverride: true,
-            room: { select: { roomNumber: true, facility: { select: { maxCageOccupancy: true } } } },
-            rack: { select: { rackNumber: true } },
-            cageNumber: true,
-            _count: { select: { animals: { where: { outcomeStatus: "alive" } } } },
-          },
-        })
+      ? destinationCagesByLabId.get(request.destinationLabId) ?? []
       : [];
     const requestAnimalIds = request.items.map((item) => item.animalId);
     const blockers = {
@@ -200,7 +220,7 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
         canOverride: canOverrideLabTransferBlocks(actor),
       },
     };
-  }));
+  });
 
   return {
     requests: projected,

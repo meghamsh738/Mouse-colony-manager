@@ -1,14 +1,16 @@
+import { cache } from "react";
+
 import { prisma } from "@/lib/prisma";
-import { getActorLabAccess } from "@/lib/lab-access";
+import { getActorReadLabAccess } from "@/lib/lab-access";
 import type { ResolvedActor } from "@/lib/session";
 
-export async function getAppShellStatusView(actor: ResolvedActor | null) {
+const getAppShellStatusForRequest = cache(async (actor: ResolvedActor | null) => {
   if (!actor || actor.canonicalRole === "it_head") {
     return { degraded: false, openAlerts: 0 };
   }
 
   try {
-    const access = await getActorLabAccess(actor);
+    const access = await getActorReadLabAccess(actor);
     const openAlerts = await prisma.alert.count({
       where: {
         status: "open",
@@ -22,4 +24,8 @@ export async function getAppShellStatusView(actor: ResolvedActor | null) {
 
     return { degraded: true, openAlerts: 0 };
   }
+});
+
+export function getAppShellStatusView(actor: ResolvedActor | null) {
+  return getAppShellStatusForRequest(actor);
 }

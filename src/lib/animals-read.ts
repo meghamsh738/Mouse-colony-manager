@@ -1,7 +1,7 @@
 import { compareDesc, differenceInDays } from "date-fns";
 
 import { normalizeUserRole, type Capability } from "@/lib/capabilities";
-import { canViewLab, getActorLabAccess, type LabActor } from "@/lib/lab-access";
+import { canViewLab, getActorReadLabAccess, type LabActor } from "@/lib/lab-access";
 import { parseExternalTransferProvenance } from "@/lib/lifecycle-provenance";
 import { prisma } from "@/lib/prisma";
 import type { Alert, AnimalListItem, AnimalStatus, AlertSeverity } from "@/lib/types";
@@ -234,7 +234,7 @@ async function getAnimalRuleContext(): Promise<AnimalRuleContext> {
 }
 
 export async function getAnimalPageOptions(actor: AnimalReadActor) {
-  const access = await getActorLabAccess(actor);
+  const access = await getActorReadLabAccess(actor);
   const [cages, strains, projects] = await prisma.$transaction([
     prisma.cage.findMany({
       where: {
@@ -279,7 +279,7 @@ export async function getAnimalListView(
   options: { includeTerminal?: boolean } = {},
 ): Promise<AnimalListItem[]> {
   const rules = await getAnimalRuleContext();
-  const access = await getActorLabAccess(actor);
+  const access = await getActorReadLabAccess(actor);
   const includeExperiments = canReadExperiments(actor);
   const animals = await prisma.animal.findMany({
     where: {
@@ -420,7 +420,7 @@ export async function getAnimalListView(
 
 export async function getAnimalDetailView(animalId: string, actor: AnimalReadActor) {
   const rules = await getAnimalRuleContext();
-  const access = await getActorLabAccess(actor);
+  const access = await getActorReadLabAccess(actor);
   const includeExperiments = canReadExperiments(actor);
   const animal = await prisma.animal.findUnique({
     where: { id: animalId },

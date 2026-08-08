@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import {
   Activity,
   BellRing,
@@ -29,8 +30,15 @@ import {
 
 import { signOut } from "@/auth";
 import { ActiveLabSwitcher } from "@/components/app/active-lab-switcher";
+import {
+  DesktopAlertLink,
+  MobileMoreAlertCount,
+  MobileMoreAlertDot,
+  MobileNotificationLink,
+  SidebarNotificationBadge,
+  SidebarServiceStatus,
+} from "@/components/app/app-shell-alert-status";
 import { EmptyProfileSwitcher } from "@/components/app/empty-profile-switcher";
-import { getAppShellStatusView } from "@/lib/app-shell-read";
 import { canonicalRoleLabel } from "@/lib/capabilities";
 import { isEmptyProfileSwitcherEnabled } from "@/lib/empty-profile-switch";
 import { getNavigationForActor } from "@/lib/navigation";
@@ -82,15 +90,13 @@ export async function AppShell({ currentPath, userName, role, children }: AppShe
   const navigation = actor ? getNavigationForActor(actor) : [];
   const mobilePrimaryNavigation = navigation.filter((item) => item.mobilePrimary).slice(0, 4);
   const mobileSecondaryNavigation = navigation.filter((item) => !mobilePrimaryNavigation.includes(item));
-  const status = await getAppShellStatusView(actor);
   const profileSwitcherEnabled = isEmptyProfileSwitcherEnabled(
     process.env.NODE_ENV,
     process.env.EMPTY_PROFILE_SWITCHER,
   );
-  const alertCountLabel = status.openAlerts === 1 ? "1 open alert" : `${status.openAlerts} open alerts`;
-  const alertLabel = status.degraded ? "Alerts offline" : alertCountLabel;
   const roleLabel = actor ? canonicalRoleLabel(actor.canonicalRole) : role.replaceAll("_", " ");
   const accountSummary = profileSwitcherEnabled ? userName : roleLabel;
+  const hasNotifications = navigation.some((item) => item.id === "notifications");
 
   async function signOutAction() {
     "use server";
@@ -126,8 +132,10 @@ export async function AppShell({ currentPath, userName, role, children }: AppShe
                   >
                     <Icon className="h-[17px] w-[17px] shrink-0" aria-hidden="true" />
                     <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    {item.href === "/notifications" && status.openAlerts > 0 ? (
-                      <span className="sidebar-alert-count">{status.openAlerts}</span>
+                    {item.href === "/notifications" ? (
+                      <Suspense fallback={null}>
+                        <SidebarNotificationBadge actor={actor} />
+                      </Suspense>
                     ) : null}
                   </Link>
                 </div>
@@ -136,15 +144,9 @@ export async function AppShell({ currentPath, userName, role, children }: AppShe
           </nav>
 
           <div className="sidebar-footer">
-            <div className="flex items-center gap-2 text-xs text-white/65">
-              <span
-                className={cn(
-                  "h-2 w-2 rounded-full",
-                  status.degraded ? "bg-amber-400" : "bg-emerald-400",
-                )}
-              />
-              {status.degraded ? "Service check needed" : "Systems operational"}
-            </div>
+            <Suspense fallback={<div className="flex items-center gap-2 text-xs text-white/65"><span className="h-2 w-2 rounded-full bg-white/45" />Checking status</div>}>
+              <SidebarServiceStatus actor={actor} />
+            </Suspense>
             <div className="mt-3 min-w-0">
               <p className="truncate text-sm font-medium text-white">{userName}</p>
               <p className="truncate text-xs text-white/55">{roleLabel}</p>
@@ -172,10 +174,11 @@ export async function AppShell({ currentPath, userName, role, children }: AppShe
             </span>
           </Link>
           <div className="flex items-center gap-1.5">
-            {navigation.some((item) => item.id === "notifications") ? <Link className="icon-button relative !h-11 !w-11" href="/notifications" aria-label={alertLabel}>
-              <BellRing className="h-5 w-5" aria-hidden="true" />
-              {status.openAlerts > 0 ? <span className="notification-dot">{status.openAlerts}</span> : null}
-            </Link> : null}
+            {hasNotifications ? (
+              <Suspense fallback={<Link className="icon-button relative !h-11 !w-11" href="/notifications" aria-label="Notifications"><BellRing className="h-5 w-5" aria-hidden="true" /></Link>}>
+                <MobileNotificationLink actor={actor} />
+              </Suspense>
+            ) : null}
             <details className="user-menu">
               <summary className="icon-button !h-11 !w-11 list-none [&::-webkit-details-marker]:hidden" aria-label="Account menu">
                 <CircleUserRound className="h-5 w-5" aria-hidden="true" />
@@ -203,13 +206,11 @@ export async function AppShell({ currentPath, userName, role, children }: AppShe
         </header>
 
         <header className="desktop-command-header hidden lg:flex">
-          {navigation.some((item) => item.id === "notifications") ? <Link
-            className={cn("global-alert-link", status.degraded && "is-warning")}
-            href="/notifications"
-          >
-            <span className="global-alert-dot" aria-hidden="true" />
-            <span>{status.degraded ? "Alerts unavailable" : alertCountLabel}</span>
-          </Link> : <span className="text-xs text-[var(--muted)]">{roleLabel}</span>}
+          {hasNotifications ? (
+            <Suspense fallback={<Link className="global-alert-link" href="/notifications"><span className="global-alert-dot" aria-hidden="true" /><span>Checking alerts</span></Link>}>
+              <DesktopAlertLink actor={actor} />
+            </Suspense>
+          ) : <span className="text-xs text-[var(--muted)]">{roleLabel}</span>}
           {navigation.some((item) => item.id === "animals") ? <form action="/animals" method="get" className="global-search-form">
             <Search className="h-4 w-4 text-[var(--muted)]" aria-hidden="true" />
             <input
@@ -285,7 +286,9 @@ export async function AppShell({ currentPath, userName, role, children }: AppShe
             <summary className={cn("mobile-bottom-link list-none [&::-webkit-details-marker]:hidden", (currentPath === "/workbook" || mobileSecondaryNavigation.some((item) => isActivePath(currentPath, item.href))) && "is-active") }>
               <span className="mobile-bottom-icon relative">
                 <ChevronDown className="h-5 w-5" aria-hidden="true" />
-                {status.openAlerts > 0 ? <span className="mobile-more-dot" /> : null}
+                <Suspense fallback={null}>
+                  <MobileMoreAlertDot actor={actor} />
+                </Suspense>
               </span>
               <span>More</span>
             </summary>
@@ -302,8 +305,10 @@ export async function AppShell({ currentPath, userName, role, children }: AppShe
                   >
                     <Icon className="h-4 w-4" aria-hidden="true" />
                     <span>{item.label}</span>
-                    {item.href === "/notifications" && status.openAlerts > 0 ? (
-                      <span className="ml-auto text-xs font-semibold text-[var(--danger)]">{status.openAlerts}</span>
+                    {item.href === "/notifications" ? (
+                      <Suspense fallback={null}>
+                        <MobileMoreAlertCount actor={actor} />
+                      </Suspense>
                     ) : null}
                   </Link>
                 );

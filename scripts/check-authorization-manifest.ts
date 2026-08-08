@@ -34,6 +34,7 @@ export const authorizationManifest = {
   "src/app/scan/[barcode]/page.tsx": "scan:use",
   "src/app/sops/page.tsx": "sops:read",
   "src/app/settings/page.tsx": "rules:manage",
+  "src/app/strains/page.tsx": "strains:discover",
   "src/app/system/page.tsx": "system:view",
   "src/app/workbook/page.tsx": "workbook:read",
 
@@ -62,6 +63,7 @@ export const authorizationManifest = {
   "src/app/scan/[barcode]/actions.ts": "cages:manage",
   "src/app/sops/actions.ts": "sops:manage",
   "src/app/settings/actions.ts": "rules:manage",
+  "src/app/strains/actions.ts": "strains:manage",
 
   // Route handlers. Mixed-method modules declare the read capability here and
   // enforce a stricter mutation capability per handler where appropriate.

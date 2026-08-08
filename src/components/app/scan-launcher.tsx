@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Camera, Keyboard, QrCode, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +30,7 @@ declare global {
 }
 
 export function ScanLauncher({ quickCages = [] }: { quickCages?: QuickCage[] }) {
+  const router = useRouter();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const frameRef = useRef<number | null>(null);
@@ -87,7 +89,7 @@ export function ScanLauncher({ quickCages = [] }: { quickCages?: QuickCage[] }) 
 
           if (results[0]?.rawValue) {
             stopScanner();
-            window.location.assign(`/scan/${encodeURIComponent(results[0].rawValue)}`);
+            router.push(`/scan/${encodeURIComponent(results[0].rawValue)}`);
             return;
           }
         } catch {

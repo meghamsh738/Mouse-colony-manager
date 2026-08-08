@@ -197,12 +197,14 @@ SD-01 evidence: migration `0036_strain_directory` adds lab-owned strain listings
 | ID | Requirement | Status |
 | --- | --- | --- |
 | M10-01 | Pagination and bounded relationship history | Not started |
-| M10-02 | Narrow projections and request-scoped actor/access context | Not started |
-| M10-03 | Loading boundaries and measured indexes | Not started |
+| M10-02 | Narrow projections and request-scoped actor/access context | In progress — safe first pass complete |
+| M10-03 | Loading boundaries and measured indexes | In progress — loading boundaries complete |
 | M10-04 | Bounded outbox workers and queue observability | Not started |
 | M10-05 | 10k animals, 2k cages, 50-user stress run | Not started |
 | M10-06 | Record p50/p95, query count, memory, pool failures, queue delay, and error rate | Not started |
 | M10-07 | Hosting decision based on measured evidence | Not started |
+
+M10 first-pass evidence: the ChatGPT Pro source review is retained in `docs/PERFORMANCE_REVIEW.md`. The implementation request-deduplicates actor resolution, gives read models an explicit request-scoped access helper while command handlers always re-check live database membership (including inside cage-detail updates), and streams non-critical alert status behind independent loading boundaries. Animals, biosamples, and cryostorage no longer load create-form options for users without the matching capability; lab-transfer destination cages are batched by authorized destination lab; barcode scanning uses in-app routing; and common operational pages now have synchronous lightweight loading states. No schema migration, persistent cache, real colony data, or production service changed. Focused tests, the full unit suite, Prisma validation, authorization-manifest validation, type checking, ESLint, diff checks, desktop route navigation, and 390 x 844 mobile QA passed; independent re-review found no P0/P1/P2 blockers. Pagination/history bounds, measured index work, and the remaining load/stress/hosting decisions remain open behind the documented measurement gate.
 
 ## Required Gate For Every Milestone
 

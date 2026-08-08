@@ -1549,6 +1549,11 @@ export async function updateCageDetails(
 
   try {
     await prisma.$transaction(async (tx) => {
+      const currentAccess = await getActorLabAccess(actor, tx);
+      if (!canManageLab(currentAccess, cage.labId)) {
+        throw new Error("You can only edit cages from labs you manage.");
+      }
+
       if (input.status && input.status !== cage.status) {
         const openCase = await tx.quarantineCase.findFirst({
           where: { cageId: cage.id, status: { in: [...OPEN_QUARANTINE_CASE_STATUSES] } },

@@ -11,10 +11,14 @@ import { requireUser } from "@/lib/session";
 
 export default async function SamplesPage() {
   const user = await requireUser({ capability: "biosamples:read" });
-  const [samples, options] = await Promise.all([getSampleInventoryView(user), getSamplePageOptions(user)]);
   const canRecordSample = user.capabilities.includes("biosamples:manage");
+  const [samples, options] = await Promise.all([
+    getSampleInventoryView(user),
+    canRecordSample ? getSamplePageOptions(user) : Promise.resolve(null),
+  ]);
+  const showRecordSample = canRecordSample && options !== null;
   const defaultCollectedAt = (process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString()).slice(0, 10);
-  const actions: CompactActionItem[] = canRecordSample
+  const actions: CompactActionItem[] = showRecordSample
     ? [
         {
           id: "add-sample",
@@ -42,7 +46,7 @@ export default async function SamplesPage() {
           description="Animal-derived specimens and aliquots."
           title="Biosamples"
         />
-        {canRecordSample ? (
+        {showRecordSample ? (
           <CompactActionTray
             actions={actions}
             eyebrow="Actions"
@@ -51,7 +55,7 @@ export default async function SamplesPage() {
           />
         ) : null}
         <WorksheetShell>
-          <SampleTable canManage={canRecordSample} data={samples} experimentOptions={options.experimentOptions} />
+          <SampleTable canManage={canRecordSample} data={samples} experimentOptions={options?.experimentOptions ?? []} />
         </WorksheetShell>
       </div>
     </AppShell>

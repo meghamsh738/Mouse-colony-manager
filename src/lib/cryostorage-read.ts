@@ -1,9 +1,9 @@
 import { prisma } from "@/lib/prisma";
-import { getActorLabAccess, type LabActor } from "@/lib/lab-access";
+import { getActorReadLabAccess, type LabActor } from "@/lib/lab-access";
 import type { CryostorageInventoryItem, CryostorageRequestItem } from "@/lib/types";
 
 export async function getCryostoragePageOptions(actor: LabActor) {
-  const access = await getActorLabAccess(actor);
+  const access = await getActorReadLabAccess(actor);
   const [labs, strains, projects] = await prisma.$transaction([
     prisma.lab.findMany({
       where: {
@@ -47,7 +47,7 @@ export async function getCryostoragePageOptions(actor: LabActor) {
 }
 
 export async function getCryostorageInventoryView(actor: LabActor): Promise<CryostorageInventoryItem[]> {
-  const access = await getActorLabAccess(actor);
+  const access = await getActorReadLabAccess(actor);
   const records = await prisma.cryostorageRecord.findMany({
     where: access.canViewAll ? {} : { labId: { in: access.memberLabIds } },
     orderBy: [{ storedAt: "desc" }, { createdAt: "desc" }],
@@ -101,7 +101,7 @@ export async function getCryostorageInventoryView(actor: LabActor): Promise<Cryo
 }
 
 export async function getCryostorageRequestView(actor: LabActor): Promise<CryostorageRequestItem[]> {
-  const access = await getActorLabAccess(actor);
+  const access = await getActorReadLabAccess(actor);
   const requests = await prisma.cryostorageRequest.findMany({
     where: access.canViewAll ? {} : { labId: { in: access.memberLabIds } },
     orderBy: [{ status: "asc" }, { requestedAt: "desc" }, { id: "asc" }],

@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { getActorLabAccess, type LabActor } from "@/lib/lab-access";
+import { getActorReadLabAccess, type LabActor } from "@/lib/lab-access";
 import type { SampleInventoryItem } from "@/lib/types";
 
 function formatAnimalOptionLabel(animal: { animalId: string; labId: string; status: string }) {
@@ -7,7 +7,7 @@ function formatAnimalOptionLabel(animal: { animalId: string; labId: string; stat
 }
 
 export async function getSamplePageOptions(actor: LabActor) {
-  const access = await getActorLabAccess(actor);
+  const access = await getActorReadLabAccess(actor);
   const labWhere = access.canViewAll ? {} : { labId: { in: access.memberLabIds } };
   const animalWhere = access.canViewAll ? {} : { owningLabId: { in: access.memberLabIds } };
   const [animals, projects, experiments] = await prisma.$transaction([
@@ -70,7 +70,7 @@ export async function getSamplePageOptions(actor: LabActor) {
 }
 
 export async function getSampleInventoryView(actor: LabActor): Promise<SampleInventoryItem[]> {
-  const access = await getActorLabAccess(actor);
+  const access = await getActorReadLabAccess(actor);
   const records = await prisma.sampleRecord.findMany({
     where: access.canViewAll ? {} : { labId: { in: access.memberLabIds } },
     orderBy: [{ collectedAt: "desc" }, { createdAt: "desc" }],

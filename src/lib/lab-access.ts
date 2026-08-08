@@ -2,12 +2,14 @@ import type { Prisma } from "@prisma/client";
 
 import { prisma } from "@/lib/prisma";
 import { normalizeUserRole } from "@/lib/capabilities";
+import type { ActorMembership } from "@/lib/capabilities";
 import type { LabMembershipRole, UserRole } from "@/lib/types";
 
 export type LabActor = {
   id: string;
   role: UserRole;
   activeLabId?: string | null;
+  memberships?: ReadonlyArray<Pick<ActorMembership, "labId" | "role">>;
 };
 
 export type ActorLabAccess = {
@@ -28,31 +30,10 @@ export function canTransferAcrossLabs(role: UserRole) {
   return isGlobalLabActor(role);
 }
 
-export async function getActorLabAccess(
+function buildActorLabAccess(
   actor: LabActor,
-  database: Pick<Prisma.TransactionClient, "labMembership"> = prisma,
-): Promise<ActorLabAccess> {
-  if (isGlobalLabActor(actor.role)) {
-    return {
-      canViewAll: true,
-      memberLabIds: [],
-      manageableLabIds: [],
-      membershipByLabId: new Map(),
-    };
-  }
-
-  const memberships = await database.labMembership.findMany({
-    where: {
-      userId: actor.id,
-      active: true,
-      lab: { active: true },
-    },
-    select: {
-      labId: true,
-      role: true,
-    },
-  });
-
+  memberships: ReadonlyArray<Pick<ActorMembership, "labId" | "role">>,
+): ActorLabAccess {
   const activeMemberships = actor.activeLabId
     ? memberships.filter((membership) => membership.labId === actor.activeLabId)
     : memberships.length === 1
@@ -68,6 +49,58 @@ export async function getActorLabAccess(
       .map((membership) => membership.labId),
     membershipByLabId,
   };
+}
+
+function getGlobalLabAccess(): ActorLabAccess {
+  return {
+    canViewAll: true,
+    memberLabIds: [],
+    manageableLabIds: [],
+    membershipByLabId: new Map(),
+  };
+}
+
+export async function getActorLabAccess(
+  actor: LabActor,
+  database: Pick<Prisma.TransactionClient, "labMembership"> = prisma,
+): Promise<ActorLabAccess> {
+  if (isGlobalLabActor(actor.role)) {
+    return getGlobalLabAccess();
+  }
+
+  // Command handlers must re-check membership against the database, including
+  // when they pass a transaction client. A resolved actor is a request
+  // snapshot, not authorization for a later mutation.
+  const memberships = await database.labMembership.findMany({
+    where: {
+      userId: actor.id,
+      active: true,
+      lab: { active: true },
+    },
+    select: {
+      labId: true,
+      role: true,
+    },
+  });
+
+  return buildActorLabAccess(actor, memberships);
+}
+
+/**
+ * Uses memberships loaded while resolving the current request. This is for
+ * read models only; mutations must call getActorLabAccess so authorization is
+ * checked against the database at the point of the write.
+ */
+export async function getActorReadLabAccess(actor: LabActor): Promise<ActorLabAccess> {
+  if (isGlobalLabActor(actor.role)) {
+    return getGlobalLabAccess();
+  }
+
+  if (!actor.memberships) {
+    return getActorLabAccess(actor);
+  }
+
+  return buildActorLabAccess(actor, actor.memberships);
 }
 
 export async function getActorLabScope(actor: LabActor, requestedLabId?: string) {

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
@@ -29,11 +30,20 @@ export type ResolvedActor = {
   capabilities: Capability[];
 };
 
-export async function resolveCurrentActor(): Promise<ResolvedActor | null> {
+type ActorResolution = {
+  hasSessionUser: boolean;
+  actor: ResolvedActor | null;
+};
+
+const resolveActorRequest = cache(async (): Promise<ActorResolution> => {
   const session = await auth();
 
-  if (!session?.user?.id) {
-    return null;
+  if (!session?.user) {
+    return { hasSessionUser: false, actor: null };
+  }
+
+  if (!session.user.id) {
+    return { hasSessionUser: true, actor: null };
   }
 
   const user = await prisma.user.findUnique({
@@ -58,11 +68,11 @@ export async function resolveCurrentActor(): Promise<ResolvedActor | null> {
   });
 
   if (!user?.active) {
-    return null;
+    return { hasSessionUser: true, actor: null };
   }
 
   if (session.user.authzVersion !== user.authzVersion) {
-    return null;
+    return { hasSessionUser: true, actor: null };
   }
 
   const canonicalRole = normalizeUserRole(user.role as UserRole);
@@ -80,28 +90,35 @@ export async function resolveCurrentActor(): Promise<ResolvedActor | null> {
   const capabilityActor = { canonicalRole, activeMembership };
 
   return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: legacyCompatibilityRole(canonicalRole, activeMembership?.role),
-    databaseRole: user.role as UserRole,
-    canonicalRole,
-    authzVersion: user.authzVersion,
-    activeLabId: activeMembership?.labId ?? null,
-    activeMembership,
-    memberships,
-    capabilities: [...getActorCapabilities(capabilityActor)],
+    hasSessionUser: true,
+    actor: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: legacyCompatibilityRole(canonicalRole, activeMembership?.role),
+      databaseRole: user.role as UserRole,
+      canonicalRole,
+      authzVersion: user.authzVersion,
+      activeLabId: activeMembership?.labId ?? null,
+      activeMembership,
+      memberships,
+      capabilities: [...getActorCapabilities(capabilityActor)],
+    },
   };
+});
+
+export async function resolveCurrentActor(): Promise<ResolvedActor | null> {
+  return (await resolveActorRequest()).actor;
 }
 
 export async function requireUser(options?: { capability?: Capability }) {
-  const session = await auth();
+  const resolution = await resolveActorRequest();
 
-  if (!session?.user) {
+  if (!resolution.hasSessionUser) {
     redirect("/login");
   }
 
-  const actor = await resolveCurrentActor();
+  const actor = resolution.actor;
 
   if (!actor) {
     redirect("/access-denied?reason=inactive");

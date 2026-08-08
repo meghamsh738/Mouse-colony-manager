@@ -154,4 +154,32 @@ describe("lab transfer packet privacy", () => {
     expect(cmu.requests[0]?.packet?.destinationCage).toEqual(packet.destinationCage);
     expect(facility.requests[0]?.destinationCage).toEqual(requestRow.destinationCage);
   });
+
+  it("loads destination cages once for multiple approval requests to the same lab", async () => {
+    mocks.requestFindMany.mockResolvedValue([
+      requestRow,
+      { ...requestRow, id: "transfer-2", packets: [{ ...requestRow.packets[0], destinationPayload: { ...packet, requestId: "transfer-2" } }] },
+    ]);
+    mocks.cageFindMany.mockResolvedValue([{
+      id: "destination-cage-1",
+      barcode: "DST-1000",
+      labId: "lab-b",
+      capacityOverride: null,
+      room: { roomNumber: "R1", facility: { maxCageOccupancy: 6 } },
+      rack: { rackNumber: "A" },
+      cageNumber: "1000",
+      _count: { animals: 2 },
+    }]);
+
+    const workspace = await getLabTransferWorkspace(actor({ role: "lab_user", labId: "lab-b" }));
+
+    expect(mocks.cageFindMany).toHaveBeenCalledOnce();
+    expect(mocks.cageFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ labId: { in: ["lab-b"] } }),
+    }));
+    expect(workspace.requests.map((request) => request.destinationCages)).toEqual([
+      [expect.objectContaining({ id: "destination-cage-1" })],
+      [expect.objectContaining({ id: "destination-cage-1" })],
+    ]);
+  });
 });

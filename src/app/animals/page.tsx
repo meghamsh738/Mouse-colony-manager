@@ -12,12 +12,16 @@ import { requireUser } from "@/lib/session";
 
 export default async function AnimalsPage() {
   const user = await requireUser({ capability: "animals:read" });
-  const [animals, options] = await Promise.all([getAnimalListView(user), getAnimalPageOptions(user)]);
   const canCreateAnimal = user.role === "admin" || user.role === "colony_manager" || user.role === "animal_staff";
   const canImportGenotypes = user.role !== "read_only";
-  const showOperations = canCreateAnimal || canImportGenotypes;
+  const [animals, options] = await Promise.all([
+    getAnimalListView(user),
+    canCreateAnimal ? getAnimalPageOptions(user) : Promise.resolve(null),
+  ]);
+  const showCreateAnimal = canCreateAnimal && options !== null;
+  const showOperations = showCreateAnimal || canImportGenotypes;
   const actions: CompactActionItem[] = [
-    ...(canCreateAnimal
+    ...(showCreateAnimal
       ? [
           {
             id: "add-mouse",
@@ -46,7 +50,7 @@ export default async function AnimalsPage() {
           },
         ]
       : []),
-    ...(canCreateAnimal
+    ...(showCreateAnimal
       ? [
           {
             id: "receive-mice",

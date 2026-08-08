@@ -18,6 +18,7 @@ Every entry point must resolve a current database actor, check an explicit capab
 | `/sops` | `sops:read` | Facility SOPs plus actor-scoped private lab SOPs; mutations reauthorize per command |
 | `/samples` | `biosamples:read` | Guarded; canonical sample-lab scoping implemented |
 | `/cryostorage` | `cryostorage:read`; lab requests require `cryostorage:request`; facility execution requires `cryostorage:manage` | Guarded; canonical lab inventory plus lab request, requester cancellation, and CMU/Facility execution workflow implemented |
+| `/strains` | `strains:discover`; requests require `strains:request`; listing and request decisions require `strains:manage` | Guarded; unit discovery exposes only approved listing fields, while draft management, private request messages, ownership checks, and notification recipients remain lab-scoped |
 | `/forecast` | `forecast:read` | Guarded; explicit current actor plus validated lab, responsible-user, and cage scope applied to breeding, supply, demand, and inventory queries |
 | `/billing`, `/billing/invoices`, invoice detail | `billing:read` | Guarded; active-lab invoice, period, and direct-ID scoping implemented |
 | `/billing/rates` | `billing:read`; edit controls require `billing:manage` | Guarded; active-lab read scoping implemented |
@@ -46,6 +47,7 @@ Every entry point must resolve a current database actor, check an explicit capab
 | `procedures/actions.ts` | `procedures:plan` for create/cancel; `procedures:execute` for outcomes | Capability, active-lab ownership, exact assignment/SOP binding, and optimistic versions guarded |
 | `samples/actions.ts` | `biosamples:manage` + lab | Capability and sample/animal/project ownership guarded |
 | `cryostorage/actions.ts` | submit/cancel use `cryostorage:request`; execution and direct inventory maintenance use `cryostorage:manage` | Capability, active-lab ownership, idempotent command identity, optimistic request/record versions, and immutable request event/operation history guarded |
+| `strains/actions.ts` | create/update/decide use `strains:manage`; contact/material requests use `strains:request` | Capability, active owner-or-manager contact, explicit sharing, idempotent command identity, optimistic listing/request versions, and private notification recipients guarded |
 | `billing/actions.ts` | generate/manage/finalize/void capabilities | Capability guarded; lab billing scope pending Milestone 2/7 |
 | `settings/actions.ts` | `rules:manage` | Capability guarded |
 | `notifications/actions.ts` | `notifications:read` + exact current user recipient/preference | Idempotent read/acknowledge/resolve and personal delivery-preference commands reauthorize the current database actor |
