@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/lab-access", () => ({
   getActorLabAccess: mocks.getActorLabAccess,
+  getActorReadLabAccess: mocks.getActorLabAccess,
   canViewLab: (access: { canViewAll: boolean; memberLabIds: string[] }, labId?: string | null) =>
     access.canViewAll || Boolean(labId && access.memberLabIds.includes(labId)),
 }));

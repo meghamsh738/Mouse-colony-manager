@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { moveCageSchema } from "@/lib/cage-move-schema";
@@ -79,9 +80,11 @@ export async function addCageHealthNoteAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/cages");
-  revalidatePath(`/scan/${barcode}`);
+  after(() => {
+    revalidatePath("/");
+    revalidatePath("/cages");
+    revalidatePath(`/scan/${barcode}`);
+  });
 
   return {
     status: "success",
@@ -121,11 +124,13 @@ export async function moveCageFromScanAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/cages");
-  revalidatePath(`/cages/${parsed.data.cageId}`);
-  revalidatePath(`/scan/${barcode}`);
+  after(() => {
+    revalidatePath("/");
+    revalidatePath("/animals");
+    revalidatePath("/cages");
+    revalidatePath(`/cages/${parsed.data.cageId}`);
+    revalidatePath(`/scan/${barcode}`);
+  });
 
   return {
     status: "success",

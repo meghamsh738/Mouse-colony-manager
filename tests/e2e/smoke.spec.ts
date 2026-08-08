@@ -96,7 +96,7 @@ test("admin can browse the read-only workbook and return to app view", async ({ 
   if (testInfo.project.name === "mobile") {
     await page.locator("summary").filter({ hasText: "More" }).click();
   }
-  await page.getByRole("link", { name: "Workbook" }).click();
+  await page.getByLabel("Main navigation").getByRole("link", { name: "Workbook" }).click();
   await expect(page).toHaveURL(/\/workbook/);
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
@@ -123,6 +123,7 @@ test("admin can add a new animal record from the colony table", async ({ page },
   await signInAs(page, "admin");
   await page.goto("/animals");
 
+  await page.getByRole("button", { name: "Add mouse" }).click();
   await page.getByTestId("animal-create-id").fill(animalId);
   await page.getByTestId("animal-create-lab-id").fill(labId);
   await submitAfterBlur(page, "animal-create-submit");
@@ -143,6 +144,7 @@ test("animal staff can scan a cage and log a welfare note", async ({ page }, tes
   await page.getByRole("button", { name: "Open cage" }).click();
 
   await expect(page).toHaveURL(/\/scan\/CM-A101-003$/);
+  await page.getByRole("button", { name: "Add note" }).click();
   await page.getByTestId("health-note-text").fill(noteText);
   await page.getByTestId("health-note-attachment-label").fill(attachmentLabel);
   await page.getByTestId("health-note-attachment").setInputFiles({
@@ -153,7 +155,9 @@ test("animal staff can scan a cage and log a welfare note", async ({ page }, tes
   await submitAfterBlur(page, "health-note-submit");
 
   await expect(page.getByText("Health note logged for CM-A101-003.")).toBeVisible({ timeout: 30_000 });
+  await page.goto("/scan/CM-A101-003");
   await expect(page.getByText(noteText).first()).toBeVisible({ timeout: 30_000 });
+  await page.locator("summary").filter({ hasText: "Recent notes" }).click();
   await expect(page.getByText(attachmentLabel).first()).toBeVisible({ timeout: 30_000 });
 });
 
@@ -170,12 +174,13 @@ test("animal staff can browse cage list and open cage detail", async ({ page }) 
 
   await expect(page).toHaveURL(/\/cages\/cage-a101-003$/);
   await expect(page.getByText("CM-A101-003").first()).toBeVisible();
-  await expect(page.getByText("CM-26003")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open mobile scan view" })).toBeVisible();
+  await expect(page.getByText("CM-26003").first()).toBeVisible();
+  await expect(page.getByRole("main").getByRole("link", { name: "Scan", exact: true })).toBeVisible();
 });
 
 test("admin can review and permanently close an empty cage from detail and scan views", async ({ page }, testInfo) => {
   const suffix = testInfo.project.name === "mobile" ? "098" : "099";
+  const expectedClosedDate = new Date().toISOString().slice(0, 10);
   const created = await createCageWithAssignments({
     cages: [{
       clientId: `e2e-close-${suffix}`,
@@ -203,23 +208,23 @@ test("admin can review and permanently close an empty cage from detail and scan 
   await page.getByRole("checkbox", { name: /closure and billing cutoff are permanent/i }).check();
   await page.getByRole("button", { name: /Permanently close/ }).click();
 
-  await expect(page.getByText(`${cage.barcode} was closed and billing ended at the start of 2026-04-05.`)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Cage closed")).toBeVisible({ timeout: 30_000 });
   await page.goto(`/cages/${created.entityId}`);
   await expect(page.getByRole("heading", { name: "Closure" })).toBeVisible();
-  await expect(page.getByText("Start of 2026-04-05")).toBeVisible();
+  await expect(page.getByText(`Start of ${expectedClosedDate}`)).toBeVisible();
   await expect(page.getByRole("link", { name: /Close cage/ })).toHaveCount(0);
 
   await page.goto(`/scan/${cage.barcode}`);
   await expect(page.getByRole("heading", { name: "Closure" })).toBeVisible();
-  await expect(page.getByText("Start of 2026-04-05")).toBeVisible();
+  await expect(page.getByText(`Start of ${expectedClosedDate}`)).toBeVisible();
   await expect(page.getByRole("link", { name: /Close cage/ })).toHaveCount(0);
 
   const persisted = await prisma.cageClosure.findUniqueOrThrow({
     where: { cageId: created.entityId! },
     include: { chargePeriod: true },
   });
-  expect(persisted.billingCutoffAt.toISOString()).toBe("2026-04-05T00:00:00.000Z");
-  expect(persisted.chargePeriod.endedAt?.toISOString()).toBe("2026-04-05T00:00:00.000Z");
+  expect(persisted.billingCutoffAt.toISOString()).toBe(`${expectedClosedDate}T00:00:00.000Z`);
+  expect(persisted.chargePeriod.endedAt?.toISOString()).toBe(`${expectedClosedDate}T00:00:00.000Z`);
 });
 
 test("animal staff can open a print-ready cage label sheet", async ({ page }) => {

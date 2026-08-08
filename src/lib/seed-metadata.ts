@@ -8,3 +8,13 @@ export const SEEDED_DEV_EMAILS = {
   researcher: "researcher@colony.local",
   readonly: "readonly@colony.local",
 } as const;
+
+export const SEEDED_ROLE_QA_EMAILS = {
+  itHead: "qa-it-head@colony.local",
+  facilityAdmin: "qa-facility-admin@colony.local",
+  cmuStaff: "qa-cmu-staff@colony.local",
+  labOwner: "qa-lab-owner@colony.local",
+  labManager: "qa-lab-manager@colony.local",
+  labStaff: "qa-lab-staff@colony.local",
+  labViewer: "qa-lab-viewer@colony.local",
+} as const;

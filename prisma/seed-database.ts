@@ -143,8 +143,18 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     }
   }
 
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL mcm.allow_destructive_seed = 'true'");
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+    await tx.sopDocument.updateMany({ data: { currentVersionId: null } });
+    await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+  });
+
   await prisma.$transaction([
     prisma.$executeRawUnsafe("SET LOCAL mcm.allow_destructive_seed = 'true'"),
+    prisma.strainDirectoryRequestEvent.deleteMany(),
+    prisma.strainDirectoryRequest.deleteMany(),
+    prisma.strainDirectoryListing.deleteMany(),
     prisma.notificationDelivery.deleteMany(),
     prisma.outboxDeliveryAttempt.deleteMany(),
     prisma.outboxMessage.deleteMany(),
@@ -154,6 +164,7 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     prisma.cryostorageOperation.deleteMany(),
     prisma.cryostorageRequestEvent.deleteMany(),
     prisma.cryostorageRequest.deleteMany(),
+    prisma.auditLog.deleteMany(),
     prisma.commandReceipt.deleteMany(),
     prisma.sopAcknowledgement.deleteMany(),
     prisma.sopAssignment.deleteMany(),
@@ -182,7 +193,6 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     prisma.notificationAudience.deleteMany(),
     prisma.notificationEvent.deleteMany(),
     prisma.securityEvent.deleteMany(),
-    prisma.auditLog.deleteMany(),
     prisma.alert.deleteMany(),
     prisma.ruleConfig.deleteMany(),
     prisma.invoiceAdjustment.deleteMany(),

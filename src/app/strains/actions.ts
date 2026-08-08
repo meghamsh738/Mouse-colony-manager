@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
@@ -50,8 +51,10 @@ function commandFormState(result: { ok: boolean; message?: string; result?: unkn
 }
 
 function revalidateDirectoryViews() {
-  revalidatePath("/strains");
-  revalidatePath("/notifications");
+  after(() => {
+    revalidatePath("/strains");
+    revalidatePath("/notifications");
+  });
 }
 
 export async function createStrainDirectoryListingAction(

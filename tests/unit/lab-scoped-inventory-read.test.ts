@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/lab-access", () => ({
   getActorLabAccess: mocks.getActorLabAccess,
+  getActorReadLabAccess: mocks.getActorLabAccess,
 }));
 
 vi.mock("@/lib/prisma", () => ({

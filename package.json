@@ -55,7 +55,8 @@
     "db:rehearse-populated-backup": "tsx scripts/rehearse-populated-backup.ts",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "db:seed:role-qa": "tsx prisma/seed-role-qa-cli.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

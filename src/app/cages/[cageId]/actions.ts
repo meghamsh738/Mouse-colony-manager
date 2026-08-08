@@ -2,6 +2,7 @@
 
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { moveCageSchema } from "@/lib/cage-move-schema";
@@ -76,16 +77,10 @@ function parseOptionalDailyRateCents(value: FormDataEntryValue | null, fallback:
 }
 
 function revalidateCageWorkflow(cageId: string, barcode: string) {
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/cages");
-  revalidatePath(`/cages/${cageId}`);
-  revalidatePath(`/scan/${barcode}`);
-  revalidatePath("/cages/labels");
-  revalidatePath("/billing");
-  revalidatePath("/billing/invoices");
-  revalidatePath("/workbook");
-  revalidatePath("/forecast");
+  after(() => {
+    revalidatePath(`/cages/${cageId}`);
+    revalidatePath(`/scan/${barcode}`);
+  });
 }
 
 export async function updateCageResponsibilityAction(
