@@ -5,6 +5,7 @@ export type NotificationDefinition = {
   categoryKey: NotificationCategoryKey;
   categoryLabel: string;
   description: string;
+  emailAllowed?: boolean;
   alertTypes: string[];
   audiencePolicy?: "lab_members_only" | "lab_and_facility";
   hrefForAlert: (alert: Alert) => string;
@@ -66,6 +67,16 @@ export const notificationDefinitions: NotificationDefinition[] = [
     alertTypes: ["reserved_not_started"],
     hrefForAlert: () => "/experiments",
     actionLabelForAlert: () => "Open experiments",
+  },
+  {
+    ruleKey: "notify_in_app_strain_directory",
+    categoryKey: "strain_directory",
+    categoryLabel: "Strain directory",
+    description: "Private in-app requests and responses for unit-wide strain listings.",
+    emailAllowed: false,
+    alertTypes: ["strain_directory_request"],
+    hrefForAlert: () => "/strains",
+    actionLabelForAlert: () => "Open directory",
   },
 ];
 

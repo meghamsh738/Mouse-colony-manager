@@ -384,7 +384,7 @@ async function upsertNotificationEvent(
     where: { id: producerId, active: true },
     select: { id: true, authzVersion: true },
   });
-  if (producer) {
+  if (producer && definition.emailAllowed !== false) {
     const activeRecipients = await tx.notificationRecipient.findMany({
       where: { eventId: event.id, status: "active" },
       select: { id: true, userId: true, version: true },

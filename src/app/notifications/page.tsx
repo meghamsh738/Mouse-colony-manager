@@ -42,7 +42,7 @@ export default async function NotificationsPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-semibold text-[var(--ink)]">{preference.categoryLabel}</p>
                     <Badge variant={preference.inAppEnabled ? "success" : "neutral"}>{preference.inAppEnabled ? "in-app" : "muted"}</Badge>
-                    <Badge variant={preference.emailMode === "off" ? "neutral" : "info"}>{preference.emailMode.replaceAll("_", " ")}</Badge>
+                    <Badge variant={preference.emailAllowed ? preference.emailMode === "off" ? "neutral" : "info" : "warning"}>{preference.emailAllowed ? preference.emailMode.replaceAll("_", " ") : "in-app only"}</Badge>
                   </div>
                   <p className="mt-1 wrap-value text-sm text-[var(--muted)]">{preference.description}</p>
                   <p className="mt-1 text-xs text-[var(--muted)]">{preference.matchingAlertCount} current matches</p>

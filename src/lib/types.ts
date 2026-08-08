@@ -103,6 +103,7 @@ export type NotificationCategoryKey =
   | "sop"
   | "transfer"
   | "cryostorage"
+  | "strain_directory"
   | "system";
 export type NotificationDeliveryChannel = "in_app";
 
@@ -609,6 +610,7 @@ export interface NotificationPreference {
   description: string;
   enabled: boolean;
   inAppEnabled: boolean;
+  emailAllowed: boolean;
   emailMode: "off" | "daily_digest" | "weekly_digest";
   digestHourUtc: number;
   digestDayOfWeek: number;

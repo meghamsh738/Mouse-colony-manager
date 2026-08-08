@@ -184,6 +184,14 @@ The M9 synthetic fixture is additive-only because execution policy prohibits res
 
 M9-01 synthetic-slice validation passed 92 unit files / 444 tests, focused seed/harness workflow tests (3 files / 18 tests), typecheck, scoped ESLint, Prisma validation, retained-data workflow validation, production build (50 routes), and `git diff --check`. One date-sensitive procedure wiring test now pins its clock so its fixed future-schedule fixture does not expire. Independent high-risk review returned CLEAR with no P0/P1/P2 blockers after atomic seed and source-bound runbook corrections.
 
+## Approved Product Slice: Unit-wide Strain Directory
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| SD-01 | Private draft listings, contact-confirmed unit sharing, private in-app requests, and audit history | Verified in disposable QA |
+
+SD-01 evidence: migration `0036_strain_directory` adds lab-owned strain listings, private cross-lab requests, immutable request events, and command-bound PostgreSQL write guards. A listing begins as a private draft, can be shared only by its selected active owner/manager contact while the lab has active colony or cryopreserved material, and shows researchers only canonical strain name/background, holding lab, contact name, and a non-numeric availability label. It never selects or returns individual animals, cages, locations, quantities, health, genotype, project, free-text notes, or email addresses. Requests and responses remain private in-app notifications; the category cannot generate email or digest deliveries. Active lab members may discover/request, owners/managers may manage their active lab listings, and Facility Admin can administer without impersonating the lab contact. A contact change normally requires pending requests to be resolved; when the contact has become ineligible, an owner/manager can make an audited reassignment that returns the listing to draft and alerts the new contact privately. The synthetic disposable database applied all 36 migrations and verified draft → shared → request → decision, direct forged write/event rejection, facility pause, and inactive-contact reassignment. Focused capability, command, privacy, migration, notification-policy, and repeated-contact-handoff tests, TypeScript, Prisma validation, scoped ESLint, and diff-check passed. Independent review returned CLEAR after corrective passes for request lab scoping, in-app-only delivery, audit scope, command guards, inactive contact handoff, and unique repeated-handoff notification keys. The production build was not recorded: the local build process stalled under the available runtime and was stopped without producing artifacts.
+
 ## Milestone 10: Performance And Hosting
 
 | ID | Requirement | Status |

@@ -13,6 +13,7 @@ export type NavigationItemId =
   | "sops"
   | "biosamples"
   | "forecast"
+  | "strains"
   | "cryostorage"
   | "approvals"
   | "billing"
@@ -44,6 +45,7 @@ export const navigationRegistry: NavigationItem[] = [
   { id: "sops", href: "/sops", label: "SOPs", group: "Research", capability: "sops:read" },
   { id: "biosamples", href: "/samples", label: "Biosamples", group: "Research", capability: "biosamples:read" },
   { id: "forecast", href: "/forecast", label: "Forecast", group: "Research", capability: "forecast:read" },
+  { id: "strains", href: "/strains", label: "Strain directory", group: "Research", capability: "strains:discover" },
   { id: "cryostorage", href: "/cryostorage", label: "Cryostorage", group: "Facility", capability: "cryostorage:read" },
   { id: "approvals", href: "/approvals", label: "Approvals", group: "Facility", capability: "approvals:read" },
   { id: "billing", href: "/billing", label: "Billing", group: "Facility", capability: "billing:read" },

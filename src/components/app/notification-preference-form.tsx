@@ -35,7 +35,7 @@ export function NotificationPreferenceForm({ preference }: { preference: Notific
         In-app
       </label>
 
-      <label className="grid gap-1 text-xs font-semibold uppercase text-[var(--muted)]">
+      {preference.emailAllowed ? <label className="grid gap-1 text-xs font-semibold uppercase text-[var(--muted)]">
         Email
         <select
           className="min-h-11 rounded-md border border-[var(--line)] bg-white px-3 text-sm font-normal normal-case text-[var(--ink)]"
@@ -47,7 +47,12 @@ export function NotificationPreferenceForm({ preference }: { preference: Notific
           <option value="daily_digest">Daily digest</option>
           <option value="weekly_digest">Weekly digest</option>
         </select>
-      </label>
+      </label> : <>
+        <input name="emailMode" type="hidden" value="off" />
+        <input name="digestHourUtc" type="hidden" value={preference.digestHourUtc} />
+        <input name="digestDayOfWeek" type="hidden" value={preference.digestDayOfWeek} />
+        <p className="self-center text-sm text-[var(--muted)]">In-app only</p>
+      </>}
 
       <div className="grid min-w-0 grid-cols-2 gap-2">
         <label className="grid gap-1 text-xs font-semibold uppercase text-[var(--muted)]">
@@ -59,6 +64,7 @@ export function NotificationPreferenceForm({ preference }: { preference: Notific
             min={0}
             name="digestHourUtc"
             type="number"
+            disabled={!preference.emailAllowed}
           />
         </label>
         <label className="grid gap-1 text-xs font-semibold uppercase text-[var(--muted)]">
@@ -67,6 +73,7 @@ export function NotificationPreferenceForm({ preference }: { preference: Notific
             className="min-h-11 min-w-0 rounded-md border border-[var(--line)] bg-white px-2 text-sm font-normal normal-case text-[var(--ink)] disabled:bg-slate-100"
             defaultValue={preference.digestDayOfWeek}
             name="digestDayOfWeek"
+            disabled={!preference.emailAllowed}
           >
             {dayLabels.map((label, index) => <option key={label} value={index}>{label}</option>)}
           </select>

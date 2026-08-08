@@ -189,6 +189,9 @@ export async function updateNotificationPreference(input: {
   if (!getNotificationDefinition(definition.alertTypes[0] ?? "")) {
     return { ok: false as const, code: "validation_error", message: "Notification category is not supported." };
   }
+  if (definition.emailAllowed === false && input.emailMode !== "off") {
+    return { ok: false as const, code: "validation_error", message: `${definition.categoryLabel} notifications stay in the app and cannot be sent by email.` };
+  }
 
   const preferenceId = `notification-preference-${canonicalJsonHash({
     userId: input.actor.id,

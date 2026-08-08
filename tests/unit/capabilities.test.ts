@@ -68,6 +68,12 @@ describe("role capability foundation", () => {
     expect(actorHasCapability(manager, "experiments:manage")).toBe(true);
     expect(actorHasCapability(manager, "procedures:plan")).toBe(true);
     expect(actorHasCapability(manager, "procedures:execute")).toBe(false);
+    expect(actorHasCapability(manager, "strains:discover")).toBe(true);
+    expect(actorHasCapability(manager, "strains:request")).toBe(true);
+    expect(actorHasCapability(manager, "strains:manage")).toBe(true);
+    expect(actorHasCapability(viewer, "strains:discover")).toBe(true);
+    expect(actorHasCapability(viewer, "strains:request")).toBe(true);
+    expect(actorHasCapability(viewer, "strains:manage")).toBe(false);
     expect(actorHasCapability(viewer, "procedures:plan")).toBe(false);
     expect(actorHasCapability(viewer, "procedures:operational")).toBe(true);
     expect(actorHasCapability(manager, "migrations:manage")).toBe(false);
@@ -75,6 +81,7 @@ describe("role capability foundation", () => {
     expect(actorHasCapability(owner, "labs:manage")).toBe(true);
     expect(actorHasCapability(manager, "labs:manage")).toBe(false);
     expect(getNavigationForActor(owner).some((item) => item.id === "labs")).toBe(true);
+    expect(getNavigationForActor(viewer).some((item) => item.id === "strains")).toBe(true);
   });
 
   it("keeps destination consent with lab principals while Facility retains finalization", () => {
@@ -86,6 +93,9 @@ describe("role capability foundation", () => {
     expect(actorHasCapability(facility, "billing:generate")).toBe(true);
     expect(actorHasCapability(facility, "billing:finalize")).toBe(true);
     expect(actorHasCapability(facility, "billing:manage")).toBe(true);
+    expect(actorHasCapability(facility, "strains:manage")).toBe(true);
+    expect(actorHasCapability({ canonicalRole: "cmu_staff", activeMembership: null }, "strains:discover")).toBe(true);
+    expect(actorHasCapability({ canonicalRole: "cmu_staff", activeMembership: null }, "strains:request")).toBe(false);
     expect(actorHasCapability({ canonicalRole: "lab_user", activeMembership: labManager }, "billing:finalize")).toBe(false);
   });
 

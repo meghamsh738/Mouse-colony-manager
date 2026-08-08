@@ -26,6 +26,9 @@ export type Capability =
   | "cryostorage:read"
   | "cryostorage:request"
   | "cryostorage:manage"
+  | "strains:discover"
+  | "strains:request"
+  | "strains:manage"
   | "forecast:read"
   | "sops:read"
   | "sops:manage"
@@ -64,6 +67,7 @@ const facilityAdminCapabilities = new Set<Capability>([
   "breeding:read", "breeding:manage", "experiments:read", "experiments:full", "experiments:manage", "procedures:operational",
   "procedures:plan", "procedures:execute",
   "biosamples:read", "biosamples:manage", "cryostorage:read", "cryostorage:request", "cryostorage:manage",
+  "strains:discover", "strains:request", "strains:manage",
   "forecast:read", "sops:read", "sops:manage", "sops:approve", "billing:read", "billing:generate",
   "billing:finalize", "billing:manage", "notifications:read", "approvals:read", "workbook:read", "users:manage",
   "labs:manage", "rules:manage", "audit:domain", "notifications:deliver",
@@ -74,6 +78,7 @@ const cmuCapabilities = new Set<Capability>([
   "dashboard:view", "scan:use", "animals:read", "animals:manage", "cages:read", "cages:manage",
   "quarantine:read", "quarantine:manage", "transfers:read", "transfers:finalize", "breeding:read",
   "breeding:manage", "experiments:read", "procedures:operational", "procedures:execute", "cryostorage:read", "cryostorage:manage", "sops:read",
+  "strains:discover",
   "sops:manage", "billing:read", "billing:generate", "billing:finalize", "notifications:read", "approvals:read", "workbook:read",
   "notifications:deliver",
 ]);
@@ -81,7 +86,7 @@ const cmuCapabilities = new Set<Capability>([
 const labReadCapabilities: Capability[] = [
   "dashboard:view", "scan:use", "animals:read", "cages:read", "quarantine:read", "transfers:read",
   "breeding:read", "experiments:read", "experiments:full", "procedures:operational", "biosamples:read", "cryostorage:read", "forecast:read",
-  "sops:read", "billing:read", "notifications:read", "workbook:read",
+  "strains:discover", "strains:request", "sops:read", "billing:read", "notifications:read", "workbook:read",
 ];
 
 const labStaffCapabilities: Capability[] = [
@@ -90,7 +95,7 @@ const labStaffCapabilities: Capability[] = [
 ];
 
 const labManagerCapabilities: Capability[] = [
-  ...labStaffCapabilities, "transfers:request", "transfers:approve", "approvals:read", "sops:manage", "sops:approve",
+  ...labStaffCapabilities, "transfers:request", "transfers:approve", "approvals:read", "strains:manage", "sops:manage", "sops:approve",
 ];
 
 export function normalizeUserRole(role: UserRole): CanonicalUserRole {

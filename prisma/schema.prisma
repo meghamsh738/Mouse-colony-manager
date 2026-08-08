@@ -211,6 +211,31 @@ enum CryostorageOperationType {
   discard
 }
 
+enum StrainDirectoryListingStatus {
+  draft
+  shared
+  paused
+}
+
+enum StrainDirectoryRequestType {
+  contact
+  material
+}
+
+enum StrainDirectoryRequestStatus {
+  submitted
+  accepted
+  declined
+  cancelled
+}
+
+enum StrainDirectoryRequestEventType {
+  submitted
+  accepted
+  declined
+  cancelled
+}
+
 enum BreedingStatus {
   planned
   active
@@ -415,60 +440,66 @@ model User {
   notificationAudienceTargets  NotificationAudience[]        @relation("NotificationAudienceUser")
   notificationRecipients       NotificationRecipient[]       @relation("NotificationRecipientUser")
   notificationPreferences      NotificationPreference[]
+  strainDirectoryRequests      StrainDirectoryRequest[]      @relation("StrainDirectoryRequester")
+  strainDirectoryDecisions     StrainDirectoryRequest[]      @relation("StrainDirectoryDecisionActor")
+  strainDirectoryEvents        StrainDirectoryRequestEvent[] @relation("StrainDirectoryRequestEventActor")
 }
 
 model Lab {
-  id                     String                    @id
-  name                   String
-  code                   String                    @unique
-  billingContact         String?
-  notes                  String?
-  active                 Boolean                   @default(true)
-  createdAt              DateTime                  @default(now())
-  updatedAt              DateTime                  @updatedAt
-  memberships            LabMembership[]
-  cages                  Cage[]
-  animals                Animal[]
-  chargePeriods          CageChargePeriod[]
-  invoices               Invoice[]
-  invoiceAdjustments     InvoiceAdjustment[]
-  cageTransfersFrom      CageLabTransfer[]         @relation("CageTransferFromLab")
-  cageTransfersTo        CageLabTransfer[]         @relation("CageTransferToLab")
-  animalTransfersFrom    AnimalLabTransfer[]       @relation("AnimalTransferFromLab")
-  animalTransfersTo      AnimalLabTransfer[]       @relation("AnimalTransferToLab")
-  animalIntakeBatches    AnimalIntakeBatch[]
-  invitations            UserInvitation[]
-  projects               Project[]
-  experiments            Experiment[]
-  breedingSetups         BreedingSetup[]
-  sampleRecords          SampleRecord[]
-  cryostorageRecords     CryostorageRecord[]
-  cryostorageRequests    CryostorageRequest[]
-  cryostorageEvents      CryostorageRequestEvent[]
-  cryostorageOperations  CryostorageOperation[]
-  healthNotes            HealthNote[]
-  genotypingRecords      GenotypingRecord[]
-  attachments            Attachment[]
-  alerts                 Alert[]
-  workflowDrafts         WorkflowDraft[]
-  commandReceipts        CommandReceipt[]
-  outboxMessages         OutboxMessage[]
-  quarantineCases        QuarantineCase[]
-  quarantineObservations QuarantineObservation[]
-  cageClosures           CageClosure[]
-  transferRequestsFrom   LabTransferRequest[]      @relation("LabTransferSourceLab")
-  transferRequestsTo     LabTransferRequest[]      @relation("LabTransferDestinationLab")
-  transferEvents         LabTransferEvent[]
-  sopDocuments           SopDocument[]
-  sopAssignments         SopAssignment[]
-  sopAcknowledgements    SopAcknowledgement[]
-  procedurePlans         ProcedurePlan[]
-  procedureOccurrences   ProcedureOccurrence[]
-  notificationEvents     NotificationEvent[]
-  notificationAudiences  NotificationAudience[]
-  notificationRecipients NotificationRecipient[]
-  auditLogs              AuditLog[]
-  scopedSecurityEvents   SecurityEvent[]
+  id                      String                        @id
+  name                    String
+  code                    String                        @unique
+  billingContact          String?
+  notes                   String?
+  active                  Boolean                       @default(true)
+  createdAt               DateTime                      @default(now())
+  updatedAt               DateTime                      @updatedAt
+  memberships             LabMembership[]
+  cages                   Cage[]
+  animals                 Animal[]
+  chargePeriods           CageChargePeriod[]
+  invoices                Invoice[]
+  invoiceAdjustments      InvoiceAdjustment[]
+  cageTransfersFrom       CageLabTransfer[]             @relation("CageTransferFromLab")
+  cageTransfersTo         CageLabTransfer[]             @relation("CageTransferToLab")
+  animalTransfersFrom     AnimalLabTransfer[]           @relation("AnimalTransferFromLab")
+  animalTransfersTo       AnimalLabTransfer[]           @relation("AnimalTransferToLab")
+  animalIntakeBatches     AnimalIntakeBatch[]
+  invitations             UserInvitation[]
+  projects                Project[]
+  experiments             Experiment[]
+  breedingSetups          BreedingSetup[]
+  sampleRecords           SampleRecord[]
+  cryostorageRecords      CryostorageRecord[]
+  cryostorageRequests     CryostorageRequest[]
+  cryostorageEvents       CryostorageRequestEvent[]
+  cryostorageOperations   CryostorageOperation[]
+  healthNotes             HealthNote[]
+  genotypingRecords       GenotypingRecord[]
+  attachments             Attachment[]
+  alerts                  Alert[]
+  workflowDrafts          WorkflowDraft[]
+  commandReceipts         CommandReceipt[]
+  outboxMessages          OutboxMessage[]
+  quarantineCases         QuarantineCase[]
+  quarantineObservations  QuarantineObservation[]
+  cageClosures            CageClosure[]
+  transferRequestsFrom    LabTransferRequest[]          @relation("LabTransferSourceLab")
+  transferRequestsTo      LabTransferRequest[]          @relation("LabTransferDestinationLab")
+  transferEvents          LabTransferEvent[]
+  sopDocuments            SopDocument[]
+  sopAssignments          SopAssignment[]
+  sopAcknowledgements     SopAcknowledgement[]
+  procedurePlans          ProcedurePlan[]
+  procedureOccurrences    ProcedureOccurrence[]
+  notificationEvents      NotificationEvent[]
+  notificationAudiences   NotificationAudience[]
+  notificationRecipients  NotificationRecipient[]
+  auditLogs               AuditLog[]
+  scopedSecurityEvents    SecurityEvent[]
+  strainDirectoryListings StrainDirectoryListing[]
+  strainDirectoryRequests StrainDirectoryRequest[]
+  strainDirectoryEvents   StrainDirectoryRequestEvent[]
 }
 
 model SopDocument {
@@ -615,22 +646,22 @@ model UserInvitation {
 }
 
 model PrivilegedRoleChangeRequest {
-  id            String                     @id
-  targetUserId  String
-  requestedRole UserRole
-  status        PrivilegedRoleChangeStatus @default(pending)
-  reason        String
-  requestedById String
+  id                      String                     @id
+  targetUserId            String
+  requestedRole           UserRole
+  status                  PrivilegedRoleChangeStatus @default(pending)
+  reason                  String
+  requestedById           String
   requestedByAuthzVersion Int
-  requestedActive Boolean?
-  approvedById  String?
-  expiresAt     DateTime
-  approvedAt    DateTime?
-  rejectedAt    DateTime?
-  createdAt     DateTime                   @default(now())
-  targetUser    User                       @relation("PrivilegedChangeTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
-  requestedBy   User                       @relation("PrivilegedChangeRequester", fields: [requestedById], references: [id], onDelete: Restrict)
-  approvedBy    User?                      @relation("PrivilegedChangeApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  requestedActive         Boolean?
+  approvedById            String?
+  expiresAt               DateTime
+  approvedAt              DateTime?
+  rejectedAt              DateTime?
+  createdAt               DateTime                   @default(now())
+  targetUser              User                       @relation("PrivilegedChangeTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  requestedBy             User                       @relation("PrivilegedChangeRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy              User?                      @relation("PrivilegedChangeApprover", fields: [approvedById], references: [id], onDelete: Restrict)
 
   @@index([targetUserId, status])
   @@index([requestedById, status])
@@ -638,15 +669,16 @@ model PrivilegedRoleChangeRequest {
 }
 
 model LabMembership {
-  id                   String               @id
+  id                   String                   @id
   labId                String
   userId               String
   role                 LabMembershipRole
-  active               Boolean              @default(true)
-  createdAt            DateTime             @default(now())
-  lab                  Lab                  @relation(fields: [labId], references: [id], onDelete: Cascade)
-  user                 User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  active               Boolean                  @default(true)
+  createdAt            DateTime                 @default(now())
+  lab                  Lab                      @relation(fields: [labId], references: [id], onDelete: Cascade)
+  user                 User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
   cageResponsibilities CageUserAssignment[]
+  directoryContacts    StrainDirectoryListing[] @relation("StrainDirectoryContact")
 
   @@unique([labId, userId])
   @@index([userId])
@@ -749,14 +781,80 @@ model CageUserAssignment {
 }
 
 model Strain {
-  id                  String               @id
-  name                String               @unique
+  id                  String                   @id
+  name                String                   @unique
   background          String?
   notes               String?
   maintenanceRules    Json?
   animals             Animal[]
   cryostorageRecords  CryostorageRecord[]
   cryostorageRequests CryostorageRequest[]
+  directoryListings   StrainDirectoryListing[]
+}
+
+model StrainDirectoryListing {
+  id            String                       @id
+  strainId      String
+  labId         String
+  contactUserId String
+  status        StrainDirectoryListingStatus @default(draft)
+  version       Int                          @default(1)
+  sharedAt      DateTime?
+  createdAt     DateTime                     @default(now())
+  updatedAt     DateTime                     @updatedAt
+  strain        Strain                       @relation(fields: [strainId], references: [id], onDelete: Restrict)
+  lab           Lab                          @relation(fields: [labId], references: [id], onDelete: Restrict)
+  contact       LabMembership                @relation("StrainDirectoryContact", fields: [labId, contactUserId], references: [labId, userId], onDelete: Restrict, onUpdate: NoAction)
+  requests      StrainDirectoryRequest[]
+
+  @@unique([strainId, labId])
+  @@index([status, labId])
+  @@index([contactUserId, status])
+}
+
+model StrainDirectoryRequest {
+  id              String                        @id
+  listingId       String
+  requesterUserId String
+  requesterLabId  String
+  requestType     StrainDirectoryRequestType
+  purpose         String?
+  status          StrainDirectoryRequestStatus  @default(submitted)
+  decidedById     String?
+  decidedAt       DateTime?
+  decisionReason  String?
+  version         Int                           @default(1)
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
+  listing         StrainDirectoryListing        @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  requester       User                          @relation("StrainDirectoryRequester", fields: [requesterUserId], references: [id], onDelete: Restrict)
+  requesterLab    Lab                           @relation(fields: [requesterLabId], references: [id], onDelete: Restrict)
+  decidedBy       User?                         @relation("StrainDirectoryDecisionActor", fields: [decidedById], references: [id], onDelete: Restrict)
+  events          StrainDirectoryRequestEvent[]
+
+  @@index([listingId, status, createdAt])
+  @@index([requesterUserId, status, createdAt])
+  @@index([requesterLabId, status, createdAt])
+}
+
+model StrainDirectoryRequestEvent {
+  id         String                          @id
+  requestId  String
+  eventType  StrainDirectoryRequestEventType
+  actorId    String
+  actorRole  UserRole
+  actorLabId String?
+  reason     String?
+  metadata   Json?
+  createdAt  DateTime                        @default(now())
+  request    StrainDirectoryRequest          @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  actor      User                            @relation("StrainDirectoryRequestEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+  actorLab   Lab?                            @relation(fields: [actorLabId], references: [id], onDelete: Restrict)
+
+  @@unique([requestId, eventType])
+  @@index([requestId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([actorLabId, createdAt])
 }
 
 model Allele {
@@ -1972,7 +2070,7 @@ model CommandReceipt {
   actor             User                 @relation("CommandReceiptActor", fields: [actorId], references: [id], onDelete: Restrict)
   lab               Lab?                 @relation(fields: [labId], references: [id], onDelete: Restrict)
   workflowDraft     WorkflowDraft?       @relation(fields: [workflowDraftId], references: [id], onDelete: SetNull)
-  auditLogs          AuditLog[]
+  auditLogs         AuditLog[]
 
   @@unique([actorId, commandType, idempotencyKey])
   @@index([requestId])

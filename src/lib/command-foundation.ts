@@ -506,6 +506,8 @@ const VERSIONED_AGGREGATE_TABLES = {
   sop_assignment: true,
   procedure_plan: true,
   cryostorage_request: true,
+  strain_directory_listing: true,
+  strain_directory_request: true,
   notification_recipient: true,
   notification_preference: true,
   workflow_draft: true,
@@ -598,6 +600,19 @@ export async function getAggregateVersion(
     case "cryostorage_request":
       return (await tx.cryostorageRequest.findFirst({
         where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
+    case "strain_directory_listing":
+      return (await tx.strainDirectoryListing.findFirst({
+        where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
+    case "strain_directory_request":
+      return (await tx.strainDirectoryRequest.findFirst({
+        where: {
+          id: aggregateId,
+          ...(lab ? { OR: [{ requesterLabId: lab }, { listing: { labId: lab } }] } : {}),
+        },
         select: { version: true },
       }))?.version ?? null;
     case "notification_recipient":

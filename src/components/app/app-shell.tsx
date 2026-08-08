@@ -23,6 +23,7 @@ import {
   Users,
   Wrench,
   ClipboardCheck,
+  Dna,
   type LucideIcon,
 } from "lucide-react";
 
@@ -49,6 +50,7 @@ const navigationIcons: Record<NavigationItemId, LucideIcon> = {
   sops: BookOpenCheck,
   biosamples: TestTubeDiagonal,
   forecast: LineChart,
+  strains: Dna,
   cryostorage: Snowflake,
   approvals: ClipboardCheck,
   billing: Receipt,
