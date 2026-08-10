@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   deletePlannedAssignmentAction,
@@ -57,8 +58,19 @@ function CommandIdentityFields({ identity }: { identity: { idempotencyKey: strin
   );
 }
 
+function useRefreshAfterSuccess(status: string) {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (status === "success") {
+      router.refresh();
+    }
+  }, [router, status]);
+}
+
 export function ExperimentPlanSaveForm({ experimentOptions, filters, assignments }: ExperimentPlanSaveFormProps) {
   const [state, formAction, pending] = useActionState(planExperimentCohortAction, initialFormActionState);
+  useRefreshAfterSuccess(state.status);
   const [nonce] = useState(makeNonce);
   const [experimentId, setExperimentId] = useState(experimentOptions[0]?.id ?? "");
   const [startDate, setStartDate] = useState("2026-04-15");
@@ -148,6 +160,7 @@ export function ExperimentAssignmentBatchForm({
 }: ExperimentAssignmentBatchFormProps) {
   const serverAction = action === "promote" ? promotePlannedCohortAction : demoteReservedCohortAction;
   const [state, formAction, pending] = useActionState(serverAction, initialFormActionState);
+  useRefreshAfterSuccess(state.status);
   const [nonce] = useState(makeNonce);
   const handleSubmit = useSubmitGuard(pending);
   const assignmentsJson = JSON.stringify(assignments);
@@ -196,6 +209,8 @@ export function VersionedPlannedAssignmentEditor({
 }: VersionedPlannedAssignmentEditorProps) {
   const [updateState, updateAction, updatePending] = useActionState(updatePlannedAssignmentAction, initialFormActionState);
   const [deleteState, deleteAction, deletePending] = useActionState(deletePlannedAssignmentAction, initialFormActionState);
+  useRefreshAfterSuccess(updateState.status);
+  useRefreshAfterSuccess(deleteState.status);
   const [updateNonce] = useState(makeNonce);
   const [deleteNonce] = useState(makeNonce);
   const [startDate, setStartDate] = useState(initialStartDate.slice(0, 10));

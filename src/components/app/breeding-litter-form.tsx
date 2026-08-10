@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { recordLitterAction } from "@/app/breeding/actions";
 import { FormFeedback } from "@/components/app/form-feedback";
@@ -16,12 +17,19 @@ type BreedingLitterFormProps = {
 };
 
 export function BreedingLitterForm({ breedingSetupId, breedingSetupVersion, defaultBirthDate }: BreedingLitterFormProps) {
+  const router = useRouter();
   const [state, formAction, pending] = useActionState(recordLitterAction, initialFormActionState);
   const handleSubmit = useSubmitGuard(pending);
   const [birthDate, setBirthDate] = useState(defaultBirthDate);
   const [litterSizeBirth, setLitterSizeBirth] = useState("6");
   const [notes, setNotes] = useState("Observed during breeding room round.");
   const commandKey = ["record-litter", breedingSetupId, breedingSetupVersion, birthDate, litterSizeBirth, notes].join(":");
+
+  useEffect(() => {
+    if (state.status === "success") {
+      router.refresh();
+    }
+  }, [router, state.status]);
 
   return (
     <form

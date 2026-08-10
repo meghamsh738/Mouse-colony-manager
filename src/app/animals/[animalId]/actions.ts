@@ -2,6 +2,7 @@
 
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import {
@@ -106,7 +107,8 @@ export async function updateAnimalPresenceAction(
   const { expectedVersion, idempotencyKey, requestId, ...command } = parsed.data;
   const result = await executeUpdateAnimalPresenceCommand({ actor: user, command, expectedVersion, idempotencyKey, requestId });
   if (!result.ok) return { status: "error", message: result.message ?? "The location status could not be updated." };
-  ["/", "/animals", "/cages", "/notifications", `/animals/${command.animalId}`].forEach((path) => revalidatePath(path));
+  revalidatePath(`/animals/${command.animalId}`);
+  after(() => ["/", "/animals", "/cages", "/notifications"].forEach((path) => revalidatePath(path)));
   const saved = result.result as { message?: string };
   return { status: "success", message: saved.message ?? "Animal location status updated." };
 }
@@ -159,10 +161,8 @@ export async function reserveAnimalAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/experiments");
   revalidatePath(`/animals/${command.animalId}`);
+  after(() => ["/", "/animals", "/experiments"].forEach((path) => revalidatePath(path)));
 
   const saved = result.result as { message?: string };
   return {
@@ -224,12 +224,8 @@ export async function recordGenotypeAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/breeding");
-  revalidatePath("/cages");
-  revalidatePath("/experiments");
-  revalidatePath(`/animals/${parsed.data.animalId}`);
+  after(() => ["/", "/animals", "/breeding", "/cages", "/experiments", `/animals/${parsed.data.animalId}`]
+    .forEach((path) => revalidatePath(path)));
 
   return {
     status: "success",
@@ -292,12 +288,8 @@ export async function updateAnimalLifecycleAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/breeding");
-  revalidatePath("/cages");
-  revalidatePath("/experiments");
-  revalidatePath(`/animals/${command.animalId}`);
+  after(() => ["/", "/animals", "/breeding", "/cages", "/experiments", `/animals/${command.animalId}`]
+    .forEach((path) => revalidatePath(path)));
 
   const saved = result.result as { message?: string };
   return {

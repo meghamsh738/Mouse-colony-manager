@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { createBreedingAction } from "@/app/breeding/actions";
 import { FormFeedback } from "@/components/app/form-feedback";
@@ -16,6 +17,7 @@ type BreedingSetupFormProps = {
 };
 
 export function BreedingSetupForm({ sireOptions, damOptions, allowOverride }: BreedingSetupFormProps) {
+  const router = useRouter();
   const formRef = useRef<HTMLFormElement | null>(null);
   const [state, formAction, pending] = useActionState(createBreedingAction, initialFormActionState);
   const [commandKey] = useState(() => crypto.randomUUID());
@@ -24,8 +26,9 @@ export function BreedingSetupForm({ sireOptions, damOptions, allowOverride }: Br
   useEffect(() => {
     if (state.status === "success") {
       formRef.current?.reset();
+      router.refresh();
     }
-  }, [state.status]);
+  }, [router, state.status]);
 
   return (
     <form ref={formRef} action={formAction} className="space-y-4" data-testid="breeding-create-form" onSubmit={handleSubmit}>

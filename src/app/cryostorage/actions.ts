@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { createCryostorageRecord, updateCryostorageRecord } from "@/lib/colony-write";
@@ -58,9 +59,11 @@ function commandFormState(result: { ok: boolean; message?: string; result?: unkn
 }
 
 function revalidateCryostorageViews() {
-  revalidatePath("/cryostorage");
-  revalidatePath("/workbook");
-  revalidatePath("/forecast");
+  after(() => {
+    revalidatePath("/cryostorage");
+    revalidatePath("/workbook");
+    revalidatePath("/forecast");
+  });
 }
 
 export async function submitCryostorageRequestAction(
@@ -200,7 +203,7 @@ export async function recordCryostorageAction(
   }
 
   revalidatePath("/cryostorage");
-  revalidatePath("/settings");
+  after(() => revalidatePath("/settings"));
 
   return {
     status: "success",
@@ -251,7 +254,7 @@ export async function updateCryostorageInventoryAction(
   }
 
   revalidatePath("/cryostorage");
-  revalidatePath("/settings");
+  after(() => revalidatePath("/settings"));
 
   return {
     status: "success",

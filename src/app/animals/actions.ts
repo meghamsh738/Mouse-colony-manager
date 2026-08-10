@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { createAnimalRecord, importGenotypeCsvBatch } from "@/lib/colony-write";
@@ -51,9 +52,11 @@ export async function createAnimalAction(
     };
   }
 
-  revalidatePath("/");
   revalidatePath("/animals");
-  revalidatePath("/cages");
+  after(() => {
+    revalidatePath("/");
+    revalidatePath("/cages");
+  });
 
   return {
     status: "success",
@@ -101,11 +104,8 @@ export async function importGenotypeCsvAction(
     };
   }
 
-  revalidatePath("/");
   revalidatePath("/animals");
-  revalidatePath("/breeding");
-  revalidatePath("/cages");
-  revalidatePath("/experiments");
+  after(() => ["/", "/breeding", "/cages", "/experiments"].forEach((path) => revalidatePath(path)));
 
   return {
     status: "success",

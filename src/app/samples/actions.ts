@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
@@ -55,9 +56,11 @@ export async function recordSampleAction(
     };
   }
 
-  revalidatePath("/samples");
-  revalidatePath("/animals");
-  revalidatePath(`/animals/${parsed.data.animalId}`);
+  after(() => {
+    revalidatePath("/samples");
+    revalidatePath("/animals");
+    revalidatePath(`/animals/${parsed.data.animalId}`);
+  });
 
   return {
     status: "success",
@@ -109,7 +112,7 @@ export async function updateSampleInventoryAction(
   }
 
   revalidatePath("/samples");
-  revalidatePath("/animals");
+  after(() => revalidatePath("/animals"));
 
   return {
     status: "success",

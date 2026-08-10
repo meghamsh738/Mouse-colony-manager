@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
@@ -59,8 +60,18 @@ function experimentDetailsFromForm(formData: FormData) {
 }
 
 function revalidateExperiments() {
-  revalidatePath("/");
   revalidatePath("/experiments");
+  after(() => {
+    revalidatePath("/");
+  });
+}
+
+function revalidateExperimentAssignments() {
+  after(() => {
+    revalidatePath("/");
+    revalidatePath("/animals");
+    revalidatePath("/experiments");
+  });
 }
 
 function commandMessage(result: { result?: unknown; message?: string }, fallback: string) {
@@ -210,9 +221,7 @@ export async function planExperimentCohortAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/experiments");
+  revalidateExperimentAssignments();
 
   return {
     status: "success",
@@ -267,9 +276,7 @@ export async function promotePlannedCohortAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/experiments");
+  revalidateExperimentAssignments();
 
   return {
     status: "success",
@@ -313,9 +320,7 @@ export async function demoteReservedCohortAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/experiments");
+  revalidateExperimentAssignments();
 
   return {
     status: "success",
@@ -382,9 +387,7 @@ export async function updatePlannedAssignmentAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/experiments");
+  revalidateExperimentAssignments();
 
   return {
     status: "success",
@@ -439,9 +442,7 @@ export async function deletePlannedAssignmentAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/experiments");
+  revalidateExperimentAssignments();
 
   return {
     status: "success",

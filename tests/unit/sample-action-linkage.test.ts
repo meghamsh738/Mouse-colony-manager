@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
+vi.mock("next/server", () => ({ after: (callback: () => void) => callback() }));
 vi.mock("@/lib/session", () => ({ requireUser: mocks.requireUser }));
 vi.mock("@/lib/colony-write", () => ({
   createSampleRecord: vi.fn(),

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { prisma } from "@/lib/prisma";
+import { notificationDefinitions } from "@/lib/notification-catalog";
 import { getNotificationInboxView } from "@/lib/notifications-read";
 import { seedDatabase } from "../../prisma/seed-database";
 
@@ -17,7 +18,7 @@ describe("notification inbox", () => {
     const inbox = await getNotificationInboxView(globalActor);
     const categories = new Set(inbox.notifications.map((notification) => notification.categoryKey));
 
-    expect(inbox.preferences).toHaveLength(5);
+    expect(inbox.preferences).toHaveLength(notificationDefinitions.length);
     expect(inbox.preferences.every((preference) => preference.enabled)).toBe(true);
     expect(inbox.summary.total).toBeGreaterThan(0);
     expect(inbox.notifications.every((notification) => notification.targetLabel.length > 0)).toBe(true);

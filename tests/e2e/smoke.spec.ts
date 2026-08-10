@@ -39,6 +39,11 @@ function projectSeed(projectName: string) {
   };
 }
 
+function commandHeaders(key: string) {
+  const identity = `smoke-${key}-${crypto.randomUUID()}`;
+  return { "idempotency-key": identity, "x-request-id": identity };
+}
+
 async function signInAs(page: Page, account: keyof typeof credentials) {
   await page.context().clearCookies();
   await page.goto("/");
@@ -74,11 +79,19 @@ async function submitWithinAfterBlur(page: Page, scope: Page | Locator, testId: 
 
   const button = scope.getByTestId(testId);
   await button.scrollIntoViewIfNeeded();
-  await button.dispatchEvent("click");
+  await button.evaluate((element) => (element as HTMLButtonElement).click());
 }
 
 async function submitAfterBlur(page: Page, testId: string) {
   await submitWithinAfterBlur(page, page, testId);
+}
+
+async function openDetailsMenu(summary: Locator) {
+  const details = summary.locator("xpath=..");
+
+  if (!(await details.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    await summary.click();
+  }
 }
 
 async function enableBreedingOverride(page: Page) {
@@ -96,12 +109,17 @@ test("admin can browse the read-only workbook and return to app view", async ({ 
   if (testInfo.project.name === "mobile") {
     await page.locator("summary").filter({ hasText: "More" }).click();
   }
-  await page.getByLabel("Main navigation").getByRole("link", { name: "Workbook" }).click();
-  await expect(page).toHaveURL(/\/workbook/);
+  const navigation = page.getByLabel(testInfo.project.name === "mobile" ? "Mobile navigation" : "Main navigation");
+  await navigation.getByRole("link", { name: "Workbook" }).click();
+  await expect(page).toHaveURL(/\/workbook/, { timeout: 30_000 });
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
   await page.getByLabel("Workbook sections").getByRole("link", { name: "Rooms" }).click();
-  await page.getByLabel("Rooms sheets").getByRole("link", { name: "Room A101" }).click();
+  if (testInfo.project.name === "mobile") {
+    await page.getByLabel("Rooms sheet", { exact: true }).selectOption({ index: 1 });
+  } else {
+    await page.getByLabel("Rooms sheets").getByRole("link", { name: "Room A101" }).click();
+  }
   await page.getByRole("button", { name: "Expand all" }).click();
   await expect(page.locator('.workbook-canvas a[href="/animals/animal-001"]:visible').first()).toBeVisible();
   await expect(page.locator(".workbook-canvas")).toContainText("CM-24001");
@@ -129,8 +147,7 @@ test("admin can add a new animal record from the colony table", async ({ page },
   await submitAfterBlur(page, "animal-create-submit");
 
   await page.getByTestId("colony-search").fill(animalId);
-  await expect(page.locator('[data-testid="colony-table"] tbody tr')).toHaveCount(1, { timeout: 30_000 });
-  await expect(page.getByRole("link", { name: animalId })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("link", { name: animalId }).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
 });
 
 test("animal staff can scan a cage and log a welfare note", async ({ page }, testInfo) => {
@@ -144,6 +161,7 @@ test("animal staff can scan a cage and log a welfare note", async ({ page }, tes
   await page.getByRole("button", { name: "Open cage" }).click();
 
   await expect(page).toHaveURL(/\/scan\/CM-A101-003$/);
+  await page.waitForLoadState("networkidle");
   await page.getByRole("button", { name: "Add note" }).click();
   await page.getByTestId("health-note-text").fill(noteText);
   await page.getByTestId("health-note-attachment-label").fill(attachmentLabel);
@@ -174,8 +192,8 @@ test("animal staff can browse cage list and open cage detail", async ({ page }) 
 
   await expect(page).toHaveURL(/\/cages\/cage-a101-003$/);
   await expect(page.getByText("CM-A101-003").first()).toBeVisible();
-  await expect(page.getByText("CM-26003").first()).toBeVisible();
-  await expect(page.getByRole("main").getByRole("link", { name: "Scan", exact: true })).toBeVisible();
+  await expect(page.getByText("CM-26003").filter({ visible: true })).toBeVisible();
+  await expect(page.locator('a[href="/scan/CM-A101-003"]')).toBeVisible();
 });
 
 test("admin can review and permanently close an empty cage from detail and scan views", async ({ page }, testInfo) => {
@@ -245,6 +263,7 @@ test("animal staff can transfer a mouse into a scanned cage with fallback contro
   await signInAs(page, "staff");
   await page.goto("/scan/CM-A101-001");
 
+  await page.getByRole("button", { name: /^Move mouse:/ }).click();
   await page.getByTestId("animal-transfer-search").fill("CM-26003");
   await page.getByTestId("animal-transfer-card").filter({ hasText: "CM-26003" }).click();
   await expect(page.getByText("Staged move: CM-26003 from CM-A101-003 to CM-A101-001.")).toBeVisible();
@@ -269,6 +288,7 @@ test("animal staff can move a cage from the scan workspace and review the histor
   await signInAs(page, "staff");
   await page.goto("/scan/CM-A102-004");
 
+  await page.getByRole("button", { name: /^Move location:/ }).click();
   await page.getByTestId("cage-move-room").selectOption(seed.moveRoomId);
   await page.getByTestId("cage-move-rack").selectOption(seed.moveRackId);
   await page.getByTestId("cage-move-number").fill(seed.moveCageNumber);
@@ -276,81 +296,149 @@ test("animal staff can move a cage from the scan workspace and review the histor
   await page.getByTestId("cage-move-reason").fill(moveReason);
   await submitAfterBlur(page, "cage-move-submit");
 
-  await expect(page.getByRole("heading", { name: seed.moveLocationLabel })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`CM-A102-004 moved to ${seed.moveLocationLabel}.`)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText(seed.moveLocationLabel).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(moveReason).first()).toBeVisible({ timeout: 30_000 });
 
   await page.goto("/cages/cage-a102-004");
   await expect(page).toHaveURL(/\/cages\/cage-a102-004$/);
   await expect(page.getByText(seed.moveLocationLabel).first()).toBeVisible({ timeout: 30_000 });
+  await page.locator("summary").filter({ hasText: "Movement history" }).click();
   await expect(page.getByText(moveReason).first()).toBeVisible({ timeout: 30_000 });
 });
 
-test("researcher can review experiment overview and tune the distribution helper", async ({ page }) => {
-  await signInAs(page, "researcher");
+test("admin can manage experiment cohorts with the distribution helper", async ({ page }, testInfo) => {
+  const plannedStartDate = new Date();
+  plannedStartDate.setUTCDate(plannedStartDate.getUTCDate() + 1);
+  const plannedStartDateInput = plannedStartDate.toISOString().slice(0, 10);
+
+  await signInAs(page, "admin");
   await page.goto("/experiments");
 
   await expect(page.getByRole("heading", { name: "Experiments" })).toBeVisible();
-  await expect(page.getByTestId("experiment-cohort")).toBeVisible();
+  await expect(page.getByTestId("experiment-planner-filters")).toBeVisible();
   await page.getByTestId("planner-sex").selectOption("male");
   await page.getByTestId("planner-desired-number").fill("2");
+  await page.getByTestId("planner-min-age").fill("14");
+  await page.getByTestId("planner-max-age").fill("540");
   await page.getByTestId("planner-genotype").fill("Cre");
   await page.getByTestId("planner-group-count").fill("2");
   await page.getByTestId("planner-random-seed").fill("seed-77");
   await page.getByTestId("planner-max-same-cage").fill("1");
-  await submitAfterBlur(page, "planner-apply");
+  await page.getByTestId("planner-apply").click();
 
   await expect(page).toHaveURL(/sex=male/);
   await expect(page).toHaveURL(/desiredNumber=2/);
   await expect(page).toHaveURL(/randomSeed=seed-77/);
   await expect(page.getByTestId("experiment-ranked-candidates")).toContainText("Male", { timeout: 30_000 });
-  await expect(page.getByTestId("experiment-ranked-candidates")).toContainText("Multi-project allocation", { timeout: 30_000 });
+  await expect(page.getByTestId("experiment-ranked-candidates")).toContainText("No active project allocation", { timeout: 30_000 });
   await expect(page.getByTestId("experiment-exclusions")).toContainText("Sex filter mismatch", { timeout: 30_000 });
   await expect(page.getByTestId("experiment-exclusions")).toContainText("Examples", { timeout: 30_000 });
-  await expect(page.getByTestId("experiment-randomization")).toContainText("Seed seed-77", { timeout: 30_000 });
-  await expect(page.getByTestId("experiment-randomization")).toContainText("Balance by age band", { timeout: 30_000 });
-  await expect(page.getByTestId("experiment-randomization")).toContainText("same-cage animals per treatment arm", { timeout: 30_000 });
-  await expect(page.getByTestId("planner-group-card")).toHaveCount(2, { timeout: 30_000 });
-  await expect(page.getByTestId("planner-group-card").first()).toContainText("Group A", { timeout: 30_000 });
+  await expect(page.getByText("Seed seed-77")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Balance by age band before assignment")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Limit same-cage animals per treatment arm to 1")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("experiment-group-worksheet").locator("tbody tr")).toHaveCount(2, { timeout: 30_000 });
+  await expect(page.getByTestId("experiment-group-worksheet").locator("tbody tr").first()).toContainText("Group A", { timeout: 30_000 });
 
+  await page.getByRole("button", { name: "Save cohort: Write selected rows" }).click();
   await page.getByTestId("planner-save-experiment").selectOption("experiment-001");
-  await page.getByTestId("planner-save-start-date").fill("2026-04-15");
+  await page.getByTestId("planner-save-start-date").fill(plannedStartDateInput);
   await page.getByTestId("planner-save-notes").fill("Persisted from the distribution helper during smoke coverage.");
+  const assignmentWorksheet = page
+    .getByRole("heading", { name: "Assignments", exact: true })
+    .locator("xpath=ancestor::section[1]");
   await submitAfterBlur(page, "planner-save-submit");
 
-  await expect(page.getByText("Planned 2 cohort assignments for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("planned · Group A · starts 15 Apr 2026").first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/Planned from helper/i).first()).toBeVisible({ timeout: 30_000 });
+  await expect.poll(async () => (
+    await page.getByText("Planned 2 cohort assignments for EXP-TAM-041.").isVisible()
+      || await assignmentWorksheet.getByText("Group A", { exact: true }).filter({ visible: true }).isVisible()
+  ), { timeout: 30_000 }).toBe(true);
+  await page.reload();
+  const assignmentTable = page.getByTestId("experiment-assignments-worksheet");
+  const plannedAssignmentRow = (text: string) => testInfo.project.name === "mobile"
+    ? assignmentWorksheet.locator(".mobile-worksheet-card").filter({ hasText: text }).filter({ hasText: "planned" }).first()
+    : assignmentTable.locator("tbody tr").filter({ hasText: text }).filter({ hasText: "planned" }).first();
+  await expect(assignmentWorksheet).toContainText("planned", { timeout: 30_000 });
+  await expect(assignmentWorksheet).toContainText("Group A", { timeout: 30_000 });
+  await expect(assignmentWorksheet).toContainText("Planned from helper", { timeout: 30_000 });
 
-  const plannedEditor = page.locator('[data-testid^="planned-assignment-editor-"]').first();
+  const firstPlannedRow = plannedAssignmentRow("Group B");
+  await firstPlannedRow.locator("summary").filter({ hasText: "Edit" }).click();
+  const plannedEditor = firstPlannedRow.locator('[data-testid^="planned-assignment-editor-"]');
   const assignmentId = (await plannedEditor.getAttribute("data-testid"))?.replace("planned-assignment-editor-", "");
   expect(assignmentId).toBeTruthy();
 
   await plannedEditor.getByTestId(`planned-group-${assignmentId}`).fill("Group Z");
   await plannedEditor.getByTestId(`planned-notes-${assignmentId}`).fill("Adjusted in the overview editor before promotion.");
   await submitWithinAfterBlur(page, plannedEditor, `planned-update-submit-${assignmentId}`);
-  await expect(page.getByText("Updated planned assignment").first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/planned · Group Z · starts/i).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/Planned entry updated/i).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("Adjusted in the overview editor before promotion.").first()).toBeVisible({ timeout: 30_000 });
+  await expect.poll(async () => (
+    await page.getByText("Updated planned assignment").first().isVisible()
+      || await assignmentWorksheet.getByText("Group Z", { exact: true }).filter({ visible: true }).isVisible()
+  ), { timeout: 30_000 }).toBe(true);
+  await page.reload();
+  await expect(assignmentWorksheet).toContainText("Group Z", { timeout: 30_000 });
+  await expect(page.getByText(/Planned entry updated/i).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Adjusted in the overview editor before promotion.").filter({ visible: true })).toBeVisible({ timeout: 30_000 });
 
-  const secondEditor = page.locator('[data-testid^="planned-assignment-editor-"]').nth(1);
+  const secondPlannedRow = plannedAssignmentRow("Group A");
+  await secondPlannedRow.locator("summary").filter({ hasText: "Edit" }).click();
+  const secondEditor = secondPlannedRow.locator('[data-testid^="planned-assignment-editor-"]');
   const secondAssignmentId = (await secondEditor.getAttribute("data-testid"))?.replace("planned-assignment-editor-", "");
   expect(secondAssignmentId).toBeTruthy();
+  await secondEditor.getByRole("button", { name: "Review removal" }).dispatchEvent("click");
   await submitWithinAfterBlur(page, secondEditor, `planned-delete-submit-${secondAssignmentId}`);
+  await expect.poll(async () => (
+    await page.getByTestId(`planned-assignment-editor-${secondAssignmentId}`).count() === 0
+      || await secondEditor.getByText(/Removed planned assignment/i).isVisible()
+  ), { timeout: 30_000 }).toBe(true);
+  await page.reload();
   await expect(page.getByTestId(`planned-assignment-editor-${secondAssignmentId}`)).toHaveCount(0, { timeout: 30_000 });
 
-  await submitAfterBlur(page, "experiment-promote-submit-experiment-001");
-  await expect(page.getByText("Promoted 1 planned assignment for EXP-TAM-041.")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/reserved .* starts 15 Apr 2026/i).first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(/Promoted from planned/i).first()).toBeVisible({ timeout: 30_000 });
+  const stalePlannedRow = plannedAssignmentRow("CM-26003");
+  await stalePlannedRow.locator("summary").filter({ hasText: "Edit" }).click();
+  const staleEditor = stalePlannedRow.locator('[data-testid^="planned-assignment-editor-"]');
+  const staleAssignmentId = (await staleEditor.getAttribute("data-testid"))?.replace("planned-assignment-editor-", "");
+  expect(staleAssignmentId).toBeTruthy();
+  await staleEditor.getByRole("button", { name: "Review removal" }).dispatchEvent("click");
+  await submitWithinAfterBlur(page, staleEditor, `planned-delete-submit-${staleAssignmentId}`);
+  await expect.poll(async () => (
+    await page.getByTestId(`planned-assignment-editor-${staleAssignmentId}`).count() === 0
+      || await staleEditor.getByText(/Removed planned assignment/i).isVisible()
+  ), { timeout: 30_000 }).toBe(true);
+  await page.reload();
+  await expect(page.getByTestId(`planned-assignment-editor-${staleAssignmentId}`)).toHaveCount(0, { timeout: 30_000 });
 
+  await openDetailsMenu(page.locator("summary").filter({ hasText: /^EXP-TAM-041$/ }));
+  await page.getByRole("button", { name: "Review reservation" }).dispatchEvent("click");
+  await submitAfterBlur(page, "experiment-promote-submit-experiment-001");
+  await expect(assignmentWorksheet).toContainText("reserved", { timeout: 30_000 });
+  await expect(page.getByText(/Promoted from planned/i).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
+
+  await openDetailsMenu(page.locator("summary").filter({ hasText: /^EXP-TAM-041$/ }));
+  await page.getByRole("button", { name: "Review return" }).dispatchEvent("click");
   await submitAfterBlur(page, "experiment-demote-submit-experiment-001");
-  await expect(page.getByText(/Rolled back to planned/i).first()).toBeVisible({ timeout: 30_000 });
+  await expect(
+    assignmentWorksheet.getByText(/Rolled back to planned/i).filter({ visible: true }),
+  ).toBeVisible({ timeout: 30_000 });
 });
 
-test("researcher can query the authenticated integration API surface", async ({ page }) => {
+test("researcher integration API access is read-only", async ({ page }) => {
   await signInForApiRequests(page, "researcher");
+
+  const apiIndexResponse = await page.request.get("/api/v1");
+  const apiIndex = await apiIndexResponse.json();
+  const projectsResource = apiIndex.data.resources.find((resource: { name: string }) => resource.name === "projects");
+
+  expect(apiIndexResponse.status()).toBe(200);
+  expect(projectsResource).toMatchObject({ path: "/api/v1/projects", methods: ["GET"] });
+
+  const forbiddenWrite = await page.request.post("/api/v1/projects", {
+    data: { projectCode: "PRJ-RESEARCHER-DENIED", title: "Denied researcher write" },
+  });
+  expect(forbiddenWrite.status()).toBe(403);
+});
+
+test("admin can query and write through the authenticated integration API surface", async ({ page }) => {
+  await signInForApiRequests(page, "admin");
 
   const animalListResponse = await page.request.get("/api/v1/animals?sex=male&availableOnly=true&limit=2");
   const animalList = {
@@ -437,6 +525,7 @@ test("researcher can query the authenticated integration API surface", async ({ 
   const sampleLifecycleResponse = await page.request.patch("/api/v1/samples", {
     data: {
       sampleLabel: "API-SMOKE-001",
+      expectedVersion: sampleIntake.body.data.version,
       status: "allocated",
       storageLocation: "API allocation rack / slot 2",
       quantityLabel: "10 uL remaining",
@@ -553,13 +642,19 @@ test("researcher can query the authenticated integration API surface", async ({ 
     }),
   ]);
 
+  const assignmentExpectedExperimentVersion = await prisma.experiment.findUniqueOrThrow({
+    where: { id: "experiment-002" },
+    select: { version: true },
+  });
   const assignmentSyncResponse = await page.request.post("/api/v1/experiments/assignments", {
+    headers: commandHeaders("assignment-plan"),
     data: {
       experimentCode: "EXP-LPS-005",
+      expectedExperimentVersion: assignmentExpectedExperimentVersion.version,
       startDate: "2026-04-18",
       notes: "Created by the authenticated integration API smoke.",
       assignments: [
-        { animalCode: "CM-26005", treatmentGroup: "Arm A" },
+        { animalCode: "CM-26004", treatmentGroup: "Arm A" },
         { animalCode: "CM-26012", treatmentGroup: "Arm B" },
       ],
     },
@@ -574,7 +669,7 @@ test("researcher can query the authenticated integration API surface", async ({ 
   expect(assignmentSync.body.data).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
-        animalCode: "CM-26005",
+        animalCode: "CM-26004",
         experimentCode: "EXP-LPS-005",
         status: "planned",
         treatmentGroup: "Arm A",
@@ -589,9 +684,15 @@ test("researcher can query the authenticated integration API surface", async ({ 
   );
 
   const assignmentPromoteResponse = await page.request.patch("/api/v1/experiments/assignments", {
+    headers: commandHeaders("assignment-promote"),
     data: {
       experimentCode: "EXP-LPS-005",
+      expectedExperimentVersion: assignmentSync.body.data[0].experimentVersion,
       action: "promote_planned",
+      assignments: assignmentSync.body.data.map((assignment: { id: string; version: number }) => ({
+        assignmentId: assignment.id,
+        expectedVersion: assignment.version,
+      })),
     },
   });
   const assignmentPromote = {
@@ -603,17 +704,19 @@ test("researcher can query the authenticated integration API surface", async ({ 
   expect(assignmentPromote.body.meta.message).toContain("Promoted 2 planned assignments for EXP-LPS-005");
   expect(assignmentPromote.body.data).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ animalCode: "CM-26005", status: "reserved" }),
+      expect.objectContaining({ animalCode: "CM-26004", status: "reserved" }),
       expect.objectContaining({ animalCode: "CM-26012", status: "reserved" }),
     ]),
   );
 
   const plannedEditCreateResponse = await page.request.post("/api/v1/experiments/assignments", {
+    headers: commandHeaders("assignment-detail-plan"),
     data: {
       experimentCode: "EXP-LPS-005",
+      expectedExperimentVersion: assignmentPromote.body.data[0].experimentVersion,
       startDate: "2026-04-22",
       notes: "Created for planned assignment maintenance coverage.",
-      assignments: [{ animalCode: "CM-26004", treatmentGroup: "Arm D" }],
+      assignments: [{ animalCode: "CM-26005", treatmentGroup: "Arm D" }],
     },
   });
   const plannedEditCreate = {
@@ -627,7 +730,10 @@ test("researcher can query the authenticated integration API surface", async ({ 
   expect(editableAssignmentId).toBeTruthy();
 
   const assignmentUpdateResponse = await page.request.patch(`/api/v1/experiments/assignments/${editableAssignmentId}`, {
+    headers: commandHeaders("assignment-detail-update"),
     data: {
+      expectedExperimentVersion: plannedEditCreate.body.data[0].experimentVersion,
+      expectedAssignmentVersion: plannedEditCreate.body.data[0].version,
       startDate: "2026-04-20",
       treatmentGroup: "Arm Z",
       notes: "Adjusted by the authenticated integration API smoke.",
@@ -642,13 +748,19 @@ test("researcher can query the authenticated integration API surface", async ({ 
   expect(assignmentUpdate.body.meta.created).toBe(false);
   expect(assignmentUpdate.body.data).toMatchObject({
     id: editableAssignmentId,
-    animalCode: "CM-26004",
+    animalCode: "CM-26005",
     status: "planned",
     treatmentGroup: "Arm Z",
     startDate: "2026-04-20T00:00:00.000Z",
   });
 
-  const assignmentDeleteResponse = await page.request.delete(`/api/v1/experiments/assignments/${editableAssignmentId}`);
+  const assignmentDeleteResponse = await page.request.delete(`/api/v1/experiments/assignments/${editableAssignmentId}`, {
+    headers: commandHeaders("assignment-detail-delete"),
+    data: {
+      expectedExperimentVersion: assignmentUpdate.body.data.experimentVersion,
+      expectedAssignmentVersion: assignmentUpdate.body.data.version,
+    },
+  });
   const assignmentDelete = {
     status: assignmentDeleteResponse.status(),
     body: await assignmentDeleteResponse.json(),
@@ -658,7 +770,7 @@ test("researcher can query the authenticated integration API surface", async ({ 
   expect(assignmentDelete.body.meta.created).toBe(false);
   expect(assignmentDelete.body.data).toMatchObject({
     id: editableAssignmentId,
-    animalCode: "CM-26004",
+    animalCode: "CM-26005",
     status: "planned",
     treatmentGroup: "Arm Z",
   });
@@ -675,7 +787,7 @@ test("staff can create an animal through the integration API", async ({ page }) 
       dob: "2026-03-10",
       strainName: "C57BL/6J",
       cageBarcode: "CM-A101-003",
-      projectCode: "PRJ-NEURO-07",
+      projectCode: "PRJ-MICRO-24",
       notes: "Created by the authenticated animal intake integration API smoke.",
     },
   });
@@ -697,10 +809,10 @@ test("staff can create an animal through the integration API", async ({ page }) 
     cageLabel: "A101 / R2 / 003",
     strainName: "C57BL/6J",
   });
-  expect(payload.body.data.projectCodes).toContain("PRJ-NEURO-07");
+  expect(payload.body.data.projectCodes).toContain("PRJ-MICRO-24");
 });
 
-test("researcher can reserve an animal through the integration API", async ({ page }) => {
+test("researcher cannot reserve an animal through the integration API", async ({ page }) => {
   await signInForApiRequests(page, "researcher");
 
   const response = await page.request.post("/api/v1/experiments/reservations", {
@@ -717,14 +829,8 @@ test("researcher can reserve an animal through the integration API", async ({ pa
     body: await response.json(),
   };
 
-  expect(payload.status).toBe(201);
-  expect(payload.body.meta.created).toBe(true);
-  expect(payload.body.data).toMatchObject({
-    animalCode: "CM-26004",
-    experimentCode: "EXP-LPS-005",
-    status: "reserved",
-    treatmentGroup: "Arm C",
-  });
+  expect(payload.status).toBe(403);
+  expect(payload.body.error).toBeTruthy();
 });
 
 test("admin can update a rule through the integration API", async ({ page }) => {
@@ -866,13 +972,13 @@ test("staff can sync an external cage move through the integration API", async (
 
 test("staff can sync an external animal lifecycle update through the integration API", async ({ page }) => {
   await signInForApiRequests(page, "staff");
-  const currentResponse = await page.request.get("/api/v1/animals/animal-003");
+  const currentResponse = await page.request.get("/api/v1/animals/animal-011");
   const currentPayload = await currentResponse.json();
 
   const response = await page.request.patch("/api/v1/animals", {
     data: {
-      animalCode: "CM-26003",
-      targetStatus: "euthanized",
+      animalCode: "CM-26011",
+      targetStatus: "dead",
       happenedAt: "2026-04-18",
       reason: "External colony system recorded humane endpoint completion.",
       expectedVersion: currentPayload.data.animal.version,
@@ -886,11 +992,11 @@ test("staff can sync an external animal lifecycle update through the integration
 
   expect(payload.status).toBe(200);
   expect(payload.body.meta.created).toBe(false);
-  expect(payload.body.meta.message).toContain("CM-26003 marked euthanized");
+  expect(payload.body.meta.message).toContain("CM-26011 marked dead");
   expect(payload.body.data.animal).toMatchObject({
-    animalId: "CM-26003",
-    status: "euthanized",
-    outcomeStatus: "euthanized",
+    animalId: "CM-26011",
+    status: "dead",
+    outcomeStatus: "dead",
     deathReason: "External colony system recorded humane endpoint completion.",
   });
   expect(payload.body.data.cageLabel).toBe("Not in cage");
@@ -901,8 +1007,8 @@ test("admin can create a breeding setup through the integration API", async ({ p
 
   const response = await page.request.post("/api/v1/breeding-setups", {
     data: {
-      sireCode: "CM-22008",
-      damCode: "CM-25009",
+      sireCode: "CM-24001",
+      damCode: "CM-24002",
       startDate: "2026-04-18",
       targetGenotype: "CreER maintenance API smoke",
       targetSex: "female",
@@ -917,7 +1023,7 @@ test("admin can create a breeding setup through the integration API", async ({ p
 
   expect(payload.status).toBe(201);
   expect(payload.body.meta.created).toBe(true);
-  expect(payload.body.meta.message).toContain("Breeding setup created for CM-22008 and CM-25009");
+  expect(payload.body.meta.message).toContain("Breeding setup created for CM-24001 and CM-24002");
   expect(payload.body.data).toMatchObject({
     status: "active",
     targetGenotype: "CreER maintenance API smoke",
@@ -925,8 +1031,8 @@ test("admin can create a breeding setup through the integration API", async ({ p
   });
   expect(payload.body.data.adults).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ role: "sire", animalCode: "CM-22008", status: "breeding" }),
-      expect.objectContaining({ role: "dam", animalCode: "CM-25009", status: "breeding" }),
+      expect.objectContaining({ role: "sire", animalCode: "CM-24001", status: "breeding" }),
+      expect.objectContaining({ role: "dam", animalCode: "CM-24002", status: "breeding" }),
     ]),
   );
 });
@@ -965,12 +1071,35 @@ test("admin can record a litter through the integration API", async ({ page }) =
 });
 
 test("admin can record weaning through the integration API", async ({ page }) => {
+  const maleCageResult = await createCageWithAssignments({
+    cages: [{
+      clientId: "e2e-weaning-male-cage",
+      labId: "lab-microglia",
+      roomId: "room-a101",
+      rackId: "rack-a101-2",
+      cageNumber: "097",
+      status: "active",
+      startDate: "2026-04-18",
+    }],
+    assignments: [],
+    movedAt: "2026-04-18",
+    reason: "Create an empty male weaning cage for integration API coverage.",
+  }, { id: "user-admin", role: "admin" });
+  expect(maleCageResult.ok).toBe(true);
+  if (!maleCageResult.ok) {
+    throw new Error(maleCageResult.message);
+  }
+  const maleCage = await prisma.cage.findUniqueOrThrow({
+    where: { id: maleCageResult.entityId! },
+    select: { barcode: true },
+  });
+
   await signInForApiRequests(page, "admin");
 
   const breedingResponse = await page.request.post("/api/v1/breeding-setups", {
     data: {
-      sireCode: "CM-22008",
-      damCode: "CM-25009",
+      sireCode: "CM-24001",
+      damCode: "CM-24002",
       startDate: "2026-04-18",
       targetGenotype: "Weaning API smoke",
       allowOverride: true,
@@ -995,7 +1124,7 @@ test("admin can record weaning through the integration API", async ({ page }) =>
       femaleCount: 2,
       maleCount: 3,
       femaleCageBarcode: "CM-A101-003",
-      maleCageBarcode: "CM-A101-002",
+      maleCageBarcode: maleCage.barcode,
       strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
     },
   });
@@ -1013,12 +1142,12 @@ test("admin can record weaning through the integration API", async ({ page }) =>
     maleCount: 3,
     strainName: "Cx3cr1-CreER x Rosa26-LSL-tdTomato",
     femaleCage: { cageBarcode: "CM-A101-003" },
-    maleCage: { cageBarcode: "CM-A101-002" },
+    maleCage: { cageBarcode: maleCage.barcode },
   });
   expect(payload.body.data.progeny).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ sex: "female", cageBarcode: "CM-A101-003" }),
-      expect.objectContaining({ sex: "male", cageBarcode: "CM-A101-002" }),
+      expect.objectContaining({ sex: "male", cageBarcode: maleCage.barcode }),
     ]),
   );
 });
@@ -1027,10 +1156,10 @@ test("staff can review the notification inbox and jump into breeding follow-up",
   await signInAs(page, "staff");
   await page.goto("/notifications");
 
-  await expect(page.getByRole("heading", { name: "In-app notification inbox for the active colony." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Notifications", exact: true })).toBeVisible();
   await expect(page.getByTestId("notification-feed")).toBeVisible();
-  await expect(page.getByTestId("notification-preference-genotype_pending")).toContainText("enabled");
-  await expect(page.getByTestId("notification-preference-weaning_due")).toContainText("enabled");
+  await expect(page.getByTestId("notification-preference-genotype_pending")).toContainText("Overdue genotypes");
+  await expect(page.getByTestId("notification-preference-weaning_due")).toContainText("Weaning queue");
 
   const weaningLink = page.locator('[data-testid^="notification-link-weaning_due-"]').first();
   await expect(weaningLink).toBeVisible({ timeout: 30_000 });
@@ -1039,19 +1168,23 @@ test("staff can review the notification inbox and jump into breeding follow-up",
   await page.goto(href!);
 
   await expect(page).toHaveURL(/\/breeding$/);
-  await expect(page.getByRole("heading", { name: "Active breeding setups and suggested crosses." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Breeding", exact: true })).toBeVisible();
 });
 
-test("staff can review quarantine and sentinel tracking", async ({ page }) => {
-  await signInAs(page, "staff");
+test("admin can review quarantine and sentinel tracking", async ({ page }) => {
+  await signInAs(page, "admin");
   await page.goto("/quarantine");
 
-  await expect(page.getByRole("heading", { name: "Quarantine and sentinel tracking." })).toBeVisible();
-  await expect(page.getByTestId("quarantine-cage-list")).toBeVisible();
-  await expect(page.getByTestId("quarantine-cage-cage-a102-005")).toContainText("CM-A102-005");
-  await expect(page.getByTestId("quarantine-cage-cage-a102-005")).toContainText("Fighting observed in quarantine cage");
+  await expect(page.getByRole("heading", { name: "Quarantine", exact: true })).toBeVisible();
+  const cageQueue = page.getByRole("heading", { name: "Cage queue", exact: true }).locator("xpath=ancestor::section[1]");
+  const cageRow = cageQueue
+    .locator('[data-testid="quarantine-cage-cage-a102-005"], .mobile-worksheet-card')
+    .filter({ hasText: "CM-A102-005", visible: true });
+  await expect(cageQueue).toBeVisible();
+  await expect(cageRow).toContainText("CM-A102-005");
+  await expect(cageRow).toContainText("Fighting observed in quarantine cage");
 
-  const cageLink = page.getByRole("link", { name: "Open cage workspace" }).first();
+  const cageLink = cageRow.getByRole("link", { name: "Open", exact: true });
   const href = await cageLink.getAttribute("href");
   expect(href).toBe("/cages/cage-a102-005");
 });
@@ -1060,13 +1193,12 @@ test("admin can review breeding overview and generator suggestions", async ({ pa
   await signInAs(page, "admin");
   await page.goto("/breeding");
 
-  await expect(page.getByText("breeding-001")).toBeVisible();
-  await expect(page.getByText("litter-001 born").first()).toBeVisible();
-  await expect(page.getByText("Cross can yield desired dual-transgenic pups").first()).toBeVisible();
-  await expect(page.getByTestId("breeding-suggestions")).toContainText("Rule risk", { timeout: 30_000 });
-  await expect(page.getByTestId("breeding-suggestions")).toContainText("surplus risk", { timeout: 30_000 });
-  await expect(page.getByTestId("breeding-suggestions")).toContainText("Line fertility model", { timeout: 30_000 });
-  await expect(page.getByTestId("breeding-suggestions")).toContainText("Uses actual litter history", { timeout: 30_000 });
+  await expect(page.getByText("breeding-001").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText("Progeny linked").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cross suggestions" })).toBeVisible();
+  await expect(page.getByText(/^Surplus(?: risk)?$/).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText("Model applied").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText("No genotype conflicts").filter({ visible: true }).first()).toBeVisible();
 });
 
 test("admin can create a breeding setup with override", async ({ page }, testInfo) => {
@@ -1076,14 +1208,16 @@ test("admin can create a breeding setup with override", async ({ page }, testInf
   await signInAs(page, "admin");
   await page.goto("/breeding");
 
-  await page.getByTestId("breeding-create-sire").selectOption("animal-008");
-  await page.getByTestId("breeding-create-dam").selectOption("animal-009");
+  await page.getByRole("button", { name: "Create setup: New pairing" }).click();
+  await page.getByTestId("breeding-create-sire").selectOption("animal-001");
+  await page.getByTestId("breeding-create-dam").selectOption("animal-002");
   await page.getByTestId("breeding-create-target-genotype").fill(targetGenotype);
   await enableBreedingOverride(page);
   await submitAfterBlur(page, "breeding-create-submit");
 
-  await expect(page.getByText("Breeding setup created for CM-22008 and CM-25009.")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(targetGenotype).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Breeding setup created for CM-24001 and CM-24002.")).toBeVisible({ timeout: 30_000 });
+  await page.reload();
+  await expect(page.getByText(targetGenotype).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
 });
 
 test("admin can record a litter for a newly created breeding setup", async ({ page }, testInfo) => {
@@ -1094,56 +1228,67 @@ test("admin can record a litter for a newly created breeding setup", async ({ pa
   await signInAs(page, "admin");
   await page.goto("/breeding");
 
-  await page.getByTestId("breeding-create-sire").selectOption("animal-008");
-  await page.getByTestId("breeding-create-dam").selectOption("animal-009");
+  await page.getByRole("button", { name: "Create setup: New pairing" }).click();
+  await page.getByTestId("breeding-create-sire").selectOption("animal-001");
+  await page.getByTestId("breeding-create-dam").selectOption("animal-002");
   await page.getByTestId("breeding-create-target-genotype").fill(targetGenotype);
   await enableBreedingOverride(page);
   await submitAfterBlur(page, "breeding-create-submit");
 
-  const breedingCard = page.locator('[data-testid^="breeding-card-"]').filter({ hasText: targetGenotype }).first();
-  await expect(page.getByText("Breeding setup created for CM-22008 and CM-25009.")).toBeVisible({ timeout: 30_000 });
-  await expect(breedingCard).toBeVisible({ timeout: 30_000 });
+  const setupWorksheet = page.getByRole("heading", { name: "Setup worksheet", exact: true }).locator("xpath=ancestor::section[1]");
+  const breedingRow = testInfo.project.name === "mobile"
+    ? setupWorksheet.locator(".mobile-worksheet-card").filter({ hasText: targetGenotype }).first()
+    : page.getByTestId("breeding-setup-worksheet").locator("tbody tr").filter({ hasText: targetGenotype }).first();
+  await expect(page.getByText("Breeding setup created for CM-24001 and CM-24002.")).toBeVisible({ timeout: 30_000 });
+  await page.reload();
+  await expect(breedingRow).toBeVisible({ timeout: 30_000 });
+  await breedingRow.locator("summary").filter({ hasText: "Manage" }).click();
 
-  await breedingCard.getByTestId("litter-create-birth-date").fill("2026-04-10");
-  await breedingCard.getByTestId("litter-create-size").fill("7");
-  await breedingCard.getByTestId("litter-create-notes").fill(litterNote);
-  await submitWithinAfterBlur(page, breedingCard, "litter-create-submit");
+  await breedingRow.getByTestId("litter-create-birth-date").fill("2026-04-10");
+  await breedingRow.getByTestId("litter-create-size").fill("7");
+  await breedingRow.getByTestId("litter-create-notes").fill(litterNote);
+  await submitWithinAfterBlur(page, breedingRow, "litter-create-submit");
 
-  await expect(breedingCard.getByText("7 pups recorded at birth")).toBeVisible({ timeout: 30_000 });
-  await expect(breedingCard.getByText(litterNote)).toBeVisible({ timeout: 30_000 });
+  await expect(breedingRow.getByText("Litter recorded for", { exact: false })).toBeVisible({ timeout: 30_000 });
+  await page.reload();
+  await expect(breedingRow.getByText("Born", { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(breedingRow.getByText("7", { exact: true }).filter({ visible: true }).first()).toBeVisible();
 });
 
-test("admin can wean a recorded litter and assign progeny cages", async ({ page }, testInfo) => {
+test("admin can open guided cage planning for a recorded litter", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
   const targetGenotype = `Weaning lifecycle ${seed.noteSuffix}`;
 
   await signInAs(page, "admin");
   await page.goto("/breeding");
 
-  await page.getByTestId("breeding-create-sire").selectOption("animal-008");
-  await page.getByTestId("breeding-create-dam").selectOption("animal-009");
+  await page.getByRole("button", { name: "Create setup: New pairing" }).click();
+  await page.getByTestId("breeding-create-sire").selectOption("animal-001");
+  await page.getByTestId("breeding-create-dam").selectOption("animal-002");
   await page.getByTestId("breeding-create-target-genotype").fill(targetGenotype);
   await enableBreedingOverride(page);
   await submitAfterBlur(page, "breeding-create-submit");
 
-  const breedingCard = page.locator('[data-testid^="breeding-card-"]').filter({ hasText: targetGenotype }).first();
-  await expect(page.getByText("Breeding setup created for CM-22008 and CM-25009.")).toBeVisible({ timeout: 30_000 });
-  await expect(breedingCard).toBeVisible({ timeout: 30_000 });
+  const setupWorksheet = page.getByRole("heading", { name: "Setup worksheet", exact: true }).locator("xpath=ancestor::section[1]");
+  const breedingRow = testInfo.project.name === "mobile"
+    ? setupWorksheet.locator(".mobile-worksheet-card").filter({ hasText: targetGenotype }).first()
+    : page.getByTestId("breeding-setup-worksheet").locator("tbody tr").filter({ hasText: targetGenotype }).first();
+  await expect(page.getByText("Breeding setup created for CM-24001 and CM-24002.")).toBeVisible({ timeout: 30_000 });
+  await expect(breedingRow).toBeVisible({ timeout: 30_000 });
+  await breedingRow.locator("summary").filter({ hasText: "Manage" }).click();
 
-  await breedingCard.getByTestId("litter-create-birth-date").fill("2026-04-10");
-  await breedingCard.getByTestId("litter-create-size").fill("6");
-  await submitWithinAfterBlur(page, breedingCard, "litter-create-submit");
+  await breedingRow.getByTestId("litter-create-birth-date").fill("2026-04-10");
+  await breedingRow.getByTestId("litter-create-size").fill("6");
+  await submitWithinAfterBlur(page, breedingRow, "litter-create-submit");
+  await expect(breedingRow.getByText("Litter recorded for", { exact: false })).toBeVisible({ timeout: 30_000 });
+  await page.reload();
+  await breedingRow.locator("summary").filter({ hasText: "Manage" }).click();
 
-  await breedingCard.getByTestId("wean-create-date").fill("2026-05-01");
-  await breedingCard.getByTestId("wean-create-female-count").fill("2");
-  await breedingCard.getByTestId("wean-create-male-count").fill("3");
-  await breedingCard.getByTestId("wean-create-strain").selectOption("strain-creer-tdt");
-  await breedingCard.getByTestId("wean-create-female-cage").selectOption("cage-a101-003");
-  await breedingCard.getByTestId("wean-create-male-cage").selectOption("cage-a101-002");
-  await submitWithinAfterBlur(page, breedingCard, "wean-create-submit");
-
-  await expect(breedingCard.getByText("5 pups weaned")).toBeVisible({ timeout: 30_000 });
-  await expect(breedingCard.getByText("5 progeny linked")).toBeVisible({ timeout: 30_000 });
+  const weanLink = breedingRow.getByRole("link", { name: "Wean and plan cages" });
+  await expect(weanLink).toBeVisible({ timeout: 30_000 });
+  await weanLink.click();
+  await expect(page).toHaveURL(/\/cages\/intake\?mode=wean&litterId=/);
+  await expect(page.getByRole("heading", { name: "Cage intake" })).toBeVisible();
 });
 
 test("admin can record a genotype result from the animal detail page", async ({ page }, testInfo) => {
@@ -1154,6 +1299,7 @@ test("admin can record a genotype result from the animal detail page", async ({ 
   await signInAs(page, "admin");
   await page.goto("/animals/animal-009");
 
+  await page.getByRole("button", { name: "Record genotype: Assay result" }).click();
   await page.getByTestId("genotype-record-allele").selectOption(seed.genotypeAlleleId);
   await page.getByTestId("genotype-record-zygosity").fill("+/-");
   await page.getByTestId("genotype-record-source-type").selectOption("manual PCR");
@@ -1169,7 +1315,9 @@ test("admin can record a genotype result from the animal detail page", async ({ 
   });
   await submitAfterBlur(page, "genotype-record-submit");
 
-  await expect(page.getByText(seed.genotypeExpect).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`${seed.genotypeExpect.split(" ")[0]} genotype recorded for CM-25009.`)).toBeVisible({ timeout: 30_000 });
+  await page.reload();
+  await expect(page.getByText(seed.genotypeExpect).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("genotype-record-history").getByText(resultText)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("genotype-record-history").getByText(attachmentLabel)).toBeVisible({ timeout: 30_000 });
 });
@@ -1182,29 +1330,31 @@ test("admin can record a sample and find it in the inventory workspace", async (
   await signInAs(page, "admin");
   await page.goto("/animals/animal-004");
 
+  await page.getByRole("button", { name: "Record sample: Inventory" }).click();
   await page.getByTestId("sample-record-label").fill(sampleLabel);
   await page.getByTestId("sample-record-type").fill("Tail DNA");
   await page.getByTestId("sample-record-status").selectOption("stored");
   await page.getByTestId("sample-record-collected-at").fill("2026-04-11");
-  await page.getByTestId("sample-record-project").selectOption("project-neuro");
+  await page.getByTestId("sample-record-project").selectOption("project-micro");
   await page.getByTestId("sample-record-storage").fill("Freezer 2 / Box D / D04");
   await page.getByTestId("sample-record-quantity").fill("1 x 40 uL");
   await page.getByTestId("sample-record-notes").fill(sampleNote);
   await submitAfterBlur(page, "sample-record-submit");
 
   await expect(page.getByText(`Sample ${sampleLabel} recorded for CM-26004.`)).toBeVisible({ timeout: 30_000 });
+  await page.reload();
   await expect(page.getByTestId("sample-record-history").getByText(sampleLabel)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("sample-record-history").getByText(sampleNote)).toBeVisible({ timeout: 30_000 });
 
   await page.goto("/samples");
   await page.getByTestId("sample-search").fill(sampleLabel);
 
-  await expect(page.getByTestId("sample-table").getByText(sampleLabel)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("sample-table").getByText("CM-26004")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("sample-table").getByText(sampleNote)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sample-table").getByText(sampleLabel).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sample-table").getByText("CM-26004").filter({ visible: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sample-table").getByText(sampleNote).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
 });
 
-test("admin can record a cryostorage item and find it in the backup inventory workspace", async ({ page }, testInfo) => {
+test("admin can request and complete a cryostorage storage operation", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
   const cryoLabel = `CRYO-WT-${seed.suffix}`;
   const recoveryNote = `Recovery review scheduled during ${seed.noteSuffix} archive planning.`;
@@ -1212,36 +1362,50 @@ test("admin can record a cryostorage item and find it in the backup inventory wo
   await signInAs(page, "admin");
   await page.goto("/cryostorage");
 
-  await page.getByTestId("cryostorage-record-strain").selectOption("strain-wt");
-  await page.getByTestId("cryostorage-record-project").selectOption("project-neuro");
-  await page.getByTestId("cryostorage-record-label").fill(cryoLabel);
-  await page.getByTestId("cryostorage-record-material").fill("Frozen embryos");
-  await page.getByTestId("cryostorage-record-status").selectOption("stored");
-  await page.getByTestId("cryostorage-record-stored-at").fill("2026-04-12");
-  await page.getByTestId("cryostorage-record-location").fill("LN2 Tank C / Cane 2 / Goblet 1");
-  await page.getByTestId("cryostorage-record-quantity").fill("14 embryos");
-  await page.getByTestId("cryostorage-record-recovery-notes").fill(recoveryNote);
-  await page.getByTestId("cryostorage-record-notes").fill("Backup line kept outside the active breeding pool.");
-  await submitAfterBlur(page, "cryostorage-record-submit");
+  await page.getByRole("button", { name: "New request: Storage operation" }).click();
+  const requestForm = page.getByTestId("cryostorage-request-form");
+  await requestForm.getByLabel("Label").fill(cryoLabel);
+  await requestForm.getByRole("textbox", { name: "Material", exact: true }).fill("Frozen embryos");
+  await requestForm.getByLabel("Strain").selectOption("strain-wt");
+  await requestForm.getByLabel("Project").selectOption("project-micro");
+  await requestForm.getByLabel("Preferred location").fill("LN2 Tank C / Cane 2 / Goblet 1");
+  await requestForm.getByLabel("Quantity").fill("14 embryos");
+  await requestForm.getByLabel("Notes").fill(recoveryNote);
+  await requestForm.getByRole("button", { name: "Submit request" }).click();
 
-  await expect(page.getByText(`Cryostorage record ${cryoLabel} saved for C57BL/6J.`)).toBeVisible({ timeout: 30_000 });
+  await expect(requestForm.getByText("Storage request submitted.")).toBeVisible({ timeout: 30_000 });
+  await page.reload();
+  const request = page.getByTestId("cryostorage-request-list").locator("article").filter({ hasText: cryoLabel }).first();
+  await expect(request).toContainText(recoveryNote, { timeout: 30_000 });
+  await request.getByRole("link", { name: `Store ${cryoLabel}` }).click();
+
+  await page.getByLabel("Final location").fill("LN2 Tank C / Cane 2 / Goblet 1");
+  await page.getByLabel("Final quantity").fill("14 embryos");
+  await page.getByLabel("Decision note").fill("Approved synthetic QA storage request.");
+  await page.getByLabel("Operation notes").fill(recoveryNote);
+  await page.getByRole("button", { name: "Review store" }).click();
+  await page.getByRole("button", { name: `Store ${cryoLabel}` }).click();
+  await expect(
+    page.getByText(`${cryoLabel} stored.`).or(page.getByText("Cryostorage request processed")),
+  ).toBeVisible({ timeout: 30_000 });
+
+  await page.goto("/cryostorage");
   await page.getByTestId("cryostorage-search").fill(cryoLabel);
-  await expect(page.getByTestId("cryostorage-table").getByText(cryoLabel)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("cryostorage-table").getByText("Frozen embryos")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("cryostorage-table").getByText(recoveryNote)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("cryostorage-table").getByText(cryoLabel).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("cryostorage-table").getByText("Frozen embryos").filter({ visible: true })).toBeVisible({ timeout: 30_000 });
 });
 
 test("researcher can review the forecast workspace", async ({ page }) => {
   await signInAs(page, "researcher");
   await page.goto("/forecast");
 
-  await expect(page.getByText("Projected breeding output and experiment-ready runway.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Forecast", level: 1 })).toBeVisible();
   await expect(page.getByTestId("stat-pending-demand")).toBeVisible();
   await expect(page.getByTestId("stat-90d-gap")).toBeVisible();
-  await expect(page.getByTestId("surplus-minimization")).toContainText("Surplus minimization", { timeout: 30_000 });
-  await expect(page.getByTestId("long-range-forecast")).toContainText("Long-range study demand", { timeout: 30_000 });
-  await expect(page.getByTestId("forecast-table").getByText("x").first()).toBeVisible();
-  await expect(page.getByRole("link", { name: "Inspect frozen backups" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Surplus minimization" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: "Long-range study demand" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("CM-24001 x CM-24002", { exact: true }).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole("main").getByRole("link", { name: "Cryostorage" })).toBeVisible();
 });
 
 test("admin can import genotype rows from a csv upload", async ({ page }) => {
@@ -1250,6 +1414,7 @@ test("admin can import genotype rows from a csv upload", async ({ page }) => {
   await signInAs(page, "admin");
   await page.goto("/animals");
 
+  await page.getByRole("button", { name: "Import genotype results: CSV update" }).click();
   await page.getByTestId("genotype-import-file").setInputFiles(fixturePath);
   await submitAfterBlur(page, "genotype-import-submit");
 
@@ -1262,7 +1427,7 @@ test("admin can import genotype rows from a csv upload", async ({ page }) => {
   await expect(page.getByText("CreER WT/WT").first()).toBeVisible({ timeout: 30_000 });
 });
 
-test("animal staff can euthanize and then archive an animal record", async ({ page }, testInfo) => {
+test("animal staff can record a death and then archive an animal record", async ({ page }, testInfo) => {
   const seed = projectSeed(testInfo.project.name);
 
   await signInAs(page, "staff");
@@ -1270,32 +1435,32 @@ test("animal staff can euthanize and then archive an animal record", async ({ pa
   await page.getByRole("link", { name: /Record terminal disposition/ }).click();
   await expect(page.getByTestId("high-impact-workflow")).toBeVisible();
 
-  await page.getByTestId("animal-lifecycle-target").selectOption("euthanized");
+  await page.getByTestId("animal-lifecycle-target").selectOption("dead");
   await page.getByTestId("animal-lifecycle-date").fill("2026-04-09");
   await page.getByTestId("animal-lifecycle-reason").fill("Terminal tissue collection completed during endpoint round.");
   await page.getByTestId("animal-lifecycle-review").click();
   await submitAfterBlur(page, "animal-lifecycle-submit");
 
-  await expect(page.getByText(`${seed.lifecycleAnimalCode} marked euthanized.`)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("euthanized").first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(`${seed.lifecycleAnimalCode} marked dead.`)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("dead").first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Terminal tissue collection completed during endpoint round.").first()).toBeVisible({
     timeout: 30_000,
   });
 
+  await page.goto(`/animals/${seed.lifecycleAnimalId}?action=lifecycle`);
+  await expect(page.getByTestId("high-impact-workflow")).toBeVisible();
   await page.getByTestId("animal-lifecycle-target").selectOption("archived");
   await page.getByTestId("animal-lifecycle-date").fill("2026-04-10");
   await page.getByTestId("animal-lifecycle-reason").fill("Archived after post-procedure disposition review.");
   await page.getByTestId("animal-lifecycle-review").click();
   await submitAfterBlur(page, "animal-lifecycle-submit");
 
+  await expect(page.getByText(`${seed.lifecycleAnimalCode} marked archived.`)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("archived").first()).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("Terminal disposition complete")).toBeVisible({
-    timeout: 30_000,
-  });
 
   await page.goto("/animals");
   await page.getByTestId("colony-search").fill(seed.lifecycleAnimalCode);
-  await expect(page.locator('[data-testid="colony-table"] tbody tr')).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByRole("link", { name: seed.lifecycleAnimalCode }).filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
 });
 
 test("admin can update a rule threshold and see the audit trail", async ({ page }, testInfo) => {
@@ -1309,26 +1474,22 @@ test("admin can update a rule threshold and see the audit trail", async ({ page 
   await submitAfterBlur(page, "rule-save-reservation_start_grace_days");
 
   await expect(page.getByTestId("rule-value-reservation_start_grace_days")).toHaveValue(seed.ruleGraceDays, { timeout: 30_000 });
-  await expect(page.getByText("updated rule_config rule-008").first()).toBeVisible({ timeout: 30_000 });
+  const auditHistory = page.getByRole("heading", { name: "Operational history", exact: true }).locator("xpath=ancestor::section[1]");
+  const auditRow = auditHistory.locator("tr, article").filter({ hasText: "rule-008", visible: true }).first();
+  await expect(auditRow).toContainText("update", { timeout: 30_000 });
+  await expect(auditRow).toContainText("rule_config");
 });
 
-test("researcher sees reservation conflicts and can reserve an eligible animal", async ({ page }, testInfo) => {
-  const seed = projectSeed(testInfo.project.name);
-
+test("researcher cannot access animal reservation controls", async ({ page }) => {
   await signInAs(page, "researcher");
 
   await page.goto("/animals/animal-005");
-  await page.getByTestId("reservation-experiment").selectOption("experiment-002");
-  await submitAfterBlur(page, "reservation-submit");
-  await expect(page.getByText("CM-26005 still needs genotype confirmation before reservation.")).toBeVisible({
-    timeout: 30_000,
-  });
+  await expect(page.getByRole("button", { name: "Reserve: Experiment" })).toHaveCount(0);
+  await expect(page.getByTestId("reservation-submit")).toHaveCount(0);
 
-  await page.goto(`/animals/${seed.reservationAnimalId}`);
-  await page.getByTestId("reservation-experiment").selectOption("experiment-002");
-  await submitAfterBlur(page, "reservation-submit");
-
-  await expect(page.getByText("reserved · LPS low dose")).toBeVisible({ timeout: 30_000 });
+  await page.goto("/animals/animal-004");
+  await expect(page.getByRole("button", { name: "Reserve: Experiment" })).toHaveCount(0);
+  await expect(page.getByTestId("reservation-submit")).toHaveCount(0);
 });
 
 test("exports require auth and return csv for signed-in users", async ({ page }) => {

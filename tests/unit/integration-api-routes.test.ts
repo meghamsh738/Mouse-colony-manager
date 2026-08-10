@@ -138,6 +138,36 @@ async function createApiEuthanasiaSopAssignment() {
   return (assigned.result as { assignmentId: string }).assignmentId;
 }
 
+function commandHeaders(key: string) {
+  return {
+    "content-type": "application/json",
+    "idempotency-key": `${key}-idempotency`,
+    "x-request-id": `${key}-request`,
+  };
+}
+
+async function experimentVersion(experimentCode = "EXP-LPS-005") {
+  return (await prisma.experiment.findUniqueOrThrow({
+    where: { experimentCode },
+    select: { version: true },
+  })).version;
+}
+
+async function animalVersion(animalCode: string) {
+  return (await prisma.animal.findUniqueOrThrow({
+    where: { animalId: animalCode },
+    select: { version: true },
+  })).version;
+}
+
+async function exactTimestampAfterSopAssignment(assignmentId: string) {
+  await prisma.sopAssignment.findUniqueOrThrow({
+    where: { id: assignmentId },
+    select: { id: true },
+  });
+  return new Date().toISOString();
+}
+
 describe("integration API routes", () => {
   beforeEach(async () => {
     authMock.mockReset();
@@ -279,7 +309,7 @@ describe("integration API routes", () => {
   it("updates animal lifecycle state through the external animal route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
     const sopAssignmentId = await createApiEuthanasiaSopAssignment();
-    const happenedAt = new Date().toISOString();
+    const happenedAt = await exactTimestampAfterSopAssignment(sopAssignmentId);
 
     const { PATCH } = await import("@/app/api/v1/animals/route");
     const version = (await prisma.animal.findFirstOrThrow({
@@ -313,7 +343,7 @@ describe("integration API routes", () => {
       meta: { created: boolean; message: string };
     };
 
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(payload)).toBe(200);
     expect(payload.meta.created).toBe(false);
     expect(payload.meta.message).toContain("CM-26005 marked euthanized");
     expect(payload.data.animal).toMatchObject({
@@ -364,7 +394,7 @@ describe("integration API routes", () => {
   it("treats repeated terminal lifecycle sync as idempotent", async () => {
     authMock.mockResolvedValue(authenticatedSession());
     const sopAssignmentId = await createApiEuthanasiaSopAssignment();
-    const happenedAt = new Date().toISOString();
+    const happenedAt = await exactTimestampAfterSopAssignment(sopAssignmentId);
 
     const { PATCH } = await import("@/app/api/v1/animals/route");
     const lifecycleAnimal = await prisma.animal.findFirstOrThrow({
@@ -405,7 +435,7 @@ describe("integration API routes", () => {
       meta: { created: boolean; message: string };
     };
 
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(payload)).toBe(200);
     expect(payload.meta.created).toBe(false);
     expect(payload.meta.message).toContain("marked euthanized");
     expect(payload.data.animal.status).toBe("euthanized");
@@ -2277,13 +2307,16 @@ describe("integration API routes", () => {
 
   it("syncs planned experiment assignments through the external assignment route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    const expectedExperimentVersion = await experimentVersion();
 
     const { POST } = await import("@/app/api/v1/experiments/assignments/route");
     const response = await POST(
       new Request("http://localhost:3000/api/v1/experiments/assignments", {
         method: "POST",
+        headers: commandHeaders("plan-assignments"),
         body: JSON.stringify({
           experimentCode: "EXP-LPS-005",
+          expectedExperimentVersion,
           startDate: "2026-04-18",
           notes: "Synced from an external scheduling system.",
           assignments: [
@@ -2334,10 +2367,12 @@ describe("integration API routes", () => {
 
   it("treats repeated experiment assignment sync as idempotent", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    const expectedExperimentVersion = await experimentVersion();
 
     const { POST } = await import("@/app/api/v1/experiments/assignments/route");
     const requestBody = {
       experimentCode: "EXP-LPS-005",
+      expectedExperimentVersion,
       startDate: "2026-04-18",
       notes: "Repeated sync payload.",
       assignments: [
@@ -2345,16 +2380,19 @@ describe("integration API routes", () => {
         { animalCode: "CM-26012", treatmentGroup: "Arm B" },
       ],
     };
+    const headers = commandHeaders("repeat-plan-assignments");
 
     await POST(
       new Request("http://localhost:3000/api/v1/experiments/assignments", {
         method: "POST",
+        headers,
         body: JSON.stringify(requestBody),
       }),
     );
     const response = await POST(
       new Request("http://localhost:3000/api/v1/experiments/assignments", {
         method: "POST",
+        headers,
         body: JSON.stringify(requestBody),
       }),
     );
@@ -2362,23 +2400,26 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.meta.created).toBe(false);
-    expect(payload.meta.message).toContain("already has assignments");
+    expect(payload.meta.message).toContain("Planned 2 cohort assignments for EXP-LPS-005");
     expect(payload.data).toHaveLength(2);
   });
 
   it("syncs experiment assignment status through external promote and rollback actions", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    const expectedExperimentVersion = await experimentVersion();
 
     const { PATCH, POST } = await import("@/app/api/v1/experiments/assignments/route");
     const plannedResponse = await POST(
       new Request("http://localhost:3000/api/v1/experiments/assignments", {
         method: "POST",
+        headers: commandHeaders("status-sync-plan"),
         body: JSON.stringify({
           experimentCode: "EXP-LPS-005",
+          expectedExperimentVersion,
           startDate: "2026-04-18",
           notes: "Status sync setup.",
           assignments: [
-            { animalCode: "CM-26005", treatmentGroup: "Arm A" },
+            { animalCode: "CM-26004", treatmentGroup: "Arm A" },
             { animalCode: "CM-26012", treatmentGroup: "Arm B" },
           ],
         }),
@@ -2386,27 +2427,37 @@ describe("integration API routes", () => {
     );
 
     expect(plannedResponse.status).toBe(201);
+    const planned = (await plannedResponse.json()) as {
+      data: Array<{ id: string; version: number; experimentVersion: number }>;
+    };
+    const plannedSnapshots = planned.data.map((assignment) => ({
+      assignmentId: assignment.id,
+      expectedVersion: assignment.version,
+    }));
 
     const promoteResponse = await PATCH(
       new Request("http://localhost:3000/api/v1/experiments/assignments", {
         method: "PATCH",
+        headers: commandHeaders("status-sync-promote"),
         body: JSON.stringify({
           experimentCode: "EXP-LPS-005",
+          expectedExperimentVersion: planned.data[0]!.experimentVersion,
           action: "promote_planned",
+          assignments: plannedSnapshots,
         }),
       }),
     );
     const promoted = (await promoteResponse.json()) as {
-      data: Array<{ animalCode: string; status: string }>;
+      data: Array<{ id: string; animalCode: string; status: string; version: number; experimentVersion: number }>;
       meta: { created: boolean; message: string };
     };
 
     expect(promoteResponse.status).toBe(200);
     expect(promoted.meta.created).toBe(false);
     expect(promoted.meta.message).toContain("Promoted 2 planned assignments for EXP-LPS-005");
-    expect(promoted.data.filter((assignment) => ["CM-26005", "CM-26012"].includes(assignment.animalCode))).toEqual(
+    expect(promoted.data.filter((assignment) => ["CM-26004", "CM-26012"].includes(assignment.animalCode))).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ animalCode: "CM-26005", status: "reserved" }),
+        expect.objectContaining({ animalCode: "CM-26004", status: "reserved" }),
         expect.objectContaining({ animalCode: "CM-26012", status: "reserved" }),
       ]),
     );
@@ -2414,9 +2465,15 @@ describe("integration API routes", () => {
     const rollbackResponse = await PATCH(
       new Request("http://localhost:3000/api/v1/experiments/assignments", {
         method: "PATCH",
+        headers: commandHeaders("status-sync-rollback"),
         body: JSON.stringify({
           experimentCode: "EXP-LPS-005",
+          expectedExperimentVersion: promoted.data[0]!.experimentVersion,
           action: "rollback_reserved",
+          assignments: promoted.data.map((assignment) => ({
+            assignmentId: assignment.id,
+            expectedVersion: assignment.version,
+          })),
         }),
       }),
     );
@@ -2426,10 +2483,10 @@ describe("integration API routes", () => {
     };
 
     expect(rollbackResponse.status).toBe(200);
-    expect(rolledBack.meta.message).toContain("Rolled back 3 reserved assignments for EXP-LPS-005");
-    expect(rolledBack.data.filter((assignment) => ["CM-26005", "CM-26012"].includes(assignment.animalCode))).toEqual(
+    expect(rolledBack.meta.message).toContain("Rolled back 2 reserved assignments for EXP-LPS-005");
+    expect(rolledBack.data.filter((assignment) => ["CM-26004", "CM-26012"].includes(assignment.animalCode))).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ animalCode: "CM-26005", status: "planned" }),
+        expect.objectContaining({ animalCode: "CM-26004", status: "planned" }),
         expect.objectContaining({ animalCode: "CM-26012", status: "planned" }),
       ]),
     );
@@ -2450,13 +2507,16 @@ describe("integration API routes", () => {
 
   it("updates and removes planned experiment assignments through the external assignment detail route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    const expectedExperimentVersion = await experimentVersion();
 
     const { POST } = await import("@/app/api/v1/experiments/assignments/route");
     const createResponse = await POST(
       new Request("http://localhost:3000/api/v1/experiments/assignments", {
         method: "POST",
+        headers: commandHeaders("detail-plan"),
         body: JSON.stringify({
           experimentCode: "EXP-LPS-005",
+          expectedExperimentVersion,
           startDate: "2026-04-18",
           notes: "Assignment detail maintenance setup.",
           assignments: [{ animalCode: "CM-26005", treatmentGroup: "Arm A" }],
@@ -2464,7 +2524,7 @@ describe("integration API routes", () => {
       }),
     );
     const created = (await createResponse.json()) as {
-      data: Array<{ id: string }>;
+      data: Array<{ id: string; version: number; experimentVersion: number }>;
     };
     const assignmentId = created.data[0]?.id;
 
@@ -2491,7 +2551,10 @@ describe("integration API routes", () => {
     const updateResponse = await PATCH(
       new Request(`http://localhost:3000/api/v1/experiments/assignments/${assignmentId}`, {
         method: "PATCH",
+        headers: commandHeaders("detail-update"),
         body: JSON.stringify({
+          expectedExperimentVersion: created.data[0]!.experimentVersion,
+          expectedAssignmentVersion: created.data[0]!.version,
           startDate: "2026-04-21",
           treatmentGroup: "Arm Z",
           notes: "Adjusted through the external assignment detail route.",
@@ -2500,7 +2563,7 @@ describe("integration API routes", () => {
       { params: Promise.resolve({ assignmentId }) },
     );
     const updated = (await updateResponse.json()) as {
-      data: { id: string; treatmentGroup: string; startDate: string; notes: string | null };
+      data: { id: string; treatmentGroup: string; startDate: string; notes: string | null; version: number; experimentVersion: number };
       meta: { created: boolean; message: string };
     };
 
@@ -2517,6 +2580,11 @@ describe("integration API routes", () => {
     const deleteResponse = await DELETE(
       new Request(`http://localhost:3000/api/v1/experiments/assignments/${assignmentId}`, {
         method: "DELETE",
+        headers: commandHeaders("detail-delete"),
+        body: JSON.stringify({
+          expectedExperimentVersion: updated.data.experimentVersion,
+          expectedAssignmentVersion: updated.data.version,
+        }),
       }),
       { params: Promise.resolve({ assignmentId }) },
     );
@@ -2552,14 +2620,21 @@ describe("integration API routes", () => {
 
   it("syncs direct experiment reservations through the external reservation route", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    const [expectedAnimalVersion, expectedExperimentVersion] = await Promise.all([
+      animalVersion("CM-26004"),
+      experimentVersion(),
+    ]);
 
     const { POST } = await import("@/app/api/v1/experiments/reservations/route");
     const response = await POST(
       new Request("http://localhost:3000/api/v1/experiments/reservations", {
         method: "POST",
+        headers: commandHeaders("direct-reservation"),
         body: JSON.stringify({
           experimentCode: "EXP-LPS-005",
           animalCode: "CM-26004",
+          expectedAnimalVersion,
+          expectedExperimentVersion,
           startDate: "2026-04-18",
           treatmentGroup: "Arm C",
           notes: "Reserved by an external integration test.",
@@ -2587,7 +2662,7 @@ describe("integration API routes", () => {
           entityType: "experiment_assignment",
           action: "reserve",
           newValue: {
-            path: ["experimentId"],
+            path: ["snapshot", "command", "experimentId"],
             equals: "experiment-002",
           },
         },
@@ -2597,25 +2672,34 @@ describe("integration API routes", () => {
 
   it("treats repeated experiment reservation sync as idempotent", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    const [expectedAnimalVersion, expectedExperimentVersion] = await Promise.all([
+      animalVersion("CM-26004"),
+      experimentVersion(),
+    ]);
 
     const { POST } = await import("@/app/api/v1/experiments/reservations/route");
     const requestBody = {
       experimentCode: "EXP-LPS-005",
       animalCode: "CM-26004",
+      expectedAnimalVersion,
+      expectedExperimentVersion,
       startDate: "2026-04-18",
       treatmentGroup: "Arm C",
       notes: "Repeated reservation payload.",
     };
+    const headers = commandHeaders("repeat-direct-reservation");
 
     await POST(
       new Request("http://localhost:3000/api/v1/experiments/reservations", {
         method: "POST",
+        headers,
         body: JSON.stringify(requestBody),
       }),
     );
     const response = await POST(
       new Request("http://localhost:3000/api/v1/experiments/reservations", {
         method: "POST",
+        headers,
         body: JSON.stringify(requestBody),
       }),
     );
@@ -2626,7 +2710,7 @@ describe("integration API routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.meta.created).toBe(false);
-    expect(payload.meta.message).toContain("already reserved for EXP-LPS-005");
+    expect(payload.meta.message).toContain("CM-26004 reserved for EXP-LPS-005");
     expect(payload.data).toMatchObject({
       animalCode: "CM-26004",
       experimentCode: "EXP-LPS-005",
@@ -2737,13 +2821,16 @@ describe("integration API routes", () => {
 
   it("rejects read-only planned assignment maintenance requests", async () => {
     authMock.mockResolvedValue(authenticatedSession());
+    const expectedExperimentVersion = await experimentVersion();
 
     const { POST } = await import("@/app/api/v1/experiments/assignments/route");
     const createResponse = await POST(
       new Request("http://localhost:3000/api/v1/experiments/assignments", {
         method: "POST",
+        headers: commandHeaders("readonly-maintenance-plan"),
         body: JSON.stringify({
           experimentCode: "EXP-LPS-005",
+          expectedExperimentVersion,
           startDate: "2026-04-18",
           assignments: [{ animalCode: "CM-26005", treatmentGroup: "Arm A" }],
         }),

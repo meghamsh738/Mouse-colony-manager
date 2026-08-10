@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { transitionBreedingAction } from "@/app/breeding/actions";
 import { FormFeedback } from "@/components/app/form-feedback";
@@ -30,6 +31,7 @@ export function BreedingStatusForm({
   currentStatus: BreedingStatus;
   defaultDate: string;
 }) {
+  const router = useRouter();
   const transitions = getAllowedBreedingTransitions(currentStatus);
   const [state, formAction, pending] = useActionState(transitionBreedingAction, initialFormActionState);
   const handleSubmit = useSubmitGuard(pending);
@@ -40,6 +42,12 @@ export function BreedingStatusForm({
     () => ["breeding-transition", breedingSetupId, breedingSetupVersion, targetStatus, happenedAt, reason].join(":"),
     [breedingSetupId, breedingSetupVersion, happenedAt, reason, targetStatus],
   );
+
+  useEffect(() => {
+    if (state.status === "success") {
+      router.refresh();
+    }
+  }, [router, state.status]);
 
   if (!transitions.length) return <p className="text-sm text-[var(--muted)]">This setup is final.</p>;
 

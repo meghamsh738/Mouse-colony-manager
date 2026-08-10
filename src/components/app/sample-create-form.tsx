@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 
 import { recordSampleAction } from "@/app/samples/actions";
 import { FormFeedback } from "@/components/app/form-feedback";
@@ -43,6 +44,7 @@ export function SampleCreateForm({
   defaultProjectId,
   defaultExperimentId,
 }: SampleCreateFormProps) {
+  const router = useRouter();
   const formRef = useRef<HTMLFormElement | null>(null);
   const [state, formAction, pending] = useActionState(recordSampleAction, initialFormActionState);
   const handleSubmit = useSubmitGuard(pending);
@@ -54,8 +56,9 @@ export function SampleCreateForm({
   useEffect(() => {
     if (state.status === "success") {
       formRef.current?.reset();
+      router.refresh();
     }
-  }, [state.status]);
+  }, [router, state.status]);
 
   return (
     <form ref={formRef} action={formAction} className="space-y-4" data-testid="sample-record-form" onSubmit={handleSubmit}>

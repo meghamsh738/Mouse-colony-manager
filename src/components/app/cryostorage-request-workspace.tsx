@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   cancelCryostorageRequestAction,
@@ -46,6 +47,16 @@ function requestLabel(request: CryostorageRequestItem) {
   return request.sampleLabel ?? request.targetRecordLabel ?? "Cryostorage request";
 }
 
+function useRefreshAfterSuccess(status: string) {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (status === "success") {
+      router.refresh();
+    }
+  }, [router, status]);
+}
+
 export function CryostorageRequestForm({
   defaultLabId,
   defaultRequestedFor,
@@ -62,6 +73,7 @@ export function CryostorageRequestForm({
   strainOptions: Option[];
 }) {
   const [state, action, pending] = useActionState(submitCryostorageRequestAction, initialFormActionState);
+  useRefreshAfterSuccess(state.status);
   const [identity] = useState(() => commandIdentity("cryostorage-submit"));
   const [requestType, setRequestType] = useState<"store" | "recover" | "discard">("store");
   const [labId, setLabId] = useState(defaultLabId || labOptions[0]?.id || "");
@@ -167,6 +179,7 @@ export function CryostorageRequestForm({
 
 function CancelRequestForm({ request }: { request: CryostorageRequestItem }) {
   const [state, action, pending] = useActionState(cancelCryostorageRequestAction, initialFormActionState);
+  useRefreshAfterSuccess(state.status);
   const [identity] = useState(() => commandIdentity(`cryostorage-cancel:${request.id}:${request.version}`));
   const handleSubmit = useSubmitGuard(pending);
 
@@ -188,6 +201,7 @@ function CancelRequestForm({ request }: { request: CryostorageRequestItem }) {
 
 function ExecuteRequestForm({ request, today }: { request: CryostorageRequestItem; today: string }) {
   const [state, action, pending] = useActionState(executeCryostorageRequestAction, initialFormActionState);
+  useRefreshAfterSuccess(state.status);
   const [identity] = useState(() => commandIdentity(`cryostorage-execute:${request.id}:${request.version}`));
   const [decision, setDecision] = useState<"complete" | "reject">("complete");
   const [step, setStep] = useState<"details" | "review">("details");

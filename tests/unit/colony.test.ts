@@ -1199,27 +1199,27 @@ describe("colony logic", () => {
 
   it("removes a terminal animal from active views and allows later archival", async () => {
     await resetColonyState();
-    const euthanized = await updateAnimalLifecycleStatus(
+    const terminal = await updateAnimalLifecycleStatus(
       {
         animalId: "animal-014",
-        targetStatus: "euthanized",
+        targetStatus: "dead",
         happenedAt: "2026-04-09",
         reason: "Terminal tissue collection completed for endpoint verification.",
       },
       { id: "user-staff", role: "animal_staff" },
     );
 
-    expect(euthanized.ok).toBe(true);
+    expect(terminal.ok).toBe(true);
 
     const activeAnimals = await getAnimalListView(globalActor);
     const cage = await getCageDetailView("cage-a101-003");
-    const euthanizedDetail = await getAnimalDetailView("animal-014", globalActor);
+    const terminalDetail = await getAnimalDetailView("animal-014", globalActor);
 
     expect(activeAnimals.some((animal) => animal.id === "animal-014")).toBe(false);
     expect(cage?.occupants.some((animal) => animal.id === "animal-014")).toBe(false);
-    expect(euthanizedDetail?.animal.status).toBe("euthanized");
-    expect(euthanizedDetail?.animal.outcomeStatus).toBe("euthanized");
-    expect(euthanizedDetail?.animal.deathReason).toContain("Terminal tissue collection");
+    expect(terminalDetail?.animal.status).toBe("dead");
+    expect(terminalDetail?.animal.outcomeStatus).toBe("dead");
+    expect(terminalDetail?.animal.deathReason).toContain("Terminal tissue collection");
 
     const archived = await updateAnimalLifecycleStatus(
       {
@@ -1235,7 +1235,7 @@ describe("colony logic", () => {
 
     const archivedDetail = await getAnimalDetailView("animal-014", globalActor);
     expect(archivedDetail?.animal.status).toBe("archived");
-    expect(archivedDetail?.animal.outcomeStatus).toBe("euthanized");
+    expect(archivedDetail?.animal.outcomeStatus).toBe("dead");
     expect(archivedDetail?.timeline.some((event) => event.label === "Archived")).toBe(true);
   }, 15_000);
 

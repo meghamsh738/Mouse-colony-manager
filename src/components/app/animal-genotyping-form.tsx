@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 
 import { recordGenotypeAction } from "@/app/animals/[animalId]/actions";
 import { FormFeedback } from "@/components/app/form-feedback";
@@ -19,6 +20,7 @@ const sourceTypeOptions = ["manual PCR", "external vendor", "qPCR", "sequencing"
 const commonZygosityValues = ["+/-", "+/+", "WT/WT", "flox/+", "flox/flox", "pending"];
 
 export function AnimalGenotypingForm({ animalId, alleleOptions, defaultDate }: AnimalGenotypingFormProps) {
+  const router = useRouter();
   const formRef = useRef<HTMLFormElement | null>(null);
   const [state, formAction, pending] = useActionState(recordGenotypeAction, initialFormActionState);
   const handleSubmit = useSubmitGuard(pending);
@@ -28,8 +30,9 @@ export function AnimalGenotypingForm({ animalId, alleleOptions, defaultDate }: A
   useEffect(() => {
     if (state.status === "success") {
       formRef.current?.reset();
+      router.refresh();
     }
-  }, [state.status]);
+  }, [router, state.status]);
 
   if (!alleleOptions.length) {
     return <p className="text-sm text-[var(--muted)]">No alleles are configured yet. Add allele definitions in admin settings first.</p>;

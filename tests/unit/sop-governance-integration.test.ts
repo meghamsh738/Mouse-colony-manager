@@ -128,7 +128,7 @@ describe("SOP governance commands", () => {
     await expect(prisma.commandReceipt.update({
       where: { id: facilityReceipt.id },
       data: { actorAuthzVersion: { increment: 1 } },
-    })).rejects.toThrow(/principal evidence are immutable/i);
+    })).rejects.toThrow(/audit identity is immutable/i);
     const facilityDocument = await prisma.sopDocument.findUniqueOrThrow({ where: { id: facilityResult.documentId } });
 
     const cmuSelfDecision = await executeDecideSopVersionCommand({

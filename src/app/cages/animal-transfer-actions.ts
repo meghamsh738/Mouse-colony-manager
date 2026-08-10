@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { executeMoveAnimalToCageCommand } from "@/lib/colony-write";
@@ -56,9 +57,6 @@ export async function moveAnimalTransferAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/cages");
   const moved = result.result as {
     message: string;
     animalId: string;
@@ -67,11 +65,16 @@ export async function moveAnimalTransferAction(
     fromCageBarcode: string;
     toCageBarcode: string;
   };
-  revalidatePath(`/animals/${moved.animalId}`);
-  revalidatePath(`/cages/${moved.fromCageId}`);
-  revalidatePath(`/cages/${moved.toCageId}`);
-  revalidatePath(`/scan/${moved.fromCageBarcode}`);
-  revalidatePath(`/scan/${moved.toCageBarcode}`);
+  after(() => {
+    revalidatePath("/");
+    revalidatePath("/animals");
+    revalidatePath("/cages");
+    revalidatePath(`/animals/${moved.animalId}`);
+    revalidatePath(`/cages/${moved.fromCageId}`);
+    revalidatePath(`/cages/${moved.toCageId}`);
+    revalidatePath(`/scan/${moved.fromCageBarcode}`);
+    revalidatePath(`/scan/${moved.toCageBarcode}`);
+  });
 
   return {
     status: "success",

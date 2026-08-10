@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { updateRuleConfig } from "@/lib/colony-write";
@@ -48,12 +49,8 @@ export async function updateRuleConfigAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/breeding");
-  revalidatePath("/cages");
-  revalidatePath("/experiments");
   revalidatePath("/settings");
+  after(() => ["/", "/animals", "/breeding", "/cages", "/experiments"].forEach((path) => revalidatePath(path)));
 
   return {
     status: "success",

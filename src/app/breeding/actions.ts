@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import {
@@ -94,10 +95,12 @@ export async function createBreedingAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/cages");
-  revalidatePath("/breeding");
+  after(() => {
+    revalidatePath("/");
+    revalidatePath("/animals");
+    revalidatePath("/cages");
+    revalidatePath("/breeding");
+  });
 
   return {
     status: "success",
@@ -140,8 +143,10 @@ export async function recordLitterAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/breeding");
+  after(() => {
+    revalidatePath("/");
+    revalidatePath("/breeding");
+  });
 
   return {
     status: "success",
@@ -178,7 +183,9 @@ export async function transitionBreedingAction(
   });
   if (!result.ok) return { status: "error", message: result.message };
 
-  ["/", "/animals", "/cages", "/breeding", "/workbook"].forEach((path) => revalidatePath(path));
+  after(() => {
+    ["/", "/animals", "/cages", "/breeding", "/workbook"].forEach((path) => revalidatePath(path));
+  });
   return {
     status: "success",
     message: (result.result as { message?: string }).message ?? "Breeding setup updated.",
@@ -217,10 +224,12 @@ export async function weanLitterAction(
     };
   }
 
-  revalidatePath("/");
-  revalidatePath("/animals");
-  revalidatePath("/cages");
-  revalidatePath("/breeding");
+  after(() => {
+    revalidatePath("/");
+    revalidatePath("/animals");
+    revalidatePath("/cages");
+    revalidatePath("/breeding");
+  });
 
   return {
     status: "success",

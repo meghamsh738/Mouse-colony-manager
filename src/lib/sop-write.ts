@@ -102,7 +102,8 @@ async function setSopCommandContext(
     SELECT
       set_config('mcm.sop_actor_id', ${input.actorId}, true),
       set_config('mcm.sop_command_type', ${input.commandType}, true),
-      set_config('mcm.sop_receipt_id', ${input.receiptId}, true)
+      set_config('mcm.sop_receipt_id', ${input.receiptId}, true),
+      set_config('TimeZone', 'UTC', true)
   `);
 }
 
