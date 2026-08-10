@@ -1,24 +1,21 @@
 "use client";
 
+import Form from "next/form";
 import Link from "next/link";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
-  getFilteredRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { InventoryPagination } from "@/components/app/inventory-pagination";
+import type { AnimalInventoryQuery } from "@/lib/animals-read";
 import type { AnimalListItem } from "@/lib/types";
-import {
-  INITIAL_VISIBLE_RECORDS,
-  VISIBLE_RECORD_BATCH,
-  VisibleRecordControls,
-} from "@/components/app/visible-record-controls";
 
 const columnHelper = createColumnHelper<AnimalListItem>();
 
@@ -34,53 +31,37 @@ function statusVariant(status: AnimalListItem["status"]) {
   return "neutral";
 }
 
-export function ColonyTable({ data }: { data: AnimalListItem[] }) {
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | AnimalListItem["status"]>("all");
-  const [availabilityFilter, setAvailabilityFilter] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_RECORDS);
-  const deferredSearch = useDeferredValue(search);
+type ColonyTableProps = {
+  data: AnimalListItem[];
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  query: AnimalInventoryQuery;
+  totalCount: number;
+};
 
-  const filteredData = useMemo(
-    () =>
-      data.filter((animal) => {
-        const haystack = [animal.animalId, animal.labId, animal.strain, animal.genotypeSummary, animal.cageLabel]
-          .join(" ")
-          .toLowerCase();
-        const matchesSearch = haystack.includes(deferredSearch.toLowerCase());
-        const matchesStatus = statusFilter === "all" ? true : animal.status === statusFilter;
-        const matchesAvailability = availabilityFilter ? animal.availableForExperiment : true;
-
-        return matchesSearch && matchesStatus && matchesAvailability;
-      }),
-    [availabilityFilter, data, deferredSearch, statusFilter],
-  );
-
-  useEffect(() => {
-    setVisibleCount(INITIAL_VISIBLE_RECORDS);
-  }, [availabilityFilter, data.length, deferredSearch, statusFilter]);
-
-  const visibleData = useMemo(() => filteredData.slice(0, visibleCount), [filteredData, visibleCount]);
+export function ColonyTable({ data, page, pageCount, pageSize, query, totalCount }: ColonyTableProps) {
+  const filtersActive = Boolean(query.search || query.status !== "all" || query.availableOnly);
 
   const currentViewExportHref = useMemo(() => {
     const params = new URLSearchParams();
 
-    if (search.trim()) {
-      params.set("search", search.trim());
+    if (query.search) {
+      params.set("search", query.search);
     }
 
-    if (statusFilter !== "all") {
-      params.set("status", statusFilter);
+    if (query.status !== "all") {
+      params.set("status", query.status);
     }
 
-    if (availabilityFilter) {
+    if (query.availableOnly) {
       params.set("availableOnly", "true");
     }
 
-    const query = params.toString();
+    const serializedQuery = params.toString();
 
-    return `/api/exports/animals${query ? `?${query}` : ""}`;
-  }, [availabilityFilter, search, statusFilter]);
+    return `/api/exports/animals${serializedQuery ? `?${serializedQuery}` : ""}`;
+  }, [query.availableOnly, query.search, query.status]);
 
   const columns = useMemo(
     () => [
@@ -137,27 +118,27 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
   // React Compiler compatibility warning is appropriate for this boundary.
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: visibleData,
+    data,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
 
   return (
     <div className="space-y-5" data-testid="colony-table">
       <div className="space-y-3">
-        <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto] 2xl:grid-cols-[minmax(16rem,1fr)_auto_auto]">
+        <Form action="/animals" className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto] 2xl:grid-cols-[minmax(16rem,1fr)_auto_auto_auto]" scroll={false}>
           <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            defaultValue={query.search}
+            name="search"
             placeholder="Search animal ID, lab ID, genotype, strain, or cage"
             data-testid="colony-search"
           />
           <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+            defaultValue={query.status}
+            name="status"
             className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+            aria-label="Filter animals by status"
           >
             <option value="all">All statuses</option>
             <option value="colony_holding">Colony holding</option>
@@ -167,25 +148,35 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
           </select>
           <label className="flex min-h-11 min-w-0 items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--muted)]">
             <input
-              checked={availabilityFilter}
-              onChange={(event) => setAvailabilityFilter(event.target.checked)}
+              defaultChecked={query.availableOnly}
+              name="availableOnly"
               type="checkbox"
+              value="true"
             />
             <span className="truncate">Available for experiment only</span>
           </label>
-        </div>
+          <input name="pageSize" type="hidden" value={pageSize} />
+          <button
+            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
+            data-testid="colony-filter-submit"
+            type="submit"
+          >
+            Apply filters
+          </button>
+        </Form>
         <div className="count-strip justify-between">
           <p className="text-sm text-[var(--muted)]">
-            Showing <span className="font-medium text-[var(--ink)]">{visibleData.length}</span> of{" "}
-            <span className="font-medium text-[var(--ink)]">{filteredData.length}</span> matching mice
-            {filteredData.length === data.length ? "" : (
-              <>
-                {" "}
-                from <span className="font-medium text-[var(--ink)]">{data.length}</span> active mice
-              </>
-            )}
+            <span className="font-medium text-[var(--ink)]">{totalCount}</span> matching mice across the authorized colony
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            {filtersActive ? (
+              <Link
+                href="/animals"
+                className="inline-flex h-11 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)] md:h-9"
+              >
+                Clear filters
+              </Link>
+            ) : null}
             <Link
               href={currentViewExportHref}
               prefetch={false}
@@ -205,15 +196,18 @@ export function ColonyTable({ data }: { data: AnimalListItem[] }) {
           </div>
         </div>
       </div>
-      <VisibleRecordControls
-        matchingCount={filteredData.length}
-        noun="mice"
-        onShowAll={() => setVisibleCount(filteredData.length)}
-        onShowMore={() =>
-          setVisibleCount((current) => Math.min(current + VISIBLE_RECORD_BATCH, filteredData.length))
-        }
-        totalCount={data.length}
-        visibleCount={visibleData.length}
+      <InventoryPagination
+        basePath="/animals"
+        page={page}
+        pageCount={pageCount}
+        pageSize={pageSize}
+        query={{
+          availableOnly: query.availableOnly,
+          pageSize,
+          search: query.search,
+          status: query.status,
+        }}
+        totalCount={totalCount}
       />
       <div className="grid gap-3 md:hidden">
         {table.getRowModel().rows.map((row) => {

@@ -147,7 +147,33 @@ test("admin can add a new animal record from the colony table", async ({ page },
   await submitAfterBlur(page, "animal-create-submit");
 
   await page.getByTestId("colony-search").fill(animalId);
+  await page.getByTestId("colony-filter-submit").click();
+  await expect(page).toHaveURL(new RegExp(`search=${animalId}`));
   await expect(page.getByRole("link", { name: animalId }).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
+});
+
+test("admin can paginate and search the authorized animal inventory", async ({ page }, testInfo) => {
+  await signInAs(page, "admin");
+  await page.goto("/animals?pageSize=5");
+
+  const visibleRows = testInfo.project.name === "mobile"
+    ? page.locator('[data-testid="colony-table"] .mobile-record:visible')
+    : page.locator('[data-testid="colony-table"] tbody tr:visible');
+  await expect(visibleRows).toHaveCount(5);
+  await expect(page.getByTestId("inventory-page-status")).toContainText("Page 1 of");
+
+  await page.getByRole("link", { name: "Next" }).click();
+  await expect(page).toHaveURL(/pageSize=5/);
+  await expect(page).toHaveURL(/page=2/);
+  await expect(page.getByTestId("inventory-page-status")).toContainText("Page 2 of");
+  await expect(visibleRows).toHaveCount(5);
+
+  await page.getByTestId("colony-search").fill("CM-26012");
+  await page.getByTestId("colony-filter-submit").click();
+  await expect(page).toHaveURL(/search=CM-26012/);
+  await expect(page).not.toHaveURL(/page=2/);
+  await expect(page.getByRole("link", { name: "CM-26012" }).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
+  await expect(visibleRows).toHaveCount(1);
 });
 
 test("animal staff can scan a cage and log a welfare note", async ({ page }, testInfo) => {
@@ -1274,6 +1300,7 @@ test("admin can open guided cage planning for a recorded litter", async ({ page 
     ? setupWorksheet.locator(".mobile-worksheet-card").filter({ hasText: targetGenotype }).first()
     : page.getByTestId("breeding-setup-worksheet").locator("tbody tr").filter({ hasText: targetGenotype }).first();
   await expect(page.getByText("Breeding setup created for CM-24001 and CM-24002.")).toBeVisible({ timeout: 30_000 });
+  await page.reload();
   await expect(breedingRow).toBeVisible({ timeout: 30_000 });
   await breedingRow.locator("summary").filter({ hasText: "Manage" }).click();
 
@@ -1460,6 +1487,8 @@ test("animal staff can record a death and then archive an animal record", async 
 
   await page.goto("/animals");
   await page.getByTestId("colony-search").fill(seed.lifecycleAnimalCode);
+  await page.getByTestId("colony-filter-submit").click();
+  await expect(page).toHaveURL(new RegExp(`search=${seed.lifecycleAnimalCode}`));
   await expect(page.getByRole("link", { name: seed.lifecycleAnimalCode }).filter({ visible: true })).toHaveCount(0, { timeout: 30_000 });
 });
 
@@ -1474,6 +1503,21 @@ test("admin can update a rule threshold and see the audit trail", async ({ page 
   await submitAfterBlur(page, "rule-save-reservation_start_grace_days");
 
   await expect(page.getByTestId("rule-value-reservation_start_grace_days")).toHaveValue(seed.ruleGraceDays, { timeout: 30_000 });
+  await expect.poll(async () => {
+    const audit = await prisma.auditLog.findFirst({
+      where: {
+        entityType: "rule_config",
+        entityId: "rule-008",
+        action: "update",
+      },
+      orderBy: [{ timestamp: "desc" }, { id: "desc" }],
+      select: { id: true },
+    });
+
+    return audit?.id ?? null;
+  }, { timeout: 30_000 }).toBeTruthy();
+
+  await page.reload({ waitUntil: "domcontentloaded" });
   const auditHistory = page.getByRole("heading", { name: "Operational history", exact: true }).locator("xpath=ancestor::section[1]");
   const auditRow = auditHistory.locator("tr, article").filter({ hasText: "rule-008", visible: true }).first();
   await expect(auditRow).toContainText("update", { timeout: 30_000 });
@@ -1525,6 +1569,8 @@ test("animal and cage export controls follow the active table filters", async ({
 
   await page.goto("/animals");
   await page.getByTestId("colony-search").fill("CM-26005");
+  await page.getByTestId("colony-filter-submit").click();
+  await expect(page).toHaveURL(/search=CM-26005/);
 
   const animalExportHref = await page.getByTestId("animal-export-current").getAttribute("href");
   expect(animalExportHref).toContain("search=CM-26005");

@@ -1,7 +1,8 @@
 import { compareDesc, differenceInDays } from "date-fns";
+import type { Prisma } from "@prisma/client";
 
 import { normalizeUserRole, type Capability } from "@/lib/capabilities";
-import { canViewLab, getActorReadLabAccess, type LabActor } from "@/lib/lab-access";
+import { canViewLab, getActorReadLabAccess, type ActorLabAccess, type LabActor } from "@/lib/lab-access";
 import { parseExternalTransferProvenance } from "@/lib/lifecycle-provenance";
 import { prisma } from "@/lib/prisma";
 import type { Alert, AnimalListItem, AnimalStatus, AlertSeverity } from "@/lib/types";
@@ -11,6 +12,65 @@ type AnimalReadActor = LabActor & {
   canonicalRole?: ReturnType<typeof normalizeUserRole>;
   capabilities?: readonly Capability[];
 };
+
+export const ANIMAL_INVENTORY_DEFAULT_PAGE_SIZE = 80;
+export const ANIMAL_INVENTORY_MAX_PAGE_SIZE = 100;
+
+const animalInventoryStatuses = [
+  "colony_holding",
+  "breeding",
+  "reserved",
+  "in_experiment",
+] as const;
+
+export type AnimalInventoryStatus = (typeof animalInventoryStatuses)[number];
+
+export type AnimalInventoryQuery = {
+  search: string;
+  status: "all" | AnimalInventoryStatus;
+  availableOnly: boolean;
+  page: number;
+  pageSize: number;
+};
+
+export type AnimalInventoryPageView = {
+  items: AnimalListItem[];
+  totalCount: number;
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  query: AnimalInventoryQuery;
+};
+
+type RawInventoryQuery = Record<string, string | string[] | undefined>;
+
+function firstQueryValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function boundedPositiveInteger(value: string | undefined, fallback: number, maximum: number) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
+}
+
+export function normalizeAnimalInventoryQuery(query: RawInventoryQuery = {}): AnimalInventoryQuery {
+  const requestedStatus = firstQueryValue(query.status);
+  const status = animalInventoryStatuses.includes(requestedStatus as AnimalInventoryStatus)
+    ? requestedStatus as AnimalInventoryStatus
+    : "all";
+
+  return {
+    search: (firstQueryValue(query.search) ?? "").trim().slice(0, 120),
+    status,
+    availableOnly: firstQueryValue(query.availableOnly) === "true",
+    page: boundedPositiveInteger(firstQueryValue(query.page), 1, 100_000),
+    pageSize: boundedPositiveInteger(
+      firstQueryValue(query.pageSize),
+      ANIMAL_INVENTORY_DEFAULT_PAGE_SIZE,
+      ANIMAL_INVENTORY_MAX_PAGE_SIZE,
+    ),
+  };
+}
 
 function canReadExperiments(actor: AnimalReadActor) {
   if (actor.capabilities) return actor.capabilities.includes("experiments:full");
@@ -274,19 +334,106 @@ export async function getAnimalPageOptions(actor: AnimalReadActor) {
   };
 }
 
-export async function getAnimalListView(
+type AnimalListViewOptions = {
+  includeTerminal?: boolean;
+  search?: string;
+  status?: AnimalInventoryQuery["status"];
+  availableOnly?: boolean;
+  skip?: number;
+  take?: number;
+};
+
+type AnimalListContext = {
+  access: ActorLabAccess;
+  criticalManualAlertAnimalIds: string[];
+  rules: AnimalRuleContext;
+};
+
+async function getCriticalManualAlertAnimalIds(access: ActorLabAccess) {
+  const alerts = await prisma.alert.findMany({
+    where: {
+      entityType: "animal",
+      severity: "critical",
+      status: "open",
+      ...(access.canViewAll ? {} : { labId: { in: access.memberLabIds } }),
+    },
+    select: { entityId: true },
+  });
+
+  return Array.from(new Set(alerts.map((alert) => alert.entityId)));
+}
+
+function buildAnimalInventoryWhere(
+  access: ActorLabAccess,
+  options: AnimalListViewOptions,
+  criticalManualAlertAnimalIds: string[] = [],
+): Prisma.AnimalWhereInput {
+  const normalizedSearch = options.search?.trim();
+  const scopedCriticalHealthNote = {
+    severity: "critical" as const,
+    followupRequired: true,
+    resolved: false,
+    ...(access.canViewAll ? {} : { labId: { in: access.memberLabIds } }),
+  };
+  const compoundFilters: Prisma.AnimalWhereInput[] = [
+    ...(options.status && options.status !== "all" ? [{ status: options.status }] : []),
+    ...(options.availableOnly
+      ? [{
+          status: "colony_holding" as const,
+          alleles: {
+            some: {},
+            every: { callStatus: "confirmed" as const },
+          },
+          experimentAssignments: { none: { status: "active" as const } },
+          healthNotes: { none: scopedCriticalHealthNote },
+          ...(criticalManualAlertAnimalIds.length ? { id: { notIn: criticalManualAlertAnimalIds } } : {}),
+        }]
+      : []),
+  ];
+
+  return {
+    ...(options.includeTerminal ? {} : { outcomeStatus: "alive" }),
+    ...(access.canViewAll ? {} : { owningLabId: { in: access.memberLabIds } }),
+    ...(compoundFilters.length ? { AND: compoundFilters } : {}),
+    ...(normalizedSearch
+      ? {
+          OR: [
+            { animalId: { contains: normalizedSearch, mode: "insensitive" } },
+            { labId: { contains: normalizedSearch, mode: "insensitive" } },
+            { strain: { name: { contains: normalizedSearch, mode: "insensitive" } } },
+            { owningLab: { name: { contains: normalizedSearch, mode: "insensitive" } } },
+            { owningLab: { code: { contains: normalizedSearch, mode: "insensitive" } } },
+            { alleles: { some: { allele: { name: { contains: normalizedSearch, mode: "insensitive" } } } } },
+            { alleles: { some: { zygosity: { contains: normalizedSearch, mode: "insensitive" } } } },
+            { currentCage: { cageNumber: { contains: normalizedSearch, mode: "insensitive" } } },
+            { currentCage: { barcode: { contains: normalizedSearch, mode: "insensitive" } } },
+            { currentCage: { room: { roomNumber: { contains: normalizedSearch, mode: "insensitive" } } } },
+            { currentCage: { rack: { rackNumber: { contains: normalizedSearch, mode: "insensitive" } } } },
+          ],
+        }
+      : {}),
+  };
+}
+
+async function getAnimalListItems(
   actor: AnimalReadActor,
-  options: { includeTerminal?: boolean } = {},
+  options: AnimalListViewOptions = {},
+  context?: AnimalListContext,
 ): Promise<AnimalListItem[]> {
-  const rules = await getAnimalRuleContext();
-  const access = await getActorReadLabAccess(actor);
+  const [rules, access] = context
+    ? [context.rules, context.access]
+    : await Promise.all([getAnimalRuleContext(), getActorReadLabAccess(actor)]);
+  const criticalManualAlertAnimalIds = context
+    ? context.criticalManualAlertAnimalIds
+    : options.availableOnly
+      ? await getCriticalManualAlertAnimalIds(access)
+      : [];
   const includeExperiments = canReadExperiments(actor);
   const animals = await prisma.animal.findMany({
-    where: {
-      ...(options.includeTerminal ? {} : { outcomeStatus: "alive" }),
-      ...(access && !access.canViewAll ? { owningLabId: { in: access.memberLabIds } } : {}),
-    },
-    orderBy: { animalId: "asc" },
+    where: buildAnimalInventoryWhere(access, options, criticalManualAlertAnimalIds),
+    orderBy: [{ animalId: "asc" }, { id: "asc" }],
+    ...(options.skip ? { skip: options.skip } : {}),
+    ...(options.take ? { take: options.take } : {}),
     include: {
       strain: { select: { name: true } },
       owningLab: { select: { id: true, name: true, code: true } },
@@ -416,6 +563,40 @@ export async function getAnimalListView(
       availableForExperiment: animal.status === "colony_holding" && genotypeConfirmed && !activeExperiment && !hasCriticalWarning,
     };
   });
+}
+
+export async function getAnimalListView(
+  actor: AnimalReadActor,
+  options: Pick<AnimalListViewOptions, "includeTerminal"> = {},
+): Promise<AnimalListItem[]> {
+  return getAnimalListItems(actor, options);
+}
+
+export async function getAnimalInventoryPageView(
+  actor: AnimalReadActor,
+  rawQuery: RawInventoryQuery = {},
+): Promise<AnimalInventoryPageView> {
+  const query = normalizeAnimalInventoryQuery(rawQuery);
+  const [rules, access] = await Promise.all([getAnimalRuleContext(), getActorReadLabAccess(actor)]);
+  const criticalManualAlertAnimalIds = query.availableOnly
+    ? await getCriticalManualAlertAnimalIds(access)
+    : [];
+  const where = buildAnimalInventoryWhere(access, query, criticalManualAlertAnimalIds);
+  const skip = (query.page - 1) * query.pageSize;
+  const context = { access, criticalManualAlertAnimalIds, rules };
+  const [totalCount, items] = await Promise.all([
+    prisma.animal.count({ where }),
+    getAnimalListItems(actor, { ...query, skip, take: query.pageSize }, context),
+  ]);
+
+  return {
+    items,
+    totalCount,
+    page: query.page,
+    pageCount: Math.max(1, Math.ceil(totalCount / query.pageSize)),
+    pageSize: query.pageSize,
+    query,
+  };
 }
 
 export async function getAnimalDetailView(animalId: string, actor: AnimalReadActor) {

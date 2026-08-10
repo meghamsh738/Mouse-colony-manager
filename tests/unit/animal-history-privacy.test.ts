@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getActorLabAccess: vi.fn(),
   ruleFindMany: vi.fn(),
+  animalCount: vi.fn(),
   animalFindMany: vi.fn(),
   animalFindUnique: vi.fn(),
   alertFindMany: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock("@/lib/lab-access", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     ruleConfig: { findMany: mocks.ruleFindMany },
-    animal: { findMany: mocks.animalFindMany, findUnique: mocks.animalFindUnique },
+    animal: { count: mocks.animalCount, findMany: mocks.animalFindMany, findUnique: mocks.animalFindUnique },
     alert: { findMany: mocks.alertFindMany },
     experiment: { findMany: mocks.experimentFindMany },
     experimentAssignment: { count: mocks.experimentAssignmentCount },
@@ -31,7 +32,12 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-import { getAnimalDetailView, getAnimalListView } from "@/lib/animals-read";
+import {
+  getAnimalDetailView,
+  getAnimalInventoryPageView,
+  getAnimalListView,
+  normalizeAnimalInventoryQuery,
+} from "@/lib/animals-read";
 
 const actor = {
   id: "lab-b-user",
@@ -123,6 +129,7 @@ describe("transferred animal history privacy", () => {
       membershipByLabId: new Map(),
     });
     mocks.ruleFindMany.mockResolvedValue([]);
+    mocks.animalCount.mockResolvedValue(1);
     mocks.animalFindMany.mockResolvedValue([transferredAnimal]);
     mocks.animalFindUnique.mockResolvedValue(transferredAnimal);
     mocks.alertFindMany.mockResolvedValue([sourceAlert]);
@@ -153,5 +160,86 @@ describe("transferred animal history privacy", () => {
     expect(detail?.notes).toEqual([]);
     expect(detail?.genotypingRecords).toEqual([]);
     expect(detail?.alerts.map((alert) => alert.message).join(" ")).not.toContain("SOURCE LAB PRIVATE");
+  });
+
+  it("normalizes and bounds inventory query parameters", () => {
+    expect(normalizeAnimalInventoryQuery({
+      availableOnly: "true",
+      page: "0",
+      pageSize: "999",
+      search: ["  C57BL/6J  ", "ignored"],
+      status: "reserved",
+    })).toEqual({
+      availableOnly: true,
+      page: 1,
+      pageSize: 100,
+      search: "C57BL/6J",
+      status: "reserved",
+    });
+  });
+
+  it("paginates authorized whole-colony search before projecting animal rows", async () => {
+    mocks.animalCount.mockResolvedValue(250);
+
+    const page = await getAnimalInventoryPageView(actor, {
+      page: "2",
+      pageSize: "100",
+      search: "C57BL",
+      status: "breeding",
+    });
+    const countQuery = mocks.animalCount.mock.calls[0]?.[0];
+    const listQuery = mocks.animalFindMany.mock.calls[0]?.[0];
+
+    expect(page).toMatchObject({ page: 2, pageCount: 3, pageSize: 100, totalCount: 250 });
+    expect(countQuery.where).toMatchObject({
+      owningLabId: { in: ["lab-b"] },
+      outcomeStatus: "alive",
+      AND: [{ status: "breeding" }],
+    });
+    expect(countQuery.where.OR).toEqual(expect.arrayContaining([
+      { animalId: { contains: "C57BL", mode: "insensitive" } },
+      { strain: { name: { contains: "C57BL", mode: "insensitive" } } },
+    ]));
+    expect(listQuery).toMatchObject({
+      orderBy: [{ animalId: "asc" }, { id: "asc" }],
+      skip: 100,
+      take: 100,
+      where: countQuery.where,
+    });
+  });
+
+  it("applies the complete experiment-availability boundary before pagination", async () => {
+    mocks.alertFindMany
+      .mockResolvedValueOnce([{ entityId: "animal-critical" }])
+      .mockResolvedValueOnce([]);
+
+    await getAnimalInventoryPageView(actor, { availableOnly: "true" });
+    const where = mocks.animalCount.mock.calls[0]?.[0]?.where;
+
+    expect(mocks.alertFindMany.mock.calls[0]?.[0]).toMatchObject({
+      select: { entityId: true },
+      where: {
+        entityType: "animal",
+        labId: { in: ["lab-b"] },
+        severity: "critical",
+        status: "open",
+      },
+    });
+    expect(where.AND).toEqual([
+      expect.objectContaining({
+        alleles: { every: { callStatus: "confirmed" }, some: {} },
+        experimentAssignments: { none: { status: "active" } },
+        healthNotes: {
+          none: {
+            followupRequired: true,
+            labId: { in: ["lab-b"] },
+            resolved: false,
+            severity: "critical",
+          },
+        },
+        id: { notIn: ["animal-critical"] },
+        status: "colony_holding",
+      }),
+    ]);
   });
 });
