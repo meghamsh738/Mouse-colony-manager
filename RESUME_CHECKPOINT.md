@@ -15,8 +15,9 @@ Recorded: 2026-08-10
 - Milestones 8 and the bounded Unit-wide Strain Directory slice are verified in the tracker.
 - The optional production-shaped M9 restore rehearsal is deferred because no real colony database exists yet. Do not request or handle production data until the user has real data and approves the documented controls.
 - Milestone 10 performance work is active.
-- M10-01 Animals slice is complete: authorization-scoped PostgreSQL search/filtering, stable server pagination (80 rows by default, hard maximum 100), canonical out-of-range redirects, filter-preserving CSV export, and desktop/mobile coverage.
-- M10-01 remains **In progress** because cages, biosamples, cryostorage, and bounded relationship/detail histories are still open.
+- M10-01 Animals and Cages inventory slices are complete: authorization-scoped PostgreSQL search/filtering, stable server pagination (80 rows by default, hard maximum 100), canonical out-of-range redirects, and desktop/mobile coverage.
+- The Cages list now selects only the fields needed for its list projection and derives warning-only pages from an authorization-scoped narrow candidate query. Existing API, Workbook, export, label, and scan full-list contracts remain unchanged.
+- M10-01 remains **In progress** because biosamples, cryostorage, and bounded relationship/detail histories are still open.
 - M10-02 and M10-03 retain their earlier safe first passes. M10-04 through M10-07 remain open.
 - No schema migration, persistent cache, production service, real colony data, or hosting decision changed in the Animals slice.
 
@@ -30,10 +31,10 @@ Recorded: 2026-08-10
 
 ## Last Successful Verification
 
-- Focused Animals query/privacy tests: 5 passed.
-- Full unit suite: 100 files / 464 tests passed.
+- Focused combined Animals/Cages query and privacy tests: 9 passed.
+- Full unit suite: 100 files / 467 tests passed.
 - Guarded disposable-database suite: 8 files / 148 tests passed.
-- Complete Playwright smoke suite: 78 scenarios passed (39 desktop and 39 mobile).
+- Complete Playwright smoke suite: 80 scenarios passed (40 desktop and 40 mobile).
 - TypeScript, Prisma validation, production build (51 pages), and `git diff --check` passed.
 - ESLint passed with zero errors and five unchanged warnings in `src/app/administration/labs/actions.ts`.
 - Manual final diff review found no blocking issue. Independent subagent review was unavailable under the active no-delegation constraint.
@@ -42,7 +43,7 @@ Recorded: 2026-08-10
 
 1. Read this file and `IMPLEMENTATION_TRACKER.md`; confirm the branch and worktree are clean before editing.
 2. Confirm the external drive and PostgreSQL data directory are present before starting the disposable runtime.
-3. Continue M10-01 with one bounded inventory/history surface at a time; cages are the natural next inventory candidate.
+3. Continue M10-01 with one bounded inventory/history surface at a time; biosamples are the natural next inventory candidate.
 4. Preserve authorization-first filtering and intentional full-list API/Workbook consumers unless their contracts are separately redesigned.
 5. Run focused tests, full unit/database gates as appropriate, production build, and desktop/mobile QA before committing each slice.
 6. Keep the production-shaped M9 rehearsal deferred until real data exists and the user explicitly approves its encryption, retention, access, and artifact-location controls.

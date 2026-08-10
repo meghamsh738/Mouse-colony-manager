@@ -222,6 +222,39 @@ test("animal staff can browse cage list and open cage detail", async ({ page }) 
   await expect(page.locator('a[href="/scan/CM-A101-003"]')).toBeVisible();
 });
 
+test("admin can paginate and search the authorized cage inventory", async ({ page }) => {
+  await signInAs(page, "admin");
+  await page.goto("/cages?pageSize=2");
+
+  const visibleRows = page.getByTestId("cage-row").filter({ visible: true });
+  await expect(visibleRows).toHaveCount(2);
+  await expect(page.getByTestId("inventory-page-status")).toContainText("Page 1 of");
+
+  await page.getByRole("link", { name: "Next" }).click();
+  await expect(page).toHaveURL(/pageSize=2/);
+  await expect(page).toHaveURL(/page=2/);
+  await expect(page.getByTestId("inventory-page-status")).toContainText("Page 2 of");
+  await expect(visibleRows).toHaveCount(2);
+
+  await page.getByTestId("cage-search").fill("CM-A101-001");
+  await page.getByTestId("cage-filter-submit").click();
+  await expect(page).toHaveURL(/search=CM-A101-001/);
+  await expect(page).not.toHaveURL(/page=2/);
+  await expect(visibleRows).toHaveCount(1);
+  await expect(visibleRows.first()).toContainText("CM-A101-001");
+
+  await page.goto("/cages?pageSize=2");
+  await page.locator("summary").filter({ hasText: "Advanced filters" }).click();
+  await page.getByLabel("Filter cages by lab").selectOption("lab-microglia");
+  await page.getByLabel("Filter cages by occupancy").selectOption("occupied");
+  await page.getByTestId("cage-filter-submit").click();
+  await expect(page).toHaveURL(/labId=lab-microglia/);
+  await expect(page).toHaveURL(/occupancy=occupied/);
+  await expect(visibleRows).toHaveCount(2);
+  await expect(visibleRows.nth(0)).toContainText("Microglia Imaging Lab");
+  await expect(visibleRows.nth(1)).toContainText("Microglia Imaging Lab");
+});
+
 test("admin can review and permanently close an empty cage from detail and scan views", async ({ page }, testInfo) => {
   const suffix = testInfo.project.name === "mobile" ? "098" : "099";
   const expectedClosedDate = new Date().toISOString().slice(0, 10);
@@ -276,6 +309,8 @@ test("animal staff can open a print-ready cage label sheet", async ({ page }) =>
   await page.goto("/cages");
 
   await page.getByTestId("cage-search").fill("CM-A101-001");
+  await page.getByTestId("cage-filter-submit").click();
+  await expect(page).toHaveURL(/search=CM-A101-001/);
   await page.getByTestId("cage-print-current").click();
 
   await expect(page).toHaveURL(/\/cages\/labels\?search=CM-A101-001/);
@@ -1592,11 +1627,15 @@ test("animal and cage export controls follow the active table filters", async ({
 
   await page.goto("/cages");
   await page.getByLabel("Warnings only").check();
-  const warningBarcode = (await page.getByTestId("cage-row").first().getByTestId("cage-row-barcode").textContent())?.trim();
+  await page.getByTestId("cage-filter-submit").click();
+  await expect(page).toHaveURL(/warningsOnly=true/);
+  const warningBarcode = (await page.getByTestId("cage-row").filter({ visible: true }).first().getByTestId("cage-row-barcode").textContent())?.trim();
 
   expect(warningBarcode).toBeTruthy();
 
   await page.getByTestId("cage-search").fill(warningBarcode ?? "");
+  await page.getByTestId("cage-filter-submit").click();
+  await expect(page).toHaveURL(new RegExp(`search=${warningBarcode}`));
 
   const cageExportHref = await page.getByTestId("cage-export-current").getAttribute("href");
   expect(cageExportHref).toContain(`search=${warningBarcode}`);

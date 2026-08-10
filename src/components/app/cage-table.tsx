@@ -1,17 +1,15 @@
 "use client";
 
+import Form from "next/form";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useMemo } from "react";
 
+import { InventoryPagination } from "@/components/app/inventory-pagination";
 import { RowActionMenu } from "@/components/app/worksheet-shell";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import {
-  INITIAL_VISIBLE_RECORDS,
-  VISIBLE_RECORD_BATCH,
-  VisibleRecordControls,
-} from "@/components/app/visible-record-controls";
+import type { CageInventoryQuery } from "@/lib/cages-read";
 import type { CageListItem } from "@/lib/types";
 
 function statusVariant(status: CageListItem["status"]) {
@@ -91,291 +89,192 @@ function WarningSummary({ cage }: { cage: CageListItem }) {
   );
 }
 
-export function CageTable({ data }: { data: CageListItem[] }) {
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | CageListItem["status"]>("all");
-  const [labFilter, setLabFilter] = useState("all");
-  const [chargeCategoryFilter, setChargeCategoryFilter] = useState("all");
-  const [chargeStateFilter, setChargeStateFilter] = useState<"all" | CageListItem["chargeState"]>("all");
-  const [occupancyFilter, setOccupancyFilter] = useState<"all" | "occupied" | "empty">("all");
-  const [sexFilter, setSexFilter] = useState<"all" | "male" | "female" | "mixed" | "unknown">("all");
-  const [warningsOnly, setWarningsOnly] = useState(false);
-  const deferredSearch = useDeferredValue(search);
-  const labOptions = useMemo(
-    () =>
-      Array.from(
-        new Map(
-          data
-            .filter((cage) => cage.labId && cage.labName)
-            .map((cage) => [cage.labId, { id: cage.labId ?? "", label: cage.labName ?? "Unassigned lab" }]),
-        ).values(),
-      ).sort((left, right) => left.label.localeCompare(right.label)),
-    [data],
-  );
-  const chargeCategoryOptions = useMemo(
-    () =>
-      Array.from(
-        new Map(
-          data
-            .filter((cage) => cage.chargeCategoryId && cage.chargeCategoryName)
-            .map((cage) => [
-              cage.chargeCategoryId,
-              { id: cage.chargeCategoryId ?? "", label: cage.chargeCategoryName ?? "Unpriced" },
-            ]),
-        ).values(),
-      ).sort((left, right) => left.label.localeCompare(right.label)),
-    [data],
-  );
-  const visibleCountKey = useMemo(
-    () =>
-      JSON.stringify([
-        data.length,
-        deferredSearch,
-        statusFilter,
-        labFilter,
-        chargeCategoryFilter,
-        chargeStateFilter,
-        occupancyFilter,
-        sexFilter,
-        warningsOnly,
-      ]),
-    [
-      data.length,
-      deferredSearch,
-      statusFilter,
-      labFilter,
-      chargeCategoryFilter,
-      chargeStateFilter,
-      occupancyFilter,
-      sexFilter,
-      warningsOnly,
-    ],
-  );
-  const [visibleRecordState, setVisibleRecordState] = useState({
-    count: INITIAL_VISIBLE_RECORDS,
-    key: visibleCountKey,
-  });
-  const visibleCount =
-    visibleRecordState.key === visibleCountKey ? visibleRecordState.count : INITIAL_VISIBLE_RECORDS;
-  const setVisibleCount = (nextCount: number | ((currentCount: number) => number)) => {
-    setVisibleRecordState((currentState) => {
-      const currentCount =
-        currentState.key === visibleCountKey ? currentState.count : INITIAL_VISIBLE_RECORDS;
-      const count = typeof nextCount === "function" ? nextCount(currentCount) : nextCount;
-
-      return { count, key: visibleCountKey };
-    });
+type CageTableProps = {
+  data: CageListItem[];
+  filterOptions: {
+    labs: Array<{ id: string; label: string }>;
+    chargeCategories: Array<{ id: string; label: string }>;
   };
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  query: CageInventoryQuery;
+  totalCount: number;
+};
 
-  const filteredData = useMemo(
-    () =>
-      data.filter((cage) => {
-        const haystack = [
-          cage.roomNumber,
-          cage.rackNumber,
-          cage.cageNumber,
-          cage.barcode,
-          cage.labName ?? "",
-          cage.labCode ?? "",
-          cage.animalIdentifiers.join(" "),
-          cage.animalLabIdentifiers.join(" "),
-          cage.sexComposition,
-          cage.strainSummary,
-          cage.projectSummary,
-          cage.chargeCategoryName ?? "",
-          cage.chargeState,
-        ]
-          .join(" ")
-          .toLowerCase();
-        const matchesSearch = haystack.includes(deferredSearch.toLowerCase());
-        const matchesStatus = statusFilter === "all" ? true : cage.status === statusFilter;
-        const matchesLab = labFilter === "all" ? true : cage.labId === labFilter;
-        const matchesChargeCategory =
-          chargeCategoryFilter === "all" ? true : cage.chargeCategoryId === chargeCategoryFilter;
-        const matchesChargeState = chargeStateFilter === "all" ? true : cage.chargeState === chargeStateFilter;
-        const matchesOccupancy =
-          occupancyFilter === "all"
-            ? true
-            : occupancyFilter === "occupied"
-              ? cage.occupantCount > 0
-              : cage.occupantCount === 0;
-        const sexComposition = cage.sexComposition.toLowerCase();
-        const matchesSex =
-          sexFilter === "all"
-            ? true
-            : sexFilter === "mixed"
-              ? sexComposition.includes("m") && sexComposition.includes("f")
-              : sexComposition.includes(sexFilter === "male" ? "m" : sexFilter === "female" ? "f" : "u");
-        const matchesWarnings = warningsOnly ? cage.warningCount > 0 : true;
-
-        return (
-          matchesSearch &&
-          matchesStatus &&
-          matchesLab &&
-          matchesChargeCategory &&
-          matchesChargeState &&
-          matchesOccupancy &&
-          matchesSex &&
-          matchesWarnings
-        );
-      }),
-    [
-      data,
-      deferredSearch,
-      statusFilter,
-      labFilter,
-      chargeCategoryFilter,
-      chargeStateFilter,
-      occupancyFilter,
-      sexFilter,
-      warningsOnly,
-    ],
+export function CageTable({ data, filterOptions, page, pageCount, pageSize, query, totalCount }: CageTableProps) {
+  const filtersActive = Boolean(
+    query.search ||
+    query.status !== "all" ||
+    query.labId !== "all" ||
+    query.chargeCategoryId !== "all" ||
+    query.chargeState !== "all" ||
+    query.occupancy !== "all" ||
+    query.sex !== "all" ||
+    query.warningsOnly,
   );
-
-  const visibleData = useMemo(() => filteredData.slice(0, visibleCount), [filteredData, visibleCount]);
   const currentViewExportHref = useMemo(() => {
     const params = new URLSearchParams();
 
-    if (search.trim()) {
-      params.set("search", search.trim());
+    if (query.search) {
+      params.set("search", query.search);
     }
 
-    if (statusFilter !== "all") {
-      params.set("status", statusFilter);
+    if (query.status !== "all") {
+      params.set("status", query.status);
     }
 
-    if (warningsOnly) {
+    if (query.warningsOnly) {
       params.set("warningsOnly", "true");
     }
 
-    const query = params.toString();
+    const serializedQuery = params.toString();
 
-    return `/api/exports/cages${query ? `?${query}` : ""}`;
-  }, [search, statusFilter, warningsOnly]);
+    return `/api/exports/cages${serializedQuery ? `?${serializedQuery}` : ""}`;
+  }, [query.search, query.status, query.warningsOnly]);
 
   const currentViewPrintHref = useMemo(() => {
     const params = new URLSearchParams();
 
-    if (search.trim()) {
-      params.set("search", search.trim());
+    if (query.search) {
+      params.set("search", query.search);
     }
 
-    if (statusFilter !== "all") {
-      params.set("status", statusFilter);
+    if (query.status !== "all") {
+      params.set("status", query.status);
     }
 
-    if (warningsOnly) {
+    if (query.warningsOnly) {
       params.set("warningsOnly", "true");
     }
 
-    const query = params.toString();
+    const serializedQuery = params.toString();
 
-    return `/cages/labels${query ? `?${query}` : ""}`;
-  }, [search, statusFilter, warningsOnly]);
+    return `/cages/labels${serializedQuery ? `?${serializedQuery}` : ""}`;
+  }, [query.search, query.status, query.warningsOnly]);
 
   return (
     <div className="space-y-4" data-testid="cage-table">
       <div className="space-y-2.5">
-        <div className="filter-toolbar">
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search cage, animal, lab, strain, project"
-            data-testid="cage-search"
-          />
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
-            className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
-          >
-            <option value="all">All statuses</option>
-            <option value="active">Active</option>
-            <option value="breeding">Breeding</option>
-            <option value="experiment">Experiment</option>
-            <option value="quarantine">Quarantine</option>
-            <option value="retired">Retired</option>
-            <option value="closed">Closed</option>
-          </select>
-          <label className="flex min-h-11 min-w-0 items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--muted)]">
-            <input checked={warningsOnly} onChange={(event) => setWarningsOnly(event.target.checked)} type="checkbox" />
-            <span className="truncate">Warnings only</span>
-          </label>
-        </div>
-        <details className="group rounded-lg border border-[var(--line)] bg-white/42">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 text-sm font-medium text-[var(--muted)] [&::-webkit-details-marker]:hidden">
-            Advanced filters
-            <span className="group-open:hidden">+</span>
-            <span className="hidden group-open:inline">-</span>
-          </summary>
-          <div className="grid min-w-0 gap-3 border-t border-[var(--line)] p-3 sm:grid-cols-2 lg:grid-cols-5">
+        <Form action="/cages" className="space-y-2.5" scroll={false}>
+          <div className="filter-toolbar">
+            <Input
+              defaultValue={query.search}
+              name="search"
+              placeholder="Search cage, animal, lab, strain, project"
+              data-testid="cage-search"
+            />
             <select
-              value={labFilter}
-              onChange={(event) => setLabFilter(event.target.value)}
+              aria-label="Filter cages by status"
               className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+              defaultValue={query.status}
+              name="status"
             >
-              <option value="all">All labs</option>
-              {labOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
+              <option value="all">All statuses</option>
+              <option value="active">Active</option>
+              <option value="breeding">Breeding</option>
+              <option value="experiment">Experiment</option>
+              <option value="quarantine">Quarantine</option>
+              <option value="retired">Retired</option>
+              <option value="closed">Closed</option>
             </select>
-            <select
-              value={chargeCategoryFilter}
-              onChange={(event) => setChargeCategoryFilter(event.target.value)}
-              className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+            <label className="flex min-h-11 min-w-0 items-center gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm text-[var(--muted)]">
+              <input defaultChecked={query.warningsOnly} name="warningsOnly" type="checkbox" value="true" />
+              <span className="truncate">Warnings only</span>
+            </label>
+            <button
+              className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)]"
+              data-testid="cage-filter-submit"
+              type="submit"
             >
-              <option value="all">All rates</option>
-              {chargeCategoryOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <select
-              value={chargeStateFilter}
-              onChange={(event) => setChargeStateFilter(event.target.value as typeof chargeStateFilter)}
-              className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
-            >
-              <option value="all">All charge states</option>
-              <option value="chargeable">Chargeable</option>
-              <option value="unpriced">Unpriced</option>
-              <option value="exited">Exited</option>
-            </select>
-            <select
-              value={occupancyFilter}
-              onChange={(event) => setOccupancyFilter(event.target.value as typeof occupancyFilter)}
-              className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
-            >
-              <option value="all">All occupancy</option>
-              <option value="occupied">Occupied</option>
-              <option value="empty">Empty</option>
-            </select>
-            <select
-              value={sexFilter}
-              onChange={(event) => setSexFilter(event.target.value as typeof sexFilter)}
-              className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
-            >
-              <option value="all">All sex mix</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="mixed">Mixed</option>
-              <option value="unknown">Unknown</option>
-            </select>
+              Apply filters
+            </button>
           </div>
-        </details>
+          <details className="group rounded-lg border border-[var(--line)] bg-white/42" open={Boolean(
+            query.labId !== "all" ||
+            query.chargeCategoryId !== "all" ||
+            query.chargeState !== "all" ||
+            query.occupancy !== "all" ||
+            query.sex !== "all"
+          )}>
+            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-3 text-sm font-medium text-[var(--muted)] [&::-webkit-details-marker]:hidden">
+              Advanced filters
+              <span className="group-open:hidden">+</span>
+              <span className="hidden group-open:inline">-</span>
+            </summary>
+            <div className="grid min-w-0 gap-3 border-t border-[var(--line)] p-3 sm:grid-cols-2 lg:grid-cols-5">
+              <select
+                aria-label="Filter cages by lab"
+                className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+                defaultValue={query.labId}
+                name="labId"
+              >
+                <option value="all">All labs</option>
+                {filterOptions.labs.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+              <select
+                aria-label="Filter cages by rate"
+                className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+                defaultValue={query.chargeCategoryId}
+                name="chargeCategoryId"
+              >
+                <option value="all">All rates</option>
+                {filterOptions.chargeCategories.map((option) => (
+                  <option key={option.id} value={option.id}>{option.label}</option>
+                ))}
+              </select>
+              <select
+                aria-label="Filter cages by charge state"
+                className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+                defaultValue={query.chargeState}
+                name="chargeState"
+              >
+                <option value="all">All charge states</option>
+                <option value="chargeable">Chargeable</option>
+                <option value="unpriced">Unpriced</option>
+                <option value="exited">Exited</option>
+              </select>
+              <select
+                aria-label="Filter cages by occupancy"
+                className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+                defaultValue={query.occupancy}
+                name="occupancy"
+              >
+                <option value="all">All occupancy</option>
+                <option value="occupied">Occupied</option>
+                <option value="empty">Empty</option>
+              </select>
+              <select
+                aria-label="Filter cages by sex mix"
+                className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)]"
+                defaultValue={query.sex}
+                name="sex"
+              >
+                <option value="all">All sex mix</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="mixed">Mixed</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </div>
+          </details>
+          <input name="pageSize" type="hidden" value={pageSize} />
+        </Form>
         <div className="utility-bar">
           <p className="text-sm text-[var(--muted)]">
-            Showing <span className="font-medium text-[var(--ink)]">{visibleData.length}</span> of{" "}
-            <span className="font-medium text-[var(--ink)]">{filteredData.length}</span> matching cages
-            {filteredData.length === data.length ? "" : (
-              <>
-                {" "}
-                from <span className="font-medium text-[var(--ink)]">{data.length}</span> total cages
-              </>
-            )}
+            <span className="font-medium text-[var(--ink)]">{totalCount}</span> matching cages across the authorized colony
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            {filtersActive ? (
+              <Link
+                className="inline-flex h-11 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 text-sm font-medium text-[var(--ink)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--page)] md:h-9"
+                href="/cages"
+              >
+                Clear filters
+              </Link>
+            ) : null}
             <Link
               href={currentViewPrintHref}
               prefetch={false}
@@ -400,15 +299,23 @@ export function CageTable({ data }: { data: CageListItem[] }) {
           </div>
         </div>
       </div>
-      <VisibleRecordControls
-        matchingCount={filteredData.length}
-        noun="cages"
-        onShowAll={() => setVisibleCount(filteredData.length)}
-        onShowMore={() =>
-          setVisibleCount((current) => Math.min(current + VISIBLE_RECORD_BATCH, filteredData.length))
-        }
-        totalCount={data.length}
-        visibleCount={visibleData.length}
+      <InventoryPagination
+        basePath="/cages"
+        page={page}
+        pageCount={pageCount}
+        pageSize={pageSize}
+        query={{
+          search: query.search,
+          status: query.status,
+          labId: query.labId,
+          chargeCategoryId: query.chargeCategoryId,
+          chargeState: query.chargeState,
+          occupancy: query.occupancy,
+          sex: query.sex,
+          warningsOnly: query.warningsOnly,
+          pageSize,
+        }}
+        totalCount={totalCount}
       />
       <div className="data-table-wrap hidden md:block">
         <table className="data-table compact-table min-w-[960px]">
@@ -420,7 +327,7 @@ export function CageTable({ data }: { data: CageListItem[] }) {
             </tr>
           </thead>
           <tbody>
-            {visibleData.map((cage) => (
+            {data.map((cage) => (
               <tr
                 className={cage.warningCount ? "triage-row-warning" : undefined}
                 key={cage.id}
@@ -484,7 +391,7 @@ export function CageTable({ data }: { data: CageListItem[] }) {
       </div>
       <div className="md:hidden">
         <div className="row-list">
-          {visibleData.map((cage) => (
+          {data.map((cage) => (
             <article
               key={cage.id}
               className={`record-row ${cage.warningCount ? "record-row-warning" : ""}`}
@@ -572,7 +479,7 @@ export function CageTable({ data }: { data: CageListItem[] }) {
               </tr>
             </thead>
             <tbody>
-              {visibleData.map((cage) => (
+              {data.map((cage) => (
                 <tr key={cage.id}>
                   <td className="min-w-[10rem]">
                     <Link className="wrap-value font-medium hover:text-[var(--accent)]" href={`/cages/${cage.id}`}>
@@ -594,7 +501,7 @@ export function CageTable({ data }: { data: CageListItem[] }) {
           </table>
         </div>
       </details>
-      {filteredData.length ? null : (
+      {data.length ? null : (
         <div className="rounded-2xl border border-dashed border-[var(--line)] bg-[var(--surface-2)] px-4 py-6 text-center text-sm text-[var(--muted)]">
           No cages match the current filters. Clear the search, widen the status filter, or export the full cage list
           instead.

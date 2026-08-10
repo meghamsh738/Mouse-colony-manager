@@ -1,9 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import { compareDesc, differenceInDays } from "date-fns";
+import type { Prisma } from "@prisma/client";
 
 import { getCageCapacityState, resolveEffectiveCageCapacity } from "@/lib/cage-capacity";
-import { canManageLab, canViewLab, getActorLabAccess, type LabActor } from "@/lib/lab-access";
+import {
+  canManageLab,
+  canViewLab,
+  getActorLabAccess,
+  type ActorLabAccess,
+  type LabActor,
+} from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
 import type {
   Alert,
@@ -19,6 +26,74 @@ type CageRuleContext = {
   mixedSexHoldingAllowed: boolean;
   today: string;
 };
+
+export const CAGE_INVENTORY_DEFAULT_PAGE_SIZE = 80;
+export const CAGE_INVENTORY_MAX_PAGE_SIZE = 100;
+
+const cageInventoryStatuses: CageStatus[] = ["active", "breeding", "quarantine", "experiment", "retired", "closed"];
+const cageChargeStates = ["chargeable", "unpriced", "exited"] as const;
+const cageOccupancyFilters = ["occupied", "empty"] as const;
+const cageSexFilters = ["male", "female", "mixed", "unknown"] as const;
+
+export type CageInventoryQuery = {
+  search: string;
+  status: "all" | CageStatus;
+  labId: string;
+  chargeCategoryId: string;
+  chargeState: "all" | (typeof cageChargeStates)[number];
+  occupancy: "all" | (typeof cageOccupancyFilters)[number];
+  sex: "all" | (typeof cageSexFilters)[number];
+  warningsOnly: boolean;
+  page: number;
+  pageSize: number;
+};
+
+export type CageInventoryPageView = {
+  items: CageListItem[];
+  totalCount: number;
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  query: CageInventoryQuery;
+  filterOptions: {
+    labs: Array<{ id: string; label: string }>;
+    chargeCategories: Array<{ id: string; label: string }>;
+  };
+};
+
+type RawCageInventoryQuery = Record<string, string | string[] | undefined>;
+
+function firstCageQueryValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function boundedCagePositiveInteger(value: string | undefined, fallback: number, maximum: number) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
+}
+
+function normalizedCageChoice<T extends string>(value: string | undefined, choices: readonly T[]): "all" | T {
+  return value && choices.includes(value as T) ? value as T : "all";
+}
+
+export function normalizeCageInventoryQuery(query: RawCageInventoryQuery = {}): CageInventoryQuery {
+  return {
+    search: (firstCageQueryValue(query.search) ?? "").trim().slice(0, 120),
+    status: normalizedCageChoice(firstCageQueryValue(query.status), cageInventoryStatuses),
+    labId: (firstCageQueryValue(query.labId) ?? "all").trim().slice(0, 120) || "all",
+    chargeCategoryId: (firstCageQueryValue(query.chargeCategoryId) ?? "all").trim().slice(0, 120) || "all",
+    chargeState: normalizedCageChoice(firstCageQueryValue(query.chargeState), cageChargeStates),
+    occupancy: normalizedCageChoice(firstCageQueryValue(query.occupancy), cageOccupancyFilters),
+    sex: normalizedCageChoice(firstCageQueryValue(query.sex), cageSexFilters),
+    warningsOnly: firstCageQueryValue(query.warningsOnly) === "true",
+    page: boundedCagePositiveInteger(firstCageQueryValue(query.page), 1, 100_000),
+    pageSize: boundedCagePositiveInteger(
+      firstCageQueryValue(query.pageSize),
+      CAGE_INVENTORY_DEFAULT_PAGE_SIZE,
+      CAGE_INVENTORY_MAX_PAGE_SIZE,
+    ),
+  };
+}
 
 function getReferenceDate() {
   return process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString();
@@ -310,18 +385,266 @@ function getCageChargeState(cage: {
   return cage.chargePeriods.length ? ("chargeable" as const) : ("unpriced" as const);
 }
 
-export async function getCageListView(
-  actor?: LabActor,
-  options: { includeTerminalAnimals?: boolean } = {},
-): Promise<CageListItem[]> {
-  const rules = await getCageRuleContext();
-  const access = actor ? await getActorLabAccess(actor) : null;
-  const cages = await prisma.cage.findMany({
+type CageListViewOptions = {
+  includeTerminalAnimals?: boolean;
+  where?: Prisma.CageWhereInput;
+  skip?: number;
+  take?: number;
+};
+
+type CageListContext = {
+  access: ActorLabAccess | null;
+  rules: CageRuleContext;
+};
+
+function cageChargeStateWhere(state: CageInventoryQuery["chargeState"]): Prisma.CageWhereInput | null {
+  if (state === "chargeable") {
+    return { active: true, status: { not: "closed" }, chargePeriods: { some: { endedAt: null } } };
+  }
+
+  if (state === "unpriced") {
+    return { active: true, status: { not: "closed" }, chargePeriods: { none: { endedAt: null } } };
+  }
+
+  if (state === "exited") {
+    return { OR: [{ active: false }, { status: "closed" }] };
+  }
+
+  return null;
+}
+
+function cageOccupancyWhere(occupancy: CageInventoryQuery["occupancy"]): Prisma.CageWhereInput | null {
+  if (occupancy === "occupied") return { animals: { some: { outcomeStatus: "alive" } } };
+  if (occupancy === "empty") return { animals: { none: { outcomeStatus: "alive" } } };
+  return null;
+}
+
+function cageSexWhere(sex: CageInventoryQuery["sex"]): Prisma.CageWhereInput | null {
+  const liveSex = (value: "male" | "female" | "unknown"): Prisma.AnimalWhereInput => ({
+    outcomeStatus: "alive",
+    sex: value,
+  });
+
+  if (sex === "mixed") {
+    return {
+      AND: [
+        { animals: { some: liveSex("male") } },
+        { animals: { some: liveSex("female") } },
+      ],
+    };
+  }
+
+  if (sex !== "all") return { animals: { some: liveSex(sex) } };
+  return null;
+}
+
+function cageAnimalSearchWhere(
+  access: ActorLabAccess,
+  search: string,
+): Prisma.CageWhereInput[] {
+  const animalSearch = (labId?: string): Prisma.AnimalWhereInput => ({
+    outcomeStatus: "alive",
+    ...(labId ? { owningLabId: labId } : {}),
+    OR: [
+      { animalId: { contains: search, mode: "insensitive" } },
+      { labId: { contains: search, mode: "insensitive" } },
+      { strain: { name: { contains: search, mode: "insensitive" } } },
+      {
+        projectAllocations: {
+          some: {
+            endedAt: null,
+            project: {
+              ...(labId ? { labId } : {}),
+              projectCode: { contains: search, mode: "insensitive" },
+            },
+          },
+        },
+      },
+    ],
+  });
+
+  if (access.canViewAll) return [{ animals: { some: animalSearch() } }];
+  return access.memberLabIds.map((labId) => ({
+    labId,
+    animals: { some: animalSearch(labId) },
+  }));
+}
+
+function buildCageInventoryWhere(
+  access: ActorLabAccess,
+  query: CageInventoryQuery,
+  warningCageIds?: string[],
+): Prisma.CageWhereInput {
+  const normalizedSearch = query.search.trim();
+  const normalizedSearchLower = normalizedSearch.toLowerCase();
+  const searchStatus = cageInventoryStatuses.find((status) => status === normalizedSearchLower);
+  const searchChargeState = cageChargeStates.find((state) => state === normalizedSearchLower);
+  const chargeStateFilter = cageChargeStateWhere(query.chargeState);
+  const occupancyFilter = cageOccupancyWhere(query.occupancy);
+  const sexFilter = cageSexWhere(query.sex);
+  const searchChargeStateFilter = searchChargeState ? cageChargeStateWhere(searchChargeState) : null;
+  const filters: Prisma.CageWhereInput[] = [
+    ...(query.status !== "all" ? [{ status: query.status }] : []),
+    ...(query.labId !== "all" ? [{ labId: query.labId }] : []),
+    ...(query.chargeCategoryId !== "all"
+      ? [{ chargePeriods: { some: { endedAt: null, categoryId: query.chargeCategoryId } } }]
+      : []),
+    ...(chargeStateFilter ? [chargeStateFilter] : []),
+    ...(occupancyFilter ? [occupancyFilter] : []),
+    ...(sexFilter ? [sexFilter] : []),
+    ...(warningCageIds ? [{ id: { in: warningCageIds } }] : []),
+  ];
+
+  return {
+    ...(access.canViewAll ? {} : { labId: { in: access.memberLabIds } }),
+    ...(filters.length ? { AND: filters } : {}),
+    ...(normalizedSearch
+      ? {
+          OR: [
+            { cageNumber: { contains: normalizedSearch, mode: "insensitive" } },
+            { barcode: { contains: normalizedSearch, mode: "insensitive" } },
+            { room: { roomNumber: { contains: normalizedSearch, mode: "insensitive" } } },
+            { rack: { rackNumber: { contains: normalizedSearch, mode: "insensitive" } } },
+            { lab: { name: { contains: normalizedSearch, mode: "insensitive" } } },
+            { lab: { code: { contains: normalizedSearch, mode: "insensitive" } } },
+            ...cageAnimalSearchWhere(access, normalizedSearch),
+            {
+              chargePeriods: {
+                some: {
+                  endedAt: null,
+                  category: {
+                    OR: [
+                      { name: { contains: normalizedSearch, mode: "insensitive" } },
+                      { code: { contains: normalizedSearch, mode: "insensitive" } },
+                    ],
+                  },
+                },
+              },
+            },
+            ...(searchStatus ? [{ status: searchStatus }] : []),
+            ...(searchChargeStateFilter ? [searchChargeStateFilter] : []),
+          ],
+        }
+      : {}),
+  };
+}
+
+async function getWarningCageIds(
+  where: Prisma.CageWhereInput,
+  rules: CageRuleContext,
+  access: ActorLabAccess,
+) {
+  const candidates = await prisma.cage.findMany({
+    where,
+    select: {
+      id: true,
+      labId: true,
+      status: true,
+      cageNumber: true,
+      capacityOverride: true,
+      rack: { select: { rackNumber: true } },
+      room: { select: { roomNumber: true, facility: { select: { maxCageOccupancy: true } } } },
+      animals: {
+        where: { outcomeStatus: "alive" },
+        select: { owningLabId: true, sex: true },
+      },
+      healthNotes: {
+        where: {
+          resolved: false,
+          OR: [{ followupRequired: true }, { severity: { in: ["warning", "critical"] } }],
+        },
+        select: {
+          id: true,
+          labId: true,
+          severity: true,
+          followupRequired: true,
+          resolved: true,
+          createdAt: true,
+        },
+      },
+    },
+  });
+  if (!candidates.length) return [];
+
+  const manualAlerts = await prisma.alert.findMany({
     where: {
+      entityType: "cage",
+      entityId: { in: candidates.map((cage) => cage.id) },
+      status: "open",
+      ...(access.canViewAll ? {} : { labId: { in: access.memberLabIds } }),
+    },
+    select: { entityId: true, labId: true },
+  });
+  const cageLabById = new Map(candidates.map((cage) => [cage.id, cage.labId]));
+  const manualWarningIds = new Set(
+    manualAlerts.flatMap((alert) => alert.labId === cageLabById.get(alert.entityId) ? [alert.entityId] : []),
+  );
+
+  return candidates.flatMap((cage) => {
+    const animals = cage.animals.filter((animal) => animal.owningLabId === cage.labId);
+    const healthNotes = cage.healthNotes
+      .filter((note) => note.labId === cage.labId)
+      .map((note) => ({ ...note, note: "" }));
+    const hasRuleWarning = buildCageRuleAlerts({ ...cage, animals, healthNotes }, rules).length > 0;
+    return hasRuleWarning || manualWarningIds.has(cage.id) ? [cage.id] : [];
+  });
+}
+
+async function getCageInventoryFilterOptions(access: ActorLabAccess) {
+  const cageScope = access.canViewAll ? {} : { labId: { in: access.memberLabIds } };
+  const [labs, chargeCategories] = await Promise.all([
+    prisma.lab.findMany({
+      where: {
+        ...(access.canViewAll ? {} : { id: { in: access.memberLabIds } }),
+        cages: { some: {} },
+      },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, code: true },
+    }),
+    prisma.cageChargeCategory.findMany({
+      where: {
+        chargePeriods: {
+          some: {
+            endedAt: null,
+            cage: cageScope,
+          },
+        },
+      },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, code: true },
+    }),
+  ]);
+
+  return {
+    labs: labs.map((lab) => ({ id: lab.id, label: `${lab.name} (${lab.code})` })),
+    chargeCategories: chargeCategories.map((category) => ({ id: category.id, label: category.name })),
+  };
+}
+
+async function getCageListItems(
+  actor?: LabActor,
+  options: CageListViewOptions = {},
+  context?: CageListContext,
+): Promise<CageListItem[]> {
+  const [rules, access] = context
+    ? [context.rules, context.access]
+    : await Promise.all([getCageRuleContext(), actor ? getActorLabAccess(actor) : Promise.resolve(null)]);
+  const cages = await prisma.cage.findMany({
+    where: options.where ?? {
       ...(access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : {}),
     },
     orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
-    include: {
+    ...(options.skip ? { skip: options.skip } : {}),
+    ...(options.take ? { take: options.take } : {}),
+    select: {
+      id: true,
+      labId: true,
+      roomId: true,
+      cageNumber: true,
+      barcode: true,
+      capacityOverride: true,
+      status: true,
+      active: true,
       room: { select: { roomNumber: true, facility: { select: { maxCageOccupancy: true } } } },
       rack: { select: { rackNumber: true } },
       lab: { select: { id: true, name: true, code: true } },
@@ -330,7 +653,10 @@ export async function getCageListView(
         where: { endedAt: null },
         take: 1,
         orderBy: { startedAt: "desc" },
-        include: {
+        select: {
+          id: true,
+          dailyRateCents: true,
+          currencyCode: true,
           category: {
             select: {
               id: true,
@@ -344,12 +670,20 @@ export async function getCageListView(
       },
       animals: {
         where: options.includeTerminalAnimals ? {} : { outcomeStatus: "alive" },
-        include: {
+        select: {
+          id: true,
+          owningLabId: true,
+          animalId: true,
+          labId: true,
+          sex: true,
+          dob: true,
+          status: true,
+          healthStatus: true,
           strain: { select: { name: true } },
-          alleles: { include: { allele: { select: { name: true } } } },
+          alleles: { select: { zygosity: true, allele: { select: { name: true } } } },
           projectAllocations: {
             where: { endedAt: null },
-            include: {
+            select: {
               project: {
                 select: {
                   projectCode: true,
@@ -361,7 +695,11 @@ export async function getCageListView(
         },
       },
       healthNotes: {
-        where: { cageId: { not: null } },
+        where: {
+          cageId: { not: null },
+          resolved: false,
+          OR: [{ followupRequired: true }, { severity: { in: ["warning", "critical"] } }],
+        },
         select: {
           id: true,
           labId: true,
@@ -476,6 +814,41 @@ export async function getCageListView(
       })),
     };
   });
+}
+
+export async function getCageListView(
+  actor?: LabActor,
+  options: Pick<CageListViewOptions, "includeTerminalAnimals"> = {},
+): Promise<CageListItem[]> {
+  return getCageListItems(actor, options);
+}
+
+export async function getCageInventoryPageView(
+  actor: LabActor,
+  rawQuery: RawCageInventoryQuery = {},
+): Promise<CageInventoryPageView> {
+  const query = normalizeCageInventoryQuery(rawQuery);
+  const [rules, access] = await Promise.all([getCageRuleContext(), getActorLabAccess(actor)]);
+  const baseWhere = buildCageInventoryWhere(access, query);
+  const warningCageIds = query.warningsOnly ? await getWarningCageIds(baseWhere, rules, access) : undefined;
+  const where = buildCageInventoryWhere(access, query, warningCageIds);
+  const skip = (query.page - 1) * query.pageSize;
+  const context = { access, rules };
+  const [totalCount, items, filterOptions] = await Promise.all([
+    prisma.cage.count({ where }),
+    getCageListItems(actor, { where, skip, take: query.pageSize }, context),
+    getCageInventoryFilterOptions(access),
+  ]);
+
+  return {
+    items,
+    totalCount,
+    page: query.page,
+    pageCount: Math.max(1, Math.ceil(totalCount / query.pageSize)),
+    pageSize: query.pageSize,
+    query,
+    filterOptions,
+  };
 }
 
 type PrintableCageLabelFilters = {
