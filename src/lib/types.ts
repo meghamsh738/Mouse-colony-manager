@@ -864,6 +864,30 @@ export interface AnimalTransferWorkspaceView {
   };
   animalOptions: AnimalTransferOption[];
   cageOptions: CageTransferOption[];
+  pinnedDestination?: CageTransferOption;
+  animalResults: TransferResultPage;
+  destinationResults: TransferResultPage;
+  query: AnimalTransferWorkspaceQuery;
+}
+
+export interface TransferResultPage {
+  totalCount: number;
+  page: number;
+  pageCount: number;
+  pageSize: number;
+}
+
+export interface AnimalTransferWorkspaceQuery {
+  animalSearch: string;
+  animalPage: number;
+  destinationSearch: string;
+  destinationPage: number;
+  pageSize: number;
+}
+
+export interface AnimalPresenceCagePageView extends TransferResultPage {
+  items: CageTransferOption[];
+  search: string;
 }
 
 export interface BreedingSuggestion {

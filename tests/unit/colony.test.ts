@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { evaluateBreedingRuleRisks, getBreedingOverviewView, getBreedingSuggestionsView } from "@/lib/breeding-read";
 import { getAnimalDetailView, getAnimalListView } from "@/lib/animals-read";
 import {
-  getAnimalTransferWorkspaceView,
+  getAnimalTransferWorkspacePageView,
   getCageDetailView,
   getCageListView,
   getPrintableCageLabelView,
@@ -1328,13 +1328,13 @@ describe("colony logic", () => {
 
   it("builds animal transfer options with active destination cage context", async () => {
     await resetColonyState();
-    const workspace = await getAnimalTransferWorkspaceView("cage-a101-003");
+    const workspace = await getAnimalTransferWorkspacePageView("cage-a101-003", resolvedGlobalActor, { animalSearch: "CM-26004" });
 
     expect(workspace.defaultDestinationCageId).toBe("cage-a101-003");
     expect(workspace.defaultDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(workspace.animalOptions.some((animal) => animal.animalId === "CM-26004")).toBe(true);
     expect(workspace.animalOptions.find((animal) => animal.animalId === "CM-26004")?.currentCageBarcode).toBe("CM-A101-002");
-    expect(workspace.animalOptions.find((animal) => animal.animalId === "CM-26011")?.currentCageBarcode).toBe("CM-A101-002");
+    expect(workspace.animalOptions).toHaveLength(1);
     expect(workspace.cageOptions.some((cage) => cage.id === "cage-a101-003" && cage.barcode === "CM-A101-003")).toBe(true);
     expect(workspace.cageOptions.every((cage) => cage.status !== "closed" && cage.status !== "retired")).toBe(true);
   });

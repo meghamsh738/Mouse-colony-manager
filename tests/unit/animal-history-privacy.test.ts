@@ -5,10 +5,12 @@ const mocks = vi.hoisted(() => ({
   ruleFindMany: vi.fn(),
   animalCount: vi.fn(),
   animalFindMany: vi.fn(),
-  animalFindUnique: vi.fn(),
+  animalFindFirst: vi.fn(),
   alertFindMany: vi.fn(),
   experimentFindMany: vi.fn(),
   experimentAssignmentCount: vi.fn(),
+  healthNoteFindFirst: vi.fn(),
+  genotypingRecordFindFirst: vi.fn(),
   alleleFindMany: vi.fn(),
   projectFindMany: vi.fn(),
 }));
@@ -23,10 +25,12 @@ vi.mock("@/lib/lab-access", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     ruleConfig: { findMany: mocks.ruleFindMany },
-    animal: { count: mocks.animalCount, findMany: mocks.animalFindMany, findUnique: mocks.animalFindUnique },
+    animal: { count: mocks.animalCount, findMany: mocks.animalFindMany, findFirst: mocks.animalFindFirst },
     alert: { findMany: mocks.alertFindMany },
     experiment: { findMany: mocks.experimentFindMany },
     experimentAssignment: { count: mocks.experimentAssignmentCount },
+    healthNote: { findFirst: mocks.healthNoteFindFirst },
+    genotypingRecord: { findFirst: mocks.genotypingRecordFindFirst },
     allele: { findMany: mocks.alleleFindMany },
     project: { findMany: mocks.projectFindMany },
   },
@@ -131,10 +135,12 @@ describe("transferred animal history privacy", () => {
     mocks.ruleFindMany.mockResolvedValue([]);
     mocks.animalCount.mockResolvedValue(1);
     mocks.animalFindMany.mockResolvedValue([transferredAnimal]);
-    mocks.animalFindUnique.mockResolvedValue(transferredAnimal);
+    mocks.animalFindFirst.mockResolvedValue(transferredAnimal);
     mocks.alertFindMany.mockResolvedValue([sourceAlert]);
     mocks.experimentFindMany.mockResolvedValue([]);
     mocks.experimentAssignmentCount.mockResolvedValue(0);
+    mocks.healthNoteFindFirst.mockResolvedValue(null);
+    mocks.genotypingRecordFindFirst.mockResolvedValue(null);
     mocks.alleleFindMany.mockResolvedValue([]);
     mocks.projectFindMany.mockResolvedValue([]);
   });
@@ -153,13 +159,39 @@ describe("transferred animal history privacy", () => {
 
   it("filters source-lab notes, genotype history, and alerts from destination lab detail", async () => {
     const detail = await getAnimalDetailView(transferredAnimal.id, actor);
-    const query = mocks.animalFindUnique.mock.calls[0]?.[0];
+    const query = mocks.animalFindFirst.mock.calls[0]?.[0];
 
+    expect(query.where).toEqual({ id: transferredAnimal.id, owningLabId: { in: ["lab-b"] } });
     expect(query.include.healthNotes.where.labId).toEqual({ in: ["lab-b"] });
+    expect(query.include.healthNotes.take).toBe(50);
+    expect(query.include.healthNotes.select.attachments.where.labId).toEqual({ in: ["lab-b"] });
     expect(query.include.genotypingRecords.where).toEqual({ labId: { in: ["lab-b"] } });
+    expect(query.include.genotypingRecords.take).toBe(50);
+    expect(query.include.sampleRecords).toMatchObject({ where: { labId: { in: ["lab-b"] } }, take: 50 });
+    expect(query.include.statusEvents.take).toBe(50);
+    expect(query.include.experimentAssignments.take).toBe(50);
+    expect(mocks.healthNoteFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ animalId: transferredAnimal.id, labId: { in: ["lab-b"] } }),
+    }));
+    expect(mocks.genotypingRecordFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ animalId: transferredAnimal.id, labId: { in: ["lab-b"] }, status: "pending" }),
+    }));
     expect(detail?.notes).toEqual([]);
     expect(detail?.genotypingRecords).toEqual([]);
     expect(detail?.alerts.map((alert) => alert.message).join(" ")).not.toContain("SOURCE LAB PRIVATE");
+  });
+
+  it("fails closed in the root Prisma query before any follow-up detail reads", async () => {
+    mocks.animalFindFirst.mockResolvedValue(null);
+
+    await expect(getAnimalDetailView("foreign-animal", actor)).resolves.toBeNull();
+
+    expect(mocks.animalFindFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: "foreign-animal", owningLabId: { in: ["lab-b"] } },
+    }));
+    expect(mocks.alertFindMany).not.toHaveBeenCalled();
+    expect(mocks.experimentFindMany).not.toHaveBeenCalled();
+    expect(mocks.experimentAssignmentCount).not.toHaveBeenCalled();
   });
 
   it("normalizes and bounds inventory query parameters", () => {

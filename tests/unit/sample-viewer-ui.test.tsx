@@ -26,6 +26,22 @@ const sample: SampleInventoryItem = {
   version: 3,
 };
 
+const inventoryProps = {
+  page: 1,
+  pageCount: 1,
+  pageSize: 80,
+  query: {
+    experimentId: "all",
+    page: 1,
+    pageSize: 80,
+    sampleType: "all",
+    search: "",
+    status: "all" as const,
+  },
+  sampleTypes: ["Tail DNA"],
+  totalCount: 1,
+};
+
 describe("biosample viewer controls", () => {
   it("renders inventory without mutation controls for viewers", () => {
     render(
@@ -33,6 +49,7 @@ describe("biosample viewer controls", () => {
         canManage={false}
         data={[sample]}
         experimentOptions={[{ id: "experiment-complete", label: "EXP-COMPLETE · Complete study", status: "completed" }]}
+        {...inventoryProps}
       />,
     );
 
@@ -51,6 +68,7 @@ describe("biosample viewer controls", () => {
           { id: "experiment-complete", label: "EXP-COMPLETE · Complete study", status: "completed" },
           { id: "experiment-other-complete", label: "EXP-OTHER · Other completed study", status: "completed" },
         ]}
+        {...inventoryProps}
       />,
     );
 

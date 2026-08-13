@@ -51,7 +51,8 @@ describe("notification provider transport security", () => {
     expect(source).toContain("NOTIFICATION_EMAIL_PROVIDER_SUPPORTS_IDEMPOTENCY");
     expect(source).toContain("hostname: pinned?.address");
     expect(source).toContain("servername: normalizeHostname(url.hostname)");
-    expect(source).toContain("providerRequest.setTimeout(10_000");
+    expect(source).toContain("providerRequest.setTimeout(timeoutMs");
+    expect(source).toContain("Email provider request exceeded its hard time limit.");
     expect(source).not.toContain("await fetch(provider.url");
   });
 

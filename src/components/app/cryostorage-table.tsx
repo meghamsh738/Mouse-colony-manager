@@ -1,11 +1,12 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import Form from "next/form";
+import Link from "next/link";
+import { useMemo } from "react";
 import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
-  getFilteredRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
@@ -14,11 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { CryostorageInlineEditForm } from "@/components/app/cryostorage-inline-edit-form";
 import { RowActionMenu } from "@/components/app/worksheet-shell";
-import {
-  INITIAL_VISIBLE_RECORDS,
-  VISIBLE_RECORD_BATCH,
-  VisibleRecordControls,
-} from "@/components/app/visible-record-controls";
+import { InventoryPagination } from "@/components/app/inventory-pagination";
+import type { CryostorageInventoryQuery } from "@/lib/cryostorage-read";
 import type { CryostorageInventoryItem } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -40,68 +38,19 @@ function statusVariant(status: CryostorageInventoryItem["status"]) {
   return "danger";
 }
 
-export function CryostorageTable({ canManage, data }: { canManage: boolean; data: CryostorageInventoryItem[] }) {
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | CryostorageInventoryItem["status"]>("all");
-  const [strainFilter, setStrainFilter] = useState("all");
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_RECORDS);
-  const deferredSearch = useDeferredValue(search);
+type CryostorageTableProps = {
+  canManage: boolean;
+  data: CryostorageInventoryItem[];
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  query: CryostorageInventoryQuery;
+  strainOptions: Array<{ id: string; label: string }>;
+  totalCount: number;
+};
 
-  const strainNames = useMemo(
-    () => Array.from(new Set(data.map((record) => record.strainName))).sort((left, right) => left.localeCompare(right)),
-    [data],
-  );
-
-  const filteredData = useMemo(
-    () =>
-      data.filter((record) => {
-        const haystack = [
-          record.sampleLabel,
-          record.materialType,
-          record.strainName,
-          record.projectCode ?? "",
-          record.storageLocation ?? "",
-          record.quantityLabel ?? "",
-          record.recoveryNotes ?? "",
-          record.notes ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
-
-        const matchesSearch = haystack.includes(deferredSearch.toLowerCase());
-        const matchesStatus = statusFilter === "all" ? true : record.status === statusFilter;
-        const matchesStrain = strainFilter === "all" ? true : record.strainName === strainFilter;
-
-        return matchesSearch && matchesStatus && matchesStrain;
-      }),
-    [data, deferredSearch, statusFilter, strainFilter],
-  );
-
-  useEffect(() => {
-    setVisibleCount(INITIAL_VISIBLE_RECORDS);
-  }, [data.length, deferredSearch, statusFilter, strainFilter]);
-
-  const visibleData = useMemo(() => filteredData.slice(0, visibleCount), [filteredData, visibleCount]);
-
-  const summary = useMemo(
-    () =>
-      filteredData.reduce(
-        (counts, record) => {
-          counts.total += 1;
-          counts[record.status] += 1;
-          return counts;
-        },
-        {
-          total: 0,
-          stored: 0,
-          reserved: 0,
-          recovered: 0,
-          depleted: 0,
-          discarded: 0,
-        },
-      ),
-    [filteredData],
-  );
+export function CryostorageTable({ canManage, data, page, pageCount, pageSize, query, strainOptions, totalCount }: CryostorageTableProps) {
+  const filtersActive = Boolean(query.search || query.status !== "all" || query.strainId !== "all");
 
   const columns = useMemo(
     () => [
@@ -169,28 +118,28 @@ export function CryostorageTable({ canManage, data }: { canManage: boolean; data
   // React Compiler compatibility warning is appropriate for this boundary.
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: visibleData,
+    data,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
 
   return (
     <div className="space-y-5" data-testid="cryostorage-table">
       <div className="space-y-3">
-        <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto]">
+        <Form action="/cryostorage" className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto_auto]" scroll={false}>
           <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            defaultValue={query.search}
+            name="search"
             placeholder="Search cryostorage label, strain, project, location, or notes"
             className="min-w-0"
             data-testid="cryostorage-search"
           />
           <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+            defaultValue={query.status}
+            name="status"
             className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
+            aria-label="Filter cryostorage by status"
           >
             <option value="all">All statuses</option>
             <option value="stored">Stored</option>
@@ -200,43 +149,33 @@ export function CryostorageTable({ canManage, data }: { canManage: boolean; data
             <option value="discarded">Discarded</option>
           </select>
           <select
-            value={strainFilter}
-            onChange={(event) => setStrainFilter(event.target.value)}
+            defaultValue={query.strainId}
+            name="strainId"
             className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
+            aria-label="Filter cryostorage by strain"
           >
             <option value="all">All strains</option>
-            {strainNames.map((strainName) => (
-              <option key={strainName} value={strainName}>
-                {strainName}
+            {strainOptions.map((strain) => (
+              <option key={strain.id} value={strain.id}>
+                {strain.label}
               </option>
             ))}
           </select>
-        </div>
-        <div className="count-strip">
-          <span>
-            Showing <span className="font-medium text-[var(--ink)]">{visibleData.length}</span> of{" "}
-            <span className="font-medium text-[var(--ink)]">{summary.total}</span> matching records
-          </span>
-          <span>
-            <span className="font-medium text-[var(--ink)]">{summary.stored}</span> stored
-          </span>
-          <span>
-            <span className="font-medium text-[var(--ink)]">{summary.reserved}</span> reserved
-          </span>
-          <span>
-            <span className="font-medium text-[var(--ink)]">{summary.recovered}</span> recovered
-          </span>
+          <input name="pageSize" type="hidden" value={pageSize} />
+          <button className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-white hover:bg-[var(--accent-strong)]" data-testid="cryostorage-filter-submit" type="submit">Apply filters</button>
+        </Form>
+        <div className="count-strip justify-between">
+          <span><span className="font-medium text-[var(--ink)]">{totalCount}</span> matching records across the authorized inventory</span>
+          {filtersActive ? <Link href="/cryostorage" className="text-sm font-medium text-[var(--accent)] hover:text-[var(--accent-strong)]">Clear filters</Link> : null}
         </div>
       </div>
-      <VisibleRecordControls
-        matchingCount={filteredData.length}
-        noun="cryostorage records"
-        onShowAll={() => setVisibleCount(filteredData.length)}
-        onShowMore={() =>
-          setVisibleCount((current) => Math.min(current + VISIBLE_RECORD_BATCH, filteredData.length))
-        }
-        totalCount={data.length}
-        visibleCount={visibleData.length}
+      <InventoryPagination
+        basePath="/cryostorage"
+        page={page}
+        pageCount={pageCount}
+        pageSize={pageSize}
+        query={{ pageSize, search: query.search, status: query.status, strainId: query.strainId }}
+        totalCount={totalCount}
       />
       <div className="grid gap-3 md:hidden">
         {table.getRowModel().rows.map((row) => {

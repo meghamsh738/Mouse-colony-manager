@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Camera, Keyboard, QrCode, ShieldCheck } from "lucide-react";
@@ -106,6 +106,19 @@ export function ScanLauncher({ quickCages = [] }: { quickCages?: QuickCage[] }) 
     }
   };
 
+  const openManualBarcode = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const barcode = String(new FormData(event.currentTarget).get("barcode") ?? "").trim();
+
+    if (!barcode) {
+      setError("Enter a cage barcode to continue.");
+      return;
+    }
+
+    setError(null);
+    router.push(`/scan/${encodeURIComponent(barcode)}`);
+  };
+
   return (
     <div className="space-y-5">
       <div className="space-y-5">
@@ -119,11 +132,12 @@ export function ScanLauncher({ quickCages = [] }: { quickCages?: QuickCage[] }) 
               <h2 className="mt-1 font-display text-xl font-semibold tracking-[-0.03em]">Open cage</h2>
             </div>
           </div>
-          <form action="/scan/lookup" className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+          <form action="/scan/lookup" className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]" onSubmit={openManualBarcode}>
             <Input
               data-testid="barcode-manual-input"
               name="barcode"
               placeholder="Enter cage barcode"
+              required
             />
             <Button type="submit" variant="default">
               Open cage

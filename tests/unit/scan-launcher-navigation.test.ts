@@ -11,6 +11,8 @@ describe("barcode scan navigation", () => {
 
     expect(source).toContain('import { useRouter } from "next/navigation";');
     expect(source).toContain("router.push(`/scan/${encodeURIComponent(results[0].rawValue)}`);");
+    expect(source).toContain("router.push(`/scan/${encodeURIComponent(barcode)}`);");
+    expect(source).toContain("onSubmit={openManualBarcode}");
     expect(source).not.toContain("window.location.assign(");
   });
 });

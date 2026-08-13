@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import Link from "next/link";
+import { useActionState, useState } from "react";
 
 import { FormFeedback } from "@/components/app/form-feedback";
 import { useSubmitGuard } from "@/components/app/use-submit-guard";
@@ -8,52 +9,39 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
-import type { AnimalTransferOption, AnimalTransferWorkspaceView } from "@/lib/types";
+import type { AnimalTransferWorkspaceView } from "@/lib/types";
 
 type AnimalTransferPanelProps = {
   action: (state: FormActionState | undefined, formData: FormData) => Promise<FormActionState>;
+  basePath: string;
   workspace: AnimalTransferWorkspaceView;
 };
 
-function getAnimalHaystack(animal: AnimalTransferOption) {
-  return [
-    animal.animalId,
-    animal.labId,
-    animal.sex,
-    animal.status,
-    animal.healthStatus,
-    animal.strain,
-    animal.currentCageBarcode,
-    animal.currentCageLabel,
-  ]
-    .join(" ")
-    .toLowerCase();
+function pageHref(basePath: string, workspace: AnimalTransferWorkspaceView, changes: Partial<AnimalTransferWorkspaceView["query"]>) {
+  const query = { ...workspace.query, ...changes };
+  const params = new URLSearchParams({ action: "move-mouse" });
+  if (query.animalSearch) params.set("animalSearch", query.animalSearch);
+  if (query.animalPage > 1) params.set("animalPage", String(query.animalPage));
+  if (query.destinationSearch) params.set("destinationSearch", query.destinationSearch);
+  if (query.destinationPage > 1) params.set("destinationPage", String(query.destinationPage));
+  if (query.pageSize !== 20) params.set("pageSize", String(query.pageSize));
+  return `${basePath}?${params.toString()}`;
 }
 
-export function AnimalTransferPanel({ action, workspace }: AnimalTransferPanelProps) {
+export function AnimalTransferPanel({ action, basePath, workspace }: AnimalTransferPanelProps) {
   const [state, formAction, pending] = useActionState(action, initialFormActionState);
   const handleSubmit = useSubmitGuard(pending);
-  const [search, setSearch] = useState("");
   const [selectedAnimalId, setSelectedAnimalId] = useState("");
   const [selectedDestinationId, setSelectedDestinationId] = useState(workspace.defaultDestinationCageId);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [movedAt, setMovedAt] = useState(workspace.defaultDate);
   const [reason, setReason] = useState("Transferred during routine cage round.");
 
-  const filteredAnimals = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-
-    if (!normalizedSearch) {
-      return workspace.animalOptions.slice(0, 5);
-    }
-
-    return workspace.animalOptions
-      .filter((animal) => getAnimalHaystack(animal).includes(normalizedSearch))
-      .slice(0, 8);
-  }, [search, workspace.animalOptions]);
-
+  const destinationOptions = workspace.pinnedDestination && !workspace.cageOptions.some((cage) => cage.id === workspace.pinnedDestination?.id)
+    ? [workspace.pinnedDestination, ...workspace.cageOptions]
+    : workspace.cageOptions;
   const selectedAnimal = workspace.animalOptions.find((animal) => animal.id === selectedAnimalId);
-  const selectedDestination = workspace.cageOptions.find((cage) => cage.id === selectedDestinationId);
+  const selectedDestination = destinationOptions.find((cage) => cage.id === selectedDestinationId);
   const sameCage = Boolean(selectedAnimal && selectedDestination && selectedAnimal.currentCageId === selectedDestination.id);
   const projectedOccupants =
     selectedDestination && selectedAnimal && !sameCage
@@ -87,7 +75,21 @@ export function AnimalTransferPanel({ action, workspace }: AnimalTransferPanelPr
   const commandKey = [workspace.commandNonce, selectedAnimalId, selectedDestinationId, movedAt, reason].join(":");
 
   return (
-    <form action={formAction} className="space-y-4" data-testid="animal-transfer-form" onSubmit={handleSubmit}>
+    <div className="space-y-4">
+      <form action={basePath} className="grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" method="get">
+        <input name="action" type="hidden" value="move-mouse" />
+        <label className="space-y-2 text-sm">
+          <span className="text-[var(--muted)]">Find animal</span>
+          <Input defaultValue={workspace.query.animalSearch} data-testid="animal-transfer-search" name="animalSearch" placeholder="Animal ID, cage, strain, or status" />
+        </label>
+        <label className="space-y-2 text-sm">
+          <span className="text-[var(--muted)]">Find destination</span>
+          <Input defaultValue={workspace.query.destinationSearch} data-testid="animal-transfer-destination-search" name="destinationSearch" placeholder="Barcode, room, rack, cage, or lab" />
+        </label>
+        <Button className="self-end" data-testid="animal-transfer-search-submit" type="submit" variant="subtle">Search</Button>
+      </form>
+      <p className="text-xs text-[var(--muted)]">Changing search or page clears the staged selection.</p>
+      <form action={formAction} className="space-y-4" data-testid="animal-transfer-form" onSubmit={handleSubmit}>
       <input name="animalId" type="hidden" value={selectedAnimalId} />
       <input name="toCageId" type="hidden" value={selectedDestinationId} />
       <input name="expectedVersion" type="hidden" value={selectedAnimal?.version ?? ""} />
@@ -97,15 +99,6 @@ export function AnimalTransferPanel({ action, workspace }: AnimalTransferPanelPr
       <div className="animal-transfer-grid grid gap-4">
         <div className="space-y-3">
           <label className="space-y-2 text-sm">
-            <span className="text-[var(--muted)]">Search</span>
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Animal, lab ID, cage, strain, sex, status"
-              data-testid="animal-transfer-search"
-            />
-          </label>
-          <label className="space-y-2 text-sm">
             <span className="text-[var(--muted)]">Animal</span>
             <select
               className="h-11 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 text-base text-[var(--ink)] md:text-sm"
@@ -114,7 +107,7 @@ export function AnimalTransferPanel({ action, workspace }: AnimalTransferPanelPr
               onChange={(event) => setSelectedAnimalId(event.target.value)}
             >
               <option value="">Choose an animal</option>
-              {filteredAnimals.map((animal) => (
+              {workspace.animalOptions.map((animal) => (
                 <option key={animal.id} value={animal.id}>
                   {animal.animalId} - {animal.currentCageBarcode} - {animal.strain}
                 </option>
@@ -122,7 +115,7 @@ export function AnimalTransferPanel({ action, workspace }: AnimalTransferPanelPr
             </select>
           </label>
           <div className="animal-transfer-results grid gap-2" aria-label="Animal search results">
-            {filteredAnimals.map((animal) => (
+            {workspace.animalOptions.map((animal) => (
               <button
                 key={animal.id}
                 className={`min-w-0 rounded-xl border px-3 py-2 text-left transition ${
@@ -154,6 +147,13 @@ export function AnimalTransferPanel({ action, workspace }: AnimalTransferPanelPr
               </button>
             ))}
           </div>
+          <div className="flex items-center justify-between gap-3 text-sm text-[var(--muted)]">
+            <span>{workspace.animalResults.totalCount} matches · page {workspace.animalResults.page} of {workspace.animalResults.pageCount}</span>
+            <div className="flex gap-2">
+              {workspace.animalResults.page > 1 ? <Link className="table-action" href={pageHref(basePath, workspace, { animalPage: workspace.animalResults.page - 1 })}>Previous</Link> : null}
+              {workspace.animalResults.page < workspace.animalResults.pageCount ? <Link className="table-action" href={pageHref(basePath, workspace, { animalPage: workspace.animalResults.page + 1 })}>Next</Link> : null}
+            </div>
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -165,7 +165,7 @@ export function AnimalTransferPanel({ action, workspace }: AnimalTransferPanelPr
               value={selectedDestinationId}
               onChange={(event) => setSelectedDestinationId(event.target.value)}
             >
-              {workspace.cageOptions.map((cage) => (
+              {destinationOptions.map((cage) => (
                 <option
                   disabled={Boolean(selectedAnimal && selectedAnimal.owningLabId !== cage.labId)}
                   key={cage.id}
@@ -176,6 +176,13 @@ export function AnimalTransferPanel({ action, workspace }: AnimalTransferPanelPr
               ))}
             </select>
           </label>
+          <div className="flex items-center justify-between gap-3 text-sm text-[var(--muted)]">
+            <span>{workspace.destinationResults.totalCount} matches · page {workspace.destinationResults.page} of {workspace.destinationResults.pageCount}</span>
+            <div className="flex gap-2">
+              {workspace.destinationResults.page > 1 ? <Link className="table-action" href={pageHref(basePath, workspace, { destinationPage: workspace.destinationResults.page - 1 })}>Previous</Link> : null}
+              {workspace.destinationResults.page < workspace.destinationResults.pageCount ? <Link className="table-action" href={pageHref(basePath, workspace, { destinationPage: workspace.destinationResults.page + 1 })}>Next</Link> : null}
+            </div>
+          </div>
           <div
             aria-label="Drop selected animal onto destination cage"
             className={`rounded-xl border p-4 transition ${
@@ -273,6 +280,7 @@ export function AnimalTransferPanel({ action, workspace }: AnimalTransferPanelPr
           {pending ? "Saving..." : "Confirm transfer"}
         </Button>
       </div>
-    </form>
+      </form>
+    </div>
   );
 }

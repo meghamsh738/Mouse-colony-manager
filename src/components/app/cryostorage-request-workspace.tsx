@@ -16,7 +16,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { initialFormActionState } from "@/lib/form-state";
-import type { CryostorageInventoryItem, CryostorageRequestItem } from "@/lib/types";
+import type { CryostorageRequestTarget } from "@/lib/cryostorage-read";
+import type { CryostorageRequestItem } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 type Option = { id: string; label: string };
@@ -69,7 +70,7 @@ export function CryostorageRequestForm({
   defaultRequestedFor: string;
   labOptions: Option[];
   projectOptions: ProjectOption[];
-  records: CryostorageInventoryItem[];
+  records: CryostorageRequestTarget[];
   strainOptions: Option[];
 }) {
   const [state, action, pending] = useActionState(submitCryostorageRequestAction, initialFormActionState);

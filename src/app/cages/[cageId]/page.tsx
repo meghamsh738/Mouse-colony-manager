@@ -24,12 +24,12 @@ import { HighImpactWorkflowShell } from "@/components/app/high-impact-workflow-s
 import { LabTransferRequestForm } from "@/components/app/lab-transfer-workflow";
 import { OperationalSection } from "@/components/app/operational-section";
 import { PageHeader } from "@/components/app/page-header";
-import { getAnimalTransferWorkspaceView, getCageDetailView } from "@/lib/cages-read";
+import { getAnimalTransferWorkspacePageView, getCageClosureDestinationOptions, getCageDetailView } from "@/lib/cages-read";
 import { getLabTransferRequestOptions } from "@/lib/lab-transfer-read";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
-export default async function CageDetailPage({ params, searchParams }: { params: Promise<{ cageId: string }>; searchParams?: Promise<{ action?: string }> }) {
+export default async function CageDetailPage({ params, searchParams }: { params: Promise<{ cageId: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser({ capability: "cages:read" });
   const { cageId } = await params;
   const snapshot = await getCageDetailView(cageId, user);
@@ -42,7 +42,14 @@ export default async function CageDetailPage({ params, searchParams }: { params:
   }
 
   const isOperational = snapshot.cage.active && snapshot.cage.status !== "closed";
-  const transferWorkspace = canTransferAnimals && isOperational ? await getAnimalTransferWorkspaceView(cageId, user) : null;
+  const query = (await searchParams) ?? {};
+  const requestedAction = Array.isArray(query.action) ? query.action[0] : query.action;
+  const transferWorkspace = canTransferAnimals && isOperational && requestedAction === "move-mouse"
+    ? await getAnimalTransferWorkspacePageView(cageId, user, query)
+    : null;
+  const closureDestinations = canMoveCage && isOperational && requestedAction === "close"
+    ? await getCageClosureDestinationOptions(cageId, user, query)
+    : null;
   const transferRequestOptions = isOperational && user.capabilities.includes("transfers:request")
     ? await getLabTransferRequestOptions(user)
     : null;
@@ -50,7 +57,6 @@ export default async function CageDetailPage({ params, searchParams }: { params:
     transferRequestOptions?.canRequest
     && transferRequestOptions.sourceLab.id === snapshot.cage.labId,
   );
-  const closureDestinations = (transferWorkspace?.cageOptions ?? []).filter((option) => option.labId === snapshot.cage.labId);
   const closureChargePeriod = snapshot.cage.chargePeriodId && snapshot.cage.chargePeriodStartedAt && snapshot.cage.chargeCategoryId && snapshot.cage.chargeCategoryName && snapshot.cage.dailyRateCents !== null && snapshot.cage.currencyCode
     ? {
         id: snapshot.cage.chargePeriodId,
@@ -61,7 +67,6 @@ export default async function CageDetailPage({ params, searchParams }: { params:
         startedAt: snapshot.cage.chargePeriodStartedAt,
       }
     : null;
-  const requestedAction = (await searchParams)?.action;
   if (requestedAction === "close") {
     if (!canMoveCage) notFound();
     return (
@@ -78,17 +83,34 @@ export default async function CageDetailPage({ params, searchParams }: { params:
           description="Move every live occupant, review the billing cutoff, and acknowledge the permanent closure before submitting."
           title={`Permanently close ${snapshot.cage.barcode}`}
         >
-          {isOperational ? <CageExitForm
-            activeChargePeriod={closureChargePeriod}
-            action={exitCageAction}
-            barcode={snapshot.cage.barcode}
-            cageId={snapshot.cage.id}
-            commandNonce={snapshot.closureCommandNonce}
-            defaultDate={snapshot.moveForm.defaultDate}
-            destinationOptions={closureDestinations}
-            occupants={snapshot.occupants}
-            version={snapshot.cage.version}
-          /> : <div className="worksheet-empty"><strong>Cage already closed</strong><p>The permanent closure and billing cutoff are recorded.</p><Link className="table-action" href={`/cages/${snapshot.cage.id}`}>Return to cage detail</Link></div>}
+          {isOperational ? <div className="space-y-4">
+            <form action={`/cages/${snapshot.cage.id}`} className="flex flex-wrap items-end gap-3" method="get">
+              <input name="action" type="hidden" value="close" />
+              <label className="min-w-64 flex-1 space-y-2 text-sm">
+                <span className="text-[var(--muted)]">Find same-lab destination cages</span>
+                <input className="h-11 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4" defaultValue={closureDestinations?.search ?? ""} name="destinationSearch" placeholder="Barcode, room, rack, cage, or lab" />
+              </label>
+              <button className="table-action min-h-11" type="submit">Search destinations</button>
+            </form>
+            {closureDestinations ? <div className="flex items-center justify-between gap-3 text-sm text-[var(--muted)]">
+              <span>{closureDestinations.totalCount} matches · page {closureDestinations.page} of {closureDestinations.pageCount}</span>
+              <div className="flex gap-2">
+                {closureDestinations.page > 1 ? <Link className="table-action" href={`/cages/${snapshot.cage.id}?action=close&destinationSearch=${encodeURIComponent(closureDestinations.search)}&destinationPage=${closureDestinations.page - 1}`}>Previous</Link> : null}
+                {closureDestinations.page < closureDestinations.pageCount ? <Link className="table-action" href={`/cages/${snapshot.cage.id}?action=close&destinationSearch=${encodeURIComponent(closureDestinations.search)}&destinationPage=${closureDestinations.page + 1}`}>Next</Link> : null}
+              </div>
+            </div> : null}
+            <CageExitForm
+              activeChargePeriod={closureChargePeriod}
+              action={exitCageAction}
+              barcode={snapshot.cage.barcode}
+              cageId={snapshot.cage.id}
+              commandNonce={snapshot.closureCommandNonce}
+              defaultDate={snapshot.moveForm.defaultDate}
+              destinationOptions={closureDestinations?.items ?? []}
+              occupants={snapshot.occupants}
+              version={snapshot.cage.version}
+            />
+          </div> : <div className="worksheet-empty"><strong>Cage already closed</strong><p>The permanent closure and billing cutoff are recorded.</p><Link className="table-action" href={`/cages/${snapshot.cage.id}`}>Return to cage detail</Link></div>}
         </HighImpactWorkflowShell>
       </AppShell>
     );
@@ -136,13 +158,18 @@ export default async function CageDetailPage({ params, searchParams }: { params:
           },
         ]
       : []),
-    ...(transferWorkspace
+    ...(canTransferAnimals && isOperational
       ? [
-          {
+          requestedAction === "move-mouse" && transferWorkspace ? {
             id: "move-mouse",
             label: "Move mouse",
             description: "Transfer animal",
-            panel: <AnimalTransferPanel action={moveAnimalTransferAction} workspace={transferWorkspace} />,
+            panel: <AnimalTransferPanel action={moveAnimalTransferAction} basePath={`/cages/${snapshot.cage.id}`} key={JSON.stringify(transferWorkspace.query)} workspace={transferWorkspace} />,
+          } : {
+            id: "move-mouse",
+            label: "Move mouse",
+            description: "Transfer animal",
+            href: `/cages/${snapshot.cage.id}?action=move-mouse`,
           },
         ]
       : []),
@@ -268,8 +295,8 @@ export default async function CageDetailPage({ params, searchParams }: { params:
                 Add note
               </Link>
             ) : null}
-            {transferWorkspace ? (
-              <Link className="action-chip" href="#move-mouse">
+            {canTransferAnimals && isOperational ? (
+              <Link className="action-chip" href={`/cages/${snapshot.cage.id}?action=move-mouse`}>
                 Move mouse
               </Link>
             ) : null}
@@ -281,7 +308,9 @@ export default async function CageDetailPage({ params, searchParams }: { params:
         />
         <CompactActionTray
           actions={operations}
+          defaultActionId={requestedAction === "move-mouse" && transferWorkspace ? "move-mouse" : undefined}
           eyebrow="Operations"
+          key={requestedAction === "move-mouse" && transferWorkspace ? "move-mouse-open" : "operations-closed"}
           summary={
             <>
               <span>{snapshot.cage.barcode}</span>
@@ -406,6 +435,7 @@ export default async function CageDetailPage({ params, searchParams }: { params:
               )}
             </InlineSection>
             <OperationalSection eyebrow="Notes" title="Staff notes">
+              <p className="mb-3 text-sm text-[var(--muted)]">Showing up to the 50 most recent notes.</p>
               <div className="row-list">
                 {snapshot.notes.length ? (
                   snapshot.notes.map((note) => (
@@ -423,6 +453,7 @@ export default async function CageDetailPage({ params, searchParams }: { params:
               </div>
             </OperationalSection>
             <OperationalSection eyebrow="History" title="Movement history">
+              <p className="mb-3 text-sm text-[var(--muted)]">Showing up to the 50 most recent cage moves.</p>
               <div className="row-list">
                 {snapshot.movementHistory.length ? (
                   snapshot.movementHistory.map((movement) => (

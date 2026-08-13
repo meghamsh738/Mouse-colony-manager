@@ -324,8 +324,11 @@ test("animal staff can transfer a mouse into a scanned cage with fallback contro
   await signInAs(page, "staff");
   await page.goto("/scan/CM-A101-001");
 
-  await page.getByRole("button", { name: /^Move mouse:/ }).click();
+  await page.getByRole("link", { name: /^Move mouse:/ }).click();
+  await expect(page).toHaveURL(/action=move-mouse/);
   await page.getByTestId("animal-transfer-search").fill("CM-26003");
+  await page.getByTestId("animal-transfer-search-submit").click();
+  await expect(page).toHaveURL(/animalSearch=CM-26003/);
   await page.getByTestId("animal-transfer-card").filter({ hasText: "CM-26003" }).click();
   await expect(page.getByText("Staged move: CM-26003 from CM-A101-003 to CM-A101-001.")).toBeVisible();
   await page.getByTestId("animal-transfer-date").fill("2026-04-10");
@@ -1410,9 +1413,10 @@ test("admin can record a sample and find it in the inventory workspace", async (
 
   await page.goto("/samples");
   await page.getByTestId("sample-search").fill(sampleLabel);
+  await page.getByTestId("sample-filter-submit").click();
 
   await expect(page.getByTestId("sample-table").getByText(sampleLabel).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId("sample-table").getByText("CM-26004").filter({ visible: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("sample-table").getByText("CM-26004").filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("sample-table").getByText(sampleNote).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
 });
 
@@ -1453,6 +1457,7 @@ test("admin can request and complete a cryostorage storage operation", async ({ 
 
   await page.goto("/cryostorage");
   await page.getByTestId("cryostorage-search").fill(cryoLabel);
+  await page.getByTestId("cryostorage-filter-submit").click();
   await expect(page.getByTestId("cryostorage-table").getByText(cryoLabel).filter({ visible: true })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("cryostorage-table").getByText("Frozen embryos").filter({ visible: true })).toBeVisible({ timeout: 30_000 });
 });
@@ -1470,17 +1475,18 @@ test("researcher can review the forecast workspace", async ({ page }) => {
   await expect(page.getByRole("main").getByRole("link", { name: "Cryostorage" })).toBeVisible();
 });
 
-test("admin can import genotype rows from a csv upload", async ({ page }) => {
+test("admin can import genotype rows pasted into the workspace", async ({ page }) => {
   const fixturePath = path.join(process.cwd(), "tests/fixtures/genotype-import.csv");
+  const fixtureText = fs.readFileSync(fixturePath, "utf8");
 
   await signInAs(page, "admin");
   await page.goto("/animals");
 
   await page.getByRole("button", { name: "Import genotype results: CSV update" }).click();
-  await page.getByTestId("genotype-import-file").setInputFiles(fixturePath);
+  await page.getByTestId("genotype-import-text").fill(fixtureText);
   await submitAfterBlur(page, "genotype-import-submit");
 
-  await expect(page.getByText("Processed 2 genotype rows from genotype-import.csv. 2 succeeded.")).toBeVisible({
+  await expect(page.getByText("Processed 2 genotype rows. 2 succeeded.")).toBeVisible({
     timeout: 30_000,
   });
 

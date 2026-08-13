@@ -31,7 +31,7 @@ describe("high-impact workflow UI", () => {
     expect(scanPage).toContain('href: `/cages/${snapshot.cage.id}?action=close`');
     expect(scanPage).not.toContain("<CageExitForm");
     expect(quarantinePage).toContain('query.action === "release"');
-    expect(cryostoragePage).toContain('query.action === "process"');
+    expect(cryostoragePage).toContain('firstQueryValue(rawQuery.action) === "process"');
   });
 
   it("requires in-page review and record-specific billing decisions", () => {

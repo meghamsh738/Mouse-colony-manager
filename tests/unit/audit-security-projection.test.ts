@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   auditFindMany: vi.fn(),
   securityFindMany: vi.fn(),
   outboxGroupBy: vi.fn(),
+  queueSummary: vi.fn(),
   migrationFindMany: vi.fn(),
 }));
 
@@ -13,6 +14,7 @@ vi.mock("@/lib/prisma", () => ({
     securityEvent: { findMany: mocks.securityFindMany },
     outboxMessage: { groupBy: mocks.outboxGroupBy },
     migrationRun: { findMany: mocks.migrationFindMany },
+    $queryRaw: mocks.queueSummary,
   },
 }));
 
@@ -42,6 +44,7 @@ describe("role-projected audit and security history", () => {
     mocks.auditFindMany.mockResolvedValue([]);
     mocks.securityFindMany.mockResolvedValue([]);
     mocks.outboxGroupBy.mockResolvedValue([]);
+    mocks.queueSummary.mockResolvedValue([]);
     mocks.migrationFindMany.mockResolvedValue([]);
   });
 
@@ -62,6 +65,8 @@ describe("role-projected audit and security history", () => {
       securityEvents: [],
       securityNextCursor: null,
       outboxStatuses: [],
+      queueTopics: [],
+      recentWorkerRuns: [],
       recentMigrations: [],
     });
     await expect(getTechnicalConsoleView(actor("facility_admin"))).rejects.toThrow("unavailable");
@@ -127,5 +132,50 @@ describe("role-projected audit and security history", () => {
     expect(view.securityEvents).toHaveLength(100);
     expect(view.securityNextCursor).toBe("security-099");
     expect(mocks.securityFindMany.mock.calls[0]?.[0]).toMatchObject({ where: { severity: "critical" }, take: 101 });
+  });
+
+  it("projects privacy-safe per-topic queue health and recent worker outcomes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-17T12:00:00.000Z"));
+    mocks.queueSummary.mockResolvedValueOnce([{
+      topic: "notifications.email",
+      ready: 2,
+      scheduled: 3,
+      retry: 1,
+      active: 1,
+      expired: 0,
+      deadLetter: 1,
+      oldestReadyAt: new Date("2026-07-17T11:55:00.000Z"),
+    }]);
+    mocks.securityFindMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        id: "security-worker-run",
+        outcome: "succeeded",
+        severity: "info",
+        subjectId: "notification_delivery",
+        summary: "notification_delivery worker completed; claimed 2, delivered 2, failed 0, cancelled 0.",
+        occurredAt: new Date("2026-07-17T11:59:00.000Z"),
+      }]);
+
+    const view = await getTechnicalConsoleView(actor("it_head"));
+
+    expect(view.queueTopics).toEqual([expect.objectContaining({
+      topic: "notifications.email",
+      ready: 2,
+      scheduled: 3,
+      retry: 1,
+      active: 1,
+      expired: 0,
+      deadLetter: 1,
+      oldestReadyAt: "2026-07-17T11:55:00.000Z",
+      oldestReadyLagSeconds: 300,
+    })]);
+    expect(view.recentWorkerRuns).toEqual([expect.objectContaining({
+      subjectId: "notification_delivery",
+      outcome: "succeeded",
+      occurredAt: "2026-07-17T11:59:00.000Z",
+    })]);
+    vi.useRealTimers();
   });
 });

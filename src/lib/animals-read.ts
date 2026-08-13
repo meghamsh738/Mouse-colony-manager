@@ -15,6 +15,7 @@ type AnimalReadActor = LabActor & {
 
 export const ANIMAL_INVENTORY_DEFAULT_PAGE_SIZE = 80;
 export const ANIMAL_INVENTORY_MAX_PAGE_SIZE = 100;
+export const ANIMAL_DETAIL_HISTORY_LIMIT = 50;
 
 const animalInventoryStatuses = [
   "colony_holding",
@@ -438,7 +439,9 @@ async function getAnimalListItems(
       strain: { select: { name: true } },
       owningLab: { select: { id: true, name: true, code: true } },
       currentCage: {
-        include: {
+        select: {
+          labId: true,
+          cageNumber: true,
           lab: { select: { id: true, name: true, code: true } },
           room: { select: { roomNumber: true } },
           rack: { select: { rackNumber: true } },
@@ -600,11 +603,13 @@ export async function getAnimalInventoryPageView(
 }
 
 export async function getAnimalDetailView(animalId: string, actor: AnimalReadActor) {
-  const rules = await getAnimalRuleContext();
-  const access = await getActorReadLabAccess(actor);
+  const [rules, access] = await Promise.all([getAnimalRuleContext(), getActorReadLabAccess(actor)]);
   const includeExperiments = canReadExperiments(actor);
-  const animal = await prisma.animal.findUnique({
-    where: { id: animalId },
+  const animal = await prisma.animal.findFirst({
+    where: {
+      id: animalId,
+      ...(access && !access.canViewAll ? { owningLabId: { in: access.memberLabIds } } : {}),
+    },
     include: {
       strain: { select: { name: true } },
       owningLab: { select: { id: true, name: true, code: true } },
@@ -618,13 +623,19 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
       sire: { select: { animalId: true } },
       dam: { select: { animalId: true } },
       alleles: {
-        include: {
+        select: {
+          id: true,
+          alleleId: true,
+          zygosity: true,
+          callStatus: true,
           allele: { select: { name: true } },
         },
       },
       projectAllocations: {
         where: { endedAt: null },
-        include: {
+        select: {
+          id: true,
+          endedAt: true,
           project: { select: { id: true, labId: true, projectCode: true, title: true } },
         },
       },
@@ -639,7 +650,12 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
             ? { experiment: { labId: { in: access.memberLabIds } } }
             : undefined,
         orderBy: { startDate: "desc" },
-        include: {
+        take: ANIMAL_DETAIL_HISTORY_LIMIT,
+        select: {
+          id: true,
+          status: true,
+          treatmentGroup: true,
+          startDate: true,
           experiment: { select: { id: true, experimentCode: true, title: true, status: true } },
         },
       },
@@ -649,6 +665,7 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
           ...(access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : {}),
         },
         orderBy: { createdAt: "desc" },
+        take: ANIMAL_DETAIL_HISTORY_LIMIT,
         select: {
           id: true,
           labId: true,
@@ -659,6 +676,7 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
           followupRequired: true,
           createdAt: true,
           attachments: {
+            where: access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : undefined,
             select: {
               id: true,
               labId: true,
@@ -673,6 +691,7 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
       genotypingRecords: {
         where: access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : undefined,
         orderBy: { resultDate: "desc" },
+        take: ANIMAL_DETAIL_HISTORY_LIMIT,
         select: {
           id: true,
           labId: true,
@@ -688,6 +707,7 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
           finalCall: true,
           sampleDate: true,
           attachments: {
+            where: access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : undefined,
             select: {
               id: true,
               labId: true,
@@ -700,7 +720,9 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
         },
       },
       sampleRecords: {
+        where: access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : undefined,
         orderBy: [{ collectedAt: "desc" }, { createdAt: "desc" }],
+        take: ANIMAL_DETAIL_HISTORY_LIMIT,
         select: {
           id: true,
           labId: true,
@@ -722,6 +744,7 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
       },
       statusEvents: {
         orderBy: { happenedAt: "desc" },
+        take: ANIMAL_DETAIL_HISTORY_LIMIT,
         select: {
           id: true,
           toStatus: true,
@@ -761,7 +784,7 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
   const visibleHealthNotes = animal.healthNotes.filter(
     (note) => access?.canViewAll || Boolean(access?.memberLabIds.includes(note.labId)),
   );
-  const [externalTransferAudit, openExperimentCount] = await Promise.all([
+  const [externalTransferAudit, openExperimentCount, unresolvedHealthNoteFallback, pendingGenotypeFallback] = await Promise.all([
     animal.outcomeStatus === "transferred" ? prisma.auditLog.findFirst({
         where: {
           entityType: "animal",
@@ -775,8 +798,40 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
     prisma.experimentAssignment.count({
       where: { animalId: animal.id, status: { in: ["planned", "reserved", "active"] } },
     }),
+    prisma.healthNote.findFirst({
+      where: {
+        animalId: animal.id,
+        followupRequired: true,
+        resolved: false,
+        ...(access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        note: true,
+        severity: true,
+        resolved: true,
+        followupRequired: true,
+        createdAt: true,
+      },
+    }),
+    prisma.genotypingRecord.findFirst({
+      where: {
+        animalId: animal.id,
+        status: "pending",
+        ...(access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : {}),
+      },
+      orderBy: { sampleDate: "desc" },
+      select: { id: true, sampleDate: true, status: true },
+    }),
   ]);
   const externalTransfer = parseExternalTransferProvenance(externalTransferAudit?.newValue);
+  const ruleHealthNotes = unresolvedHealthNoteFallback && !visibleHealthNotes.some((note) => note.id === unresolvedHealthNoteFallback.id)
+    ? [...visibleHealthNotes, unresolvedHealthNoteFallback]
+    : visibleHealthNotes;
+  const ruleGenotypingRecords = pendingGenotypeFallback && !visibleGenotypingRecords.some((record) => record.id === pendingGenotypeFallback.id)
+    ? [...visibleGenotypingRecords, pendingGenotypeFallback]
+    : visibleGenotypingRecords;
 
   const experiments = includeExperiments ? await prisma.experiment.findMany({
     where: {
@@ -834,8 +889,8 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
     ...buildRuleAlerts(
       {
         ...animal,
-        healthNotes: visibleHealthNotes,
-        genotypingRecords: visibleGenotypingRecords,
+        healthNotes: ruleHealthNotes,
+        genotypingRecords: ruleGenotypingRecords,
         projectAllocations: visibleProjectAllocations,
       },
       rules,

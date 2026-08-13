@@ -28,6 +28,14 @@ function formatTimestamp(value?: string | null) {
   return value ? `${timestampFormatter.format(new Date(value))} UTC` : "-";
 }
 
+function formatLag(seconds: number | null) {
+  if (seconds === null) return "-";
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3_600)}h`;
+  return `${Math.floor(seconds / 86_400)}d`;
+}
+
 function outboxBadgeVariant(status: OutboxQueueStatus | "processing" | "failed") {
   if (status === "delivered") return "success" as const;
   if (status === "dead_letter" || status === "failed") return "danger" as const;
@@ -118,6 +126,33 @@ export default async function SystemPage({ searchParams }: SystemPageProps) {
             <div><span className="metadata-label">Dead letters</span><strong>{failedJobs}</strong></div>
             <div><span className="metadata-label">Migration runs</span><strong>{view.recentMigrations.length}</strong></div>
             <div><span className="metadata-label">Security events</span><strong>{view.securityEvents.length}</strong></div>
+          </div>
+        </WorksheetShell>
+
+        <WorksheetShell
+          eyebrow="IT only"
+          summary={<span>{view.queueTopics.length} active queue topic{view.queueTopics.length === 1 ? "" : "s"}</span>}
+          title="Queue health"
+        >
+          {view.queueTopics.length ? <div className="worksheet-table-wrap">
+            <table className="worksheet-table min-w-[900px]">
+              <thead><tr><th>Topic</th><th>Ready</th><th>Scheduled</th><th>Retry</th><th>Active leases</th><th>Expired leases</th><th>Dead letters</th><th>Oldest-ready lag</th></tr></thead>
+              <tbody>{view.queueTopics.map((topic) => <tr key={topic.topic}>
+                <td className="worksheet-cell-mono">{topic.topic}</td>
+                <td>{topic.ready}</td><td>{topic.scheduled}</td><td>{topic.retry}</td><td>{topic.active}</td>
+                <td>{topic.expired ? <Badge variant="warning">{topic.expired}</Badge> : 0}</td>
+                <td>{topic.deadLetter ? <Badge variant="danger">{topic.deadLetter}</Badge> : 0}</td>
+                <td>{formatLag(topic.oldestReadyLagSeconds)}<p className="worksheet-cell-muted">Since {formatTimestamp(topic.oldestReadyAt)}</p></td>
+              </tr>)}</tbody>
+            </table>
+          </div> : <p className="px-4 py-5 text-sm text-[var(--muted)]">The outbox queue is empty.</p>}
+          <div className="border-t border-[var(--line)] p-4">
+            <h3 className="text-sm font-semibold text-[var(--ink)]">Recent worker runs</h3>
+            {view.recentWorkerRuns.length ? <div className="mt-3 grid gap-2 md:grid-cols-2">{view.recentWorkerRuns.map((run) => <div className="rounded-md border border-[var(--line)] p-3" key={run.id}>
+              <div className="flex flex-wrap items-center gap-2"><Badge variant={run.outcome === "succeeded" ? "success" : "warning"}>{titleCase(run.outcome)}</Badge><strong className="font-mono text-xs">{run.subjectId ?? "outbox_worker"}</strong></div>
+              <p className="mt-2 text-sm text-[var(--muted)]">{run.summary}</p>
+              <p className="worksheet-cell-muted mt-1">{formatTimestamp(run.occurredAt)}</p>
+            </div>)}</div> : <p className="mt-2 text-sm text-[var(--muted)]">No worker run has been recorded yet.</p>}
           </div>
         </WorksheetShell>
 

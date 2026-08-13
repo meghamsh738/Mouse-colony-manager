@@ -16,6 +16,7 @@ describe("technical queue source boundaries", () => {
       "providerIdempotencyKey: true",
       "providerMessageId: true",
       "aggregateId: true",
+      "leaseToken: true",
       "result: true",
     ]) {
       expect(readSource).not.toContain(forbiddenSelection);
@@ -29,6 +30,7 @@ describe("technical queue source boundaries", () => {
       ".providerIdempotencyKey",
       ".providerMessageId",
       ".aggregateId",
+      ".leaseToken",
     ]) {
       expect(pageSource).not.toContain(forbiddenRender);
     }

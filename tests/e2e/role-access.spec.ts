@@ -41,18 +41,24 @@ test("IT Head can inspect system status but cannot open colony records", async (
 test("Facility Admin can govern users but cannot inspect IT-only system status", async ({ page }) => {
   await signIn(page, SEEDED_ROLE_QA_EMAILS.facilityAdmin);
   await expectAllowed(page, "/administration/users", "Users and access");
+  await expectAllowed(page, "/sops", "Standard operating procedures");
+  await expect(page.getByRole("button", { name: "Create facility SOP" })).toBeVisible();
   await expectDenied(page, "/system");
 });
 
 test("CMU Staff can operate the approval queue but cannot govern users", async ({ page }) => {
   await signIn(page, SEEDED_ROLE_QA_EMAILS.cmuStaff);
   await expectAllowed(page, "/approvals", "Approvals");
+  await expectAllowed(page, "/procedures", "Procedures");
+  await expectAllowed(page, "/cryostorage", "Cryostorage");
   await expectDenied(page, "/administration/users");
 });
 
 test("Lab Owner can administer their lab but cannot govern unit users", async ({ page }) => {
   await signIn(page, SEEDED_ROLE_QA_EMAILS.labOwner);
   await expectAllowed(page, "/administration/labs", "Labs and members");
+  await expectAllowed(page, "/sops", "Standard operating procedures");
+  await expect(page.getByRole("button", { name: "Create lab SOP" })).toBeVisible();
   await expectDenied(page, "/administration/users");
 });
 
@@ -66,6 +72,10 @@ test("Lab Staff can manage animals but cannot use the approval queue", async ({ 
   await signIn(page, SEEDED_ROLE_QA_EMAILS.labStaff);
   await expectAllowed(page, "/animals", "Animals");
   await expect(page.getByRole("button", { name: "Add mouse" })).toBeVisible();
+  await expectAllowed(page, "/procedures", "Procedures");
+  await expect(page.getByRole("button", { name: "Plan procedure" })).toBeVisible();
+  await expectAllowed(page, "/cryostorage", "Cryostorage");
+  await expect(page.getByRole("button", { name: "New request" })).toBeVisible();
   await expectDenied(page, "/approvals");
 });
 
@@ -73,6 +83,11 @@ test("Lab Viewer can read animals without mutation or approval access", async ({
   await signIn(page, SEEDED_ROLE_QA_EMAILS.labViewer);
   await expectAllowed(page, "/animals", "Animals");
   await expect(page.getByRole("button", { name: "Add mouse" })).toHaveCount(0);
+  await expectAllowed(page, "/forecast", "Forecast");
+  await expectAllowed(page, "/procedures", "Procedures");
+  await expect(page.getByRole("button", { name: "Plan procedure" })).toHaveCount(0);
+  await expectAllowed(page, "/sops", "Standard operating procedures");
+  await expect(page.getByRole("button", { name: /Create .* SOP/ })).toHaveCount(0);
   await expectDenied(page, "/approvals");
 });
 

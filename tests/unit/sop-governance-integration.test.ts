@@ -4,10 +4,9 @@ import { describe, expect, it } from "vitest";
 import { getActorCapabilities } from "@/lib/capabilities";
 import {
   authenticateOutboxWorker,
-  claimOutboxMessages,
-  completeOutboxMessage,
 } from "@/lib/command-foundation";
 import { prisma } from "@/lib/prisma";
+import { runOutboxWorkerOnce } from "@/lib/notification-delivery";
 import type { ResolvedActor } from "@/lib/session";
 import { getSopWorkspace } from "@/lib/sop-read";
 import {
@@ -479,13 +478,24 @@ describe("SOP governance commands", () => {
     });
     expect(worker).not.toBeNull();
     if (!worker) return;
-    const leased = await claimOutboxMessages({ worker, limit: 10 });
-    expect(leased.map((message) => message.aggregateId)).toEqual([currentAssignmentId]);
-    expect(await completeOutboxMessage({
-      messageId: leased[0]!.id,
-      worker,
-      leaseToken: leased[0]!.leaseToken!,
-    })).toBe(true);
+    const acknowledgementRun = await runOutboxWorkerOnce({
+      workerType: "sop_delivery",
+      workerId: worker.id,
+      token: process.env.OUTBOX_WORKER_TOKEN_SOP_DELIVERY,
+      batchSize: 10,
+      concurrency: 1,
+    });
+    expect(acknowledgementRun).toMatchObject({
+      outcome: "completed",
+      exitCode: 0,
+      claimed: 1,
+      delivered: 1,
+      cancelled: 0,
+    });
+    await expect(prisma.outboxMessage.findFirstOrThrow({ where: { aggregateId: currentAssignmentId } })).resolves.toMatchObject({
+      status: "delivered",
+      attemptCount: 1,
+    });
 
     const beforePayloadValidationAssignment = await prisma.sopDocument.findUniqueOrThrow({ where: { id: facilityResult.documentId } });
     const payloadValidationAssignment = await executeAssignSopVersionCommand({
@@ -503,9 +513,7 @@ describe("SOP governance commands", () => {
     expect(payloadValidationAssignment.ok).toBe(true);
     if (!payloadValidationAssignment.ok) return;
     const payloadValidationAssignmentId = (payloadValidationAssignment.result as { assignmentId: string }).assignmentId;
-    const leasedForPayloadValidation = await claimOutboxMessages({ worker, limit: 10 });
-    expect(leasedForPayloadValidation.map((message) => message.aggregateId)).toEqual([payloadValidationAssignmentId]);
-    const payloadMessage = leasedForPayloadValidation[0]!;
+    const payloadMessage = await prisma.outboxMessage.findFirstOrThrow({ where: { aggregateId: payloadValidationAssignmentId } });
     await prisma.outboxMessage.update({
       where: { id: payloadMessage.id },
       data: {
@@ -519,11 +527,19 @@ describe("SOP governance commands", () => {
         },
       },
     });
-    expect(await completeOutboxMessage({
-      messageId: payloadMessage.id,
-      worker,
-      leaseToken: payloadMessage.leaseToken!,
-    })).toBe(false);
+    const staleAcknowledgementRun = await runOutboxWorkerOnce({
+      workerType: "sop_delivery",
+      workerId: worker.id,
+      token: process.env.OUTBOX_WORKER_TOKEN_SOP_DELIVERY,
+      batchSize: 10,
+      concurrency: 1,
+    });
+    expect(staleAcknowledgementRun).toMatchObject({
+      outcome: "completed",
+      claimed: 0,
+      delivered: 0,
+      cancelled: 0,
+    });
     expect((await prisma.outboxMessage.findUniqueOrThrow({ where: { id: payloadMessage.id } })).status).toBe("cancelled");
 
     const labCreate = await executeCreateSopCommand({

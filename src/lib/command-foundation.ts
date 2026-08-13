@@ -27,8 +27,14 @@ export const OUTBOX_TOPIC_AUTHORITY = {
 
 export type OutboxTopic = keyof typeof OUTBOX_TOPIC_AUTHORITY;
 
+export const OUTBOX_MAX_ATTEMPTS = 12;
+export const OUTBOX_MAX_CLAIM_BATCH = 100;
+export const OUTBOX_MAX_MAINTENANCE_BATCH = 100;
+
 export const OUTBOX_WORKER_TOPICS = {
-  notification_delivery: ["notifications.in_app", "notifications.email", "notifications.digest"],
+  // Dashboard notifications are materialized transactionally and no producer
+  // enqueues notifications.in_app, so the email worker must not claim it.
+  notification_delivery: ["notifications.email", "notifications.digest"],
   billing_delivery: ["billing.invoice"],
   sop_delivery: ["sop.assignment"],
   security_audit: ["audit.security"],
@@ -870,7 +876,7 @@ export async function enqueueOutboxMessage(tx: Prisma.TransactionClient, input: 
       requiredCapability: OUTBOX_TOPIC_AUTHORITY[input.topic],
       payload: input.payload,
       availableAt: input.availableAt ?? new Date(),
-      maxAttempts: input.maxAttempts ?? 8,
+      maxAttempts: Math.max(1, Math.min(input.maxAttempts ?? 8, OUTBOX_MAX_ATTEMPTS)),
     },
   });
 }
@@ -1003,38 +1009,53 @@ async function updateNotificationDeliveryForCancellation(
   });
 }
 
-export async function claimOutboxMessages(input: {
+export type OutboxLeaseMaintenanceResult = {
+  scanned: number;
+  retried: number;
+  deadLettered: number;
+};
+
+export async function maintainExpiredOutboxLeases(input: {
   worker: AuthenticatedOutboxWorker;
   limit?: number;
-  leaseMs?: number;
-}) {
+}): Promise<OutboxLeaseMaintenanceResult> {
   assertAuthenticatedWorker(input.worker);
   const topics = [...OUTBOX_WORKER_TOPICS[input.worker.type]];
-  const limit = Math.max(1, Math.min(input.limit ?? 25, 100));
-  const leaseMs = Math.max(5_000, Math.min(input.leaseMs ?? 60_000, 15 * 60_000));
+  const limit = Math.max(1, Math.min(input.limit ?? 25, OUTBOX_MAX_MAINTENANCE_BATCH));
   return prisma.$transaction(async (tx) => {
     const now = new Date();
-    const expiredFinal = await tx.$queryRaw<OutboxMessage[]>(Prisma.sql`
+    const expired = await tx.$queryRaw<OutboxMessage[]>(Prisma.sql`
       SELECT * FROM "OutboxMessage"
       WHERE topic IN (${Prisma.join(topics)})
         AND status = 'leased'
         AND "leaseExpiresAt" <= CURRENT_TIMESTAMP
-        AND "attemptCount" >= "maxAttempts"
-      ORDER BY "leaseExpiresAt"
+      ORDER BY "leaseExpiresAt", "createdAt"
+      LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
     `);
-    for (const message of expiredFinal) {
+    let retried = 0;
+    let deadLettered = 0;
+    for (const message of expired) {
+      const effectiveMaxAttempts = Math.max(1, Math.min(message.maxAttempts, OUTBOX_MAX_ATTEMPTS));
+      const deadLetter = message.attemptCount >= effectiveMaxAttempts;
+      const reason = deadLetter
+        ? "Final delivery lease expired before completion."
+        : "Delivery lease expired before completion and is ready for retry.";
       await tx.outboxMessage.update({
         where: { id: message.id },
         data: {
-          status: "dead_letter",
-          deadLetteredAt: now,
+          status: deadLetter ? "dead_letter" : "retry",
+          availableAt: deadLetter ? message.availableAt : now,
+          deadLetteredAt: deadLetter ? now : null,
           leaseOwner: null,
           leaseToken: null,
           workerType: null,
           leasedAt: null,
           leaseExpiresAt: null,
-          lastError: "Final delivery lease expired before completion.",
+          authorizedAt: null,
+          authorizedCapability: null,
+          authorizedActorAuthzVersion: null,
+          lastError: reason,
         },
       });
       await tx.outboxDeliveryAttempt.updateMany({
@@ -1044,50 +1065,78 @@ export async function claimOutboxMessages(input: {
       await tx.notificationDelivery.updateMany({
         where: { outboxMessageId: message.id, status: "queued" },
         data: {
-          status: "failed",
-          failedAt: now,
+          status: deadLetter ? "failed" : "queued",
+          failedAt: deadLetter ? now : null,
           attemptCount: message.attemptCount,
-          lastError: "Final delivery lease expired before completion.",
+          lastError: reason,
           version: { increment: 1 },
         },
       });
-      await writeSecurityEvent(tx, {
-        eventType: "technical.outbox.dead_lettered",
-        outcome: "failed",
-        severity: "critical",
-        actorId: message.actorId,
-        scopeLabId: message.labId,
-        correlationId: message.id,
-        dedupeKey: `technical.outbox.dead_lettered:lease:${message.id}`,
-        subjectType: "outbox_message",
-        subjectId: message.id,
-        source: "outbox_worker",
-        summary: "Background delivery exhausted its lease attempts.",
-        occurredAt: now,
-      });
+      if (deadLetter) {
+        deadLettered += 1;
+        await writeSecurityEvent(tx, {
+          eventType: "technical.outbox.dead_lettered",
+          outcome: "failed",
+          severity: "critical",
+          actorId: message.actorId,
+          scopeLabId: message.labId,
+          correlationId: message.id,
+          dedupeKey: `technical.outbox.dead_lettered:lease:${message.id}`,
+          subjectType: "outbox_message",
+          subjectId: message.id,
+          source: "outbox_worker",
+          summary: "Background delivery exhausted its lease attempts.",
+          occurredAt: now,
+        });
+      } else {
+        retried += 1;
+      }
     }
+    return { scanned: expired.length, retried, deadLettered };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
 
+export async function claimOutboxMessages(input: {
+  worker: AuthenticatedOutboxWorker;
+  limit?: number;
+  leaseMs?: number;
+  maintainExpiredLeases?: boolean;
+  maintenanceLimit?: number;
+  claimBefore?: Date;
+  excludeMessageIds?: readonly string[];
+}) {
+  assertAuthenticatedWorker(input.worker);
+  const topics = [...OUTBOX_WORKER_TOPICS[input.worker.type]];
+  const limit = Math.max(1, Math.min(input.limit ?? 25, OUTBOX_MAX_CLAIM_BATCH));
+  const scanLimit = Math.min(Math.max(limit * 4, 10), OUTBOX_MAX_CLAIM_BATCH);
+  const excludedMessageIds = [...new Set(input.excludeMessageIds ?? [])].slice(0, OUTBOX_MAX_CLAIM_BATCH);
+  const exclusion = excludedMessageIds.length
+    ? Prisma.sql`AND id NOT IN (${Prisma.join(excludedMessageIds)})`
+    : Prisma.empty;
+  const leaseMs = Math.max(5_000, Math.min(input.leaseMs ?? 60_000, 15 * 60_000));
+  if (input.maintainExpiredLeases !== false) {
+    await maintainExpiredOutboxLeases({
+      worker: input.worker,
+      limit: input.maintenanceLimit,
+    });
+  }
+  return prisma.$transaction(async (tx) => {
+    const now = new Date();
+    if (input.claimBefore && now >= input.claimBefore) return [];
     const candidates = await tx.$queryRaw<OutboxMessage[]>(Prisma.sql`
       SELECT * FROM "OutboxMessage"
       WHERE topic IN (${Prisma.join(topics)})
         AND "availableAt" <= CURRENT_TIMESTAMP
-        AND "attemptCount" < "maxAttempts"
-        AND (
-          status IN ('pending', 'retry')
-          OR (status = 'leased' AND "leaseExpiresAt" <= CURRENT_TIMESTAMP)
-        )
+        AND "attemptCount" < LEAST(GREATEST("maxAttempts", 1), ${OUTBOX_MAX_ATTEMPTS})
+        AND status IN ('pending', 'retry')
+        ${exclusion}
       ORDER BY "availableAt", "createdAt"
       FOR UPDATE SKIP LOCKED
-      LIMIT ${limit}
+      LIMIT ${scanLimit}
     `);
     const leased: OutboxMessage[] = [];
     for (const message of candidates) {
-      if (message.status === "leased") {
-        await tx.outboxDeliveryAttempt.updateMany({
-          where: { messageId: message.id, attemptNumber: message.attemptCount, status: "processing" },
-          data: { status: "failed", completedAt: now, errorMessage: "Delivery lease expired and was reclaimed." },
-        });
-      }
+      if (leased.length >= limit) break;
       const topic = message.topic as OutboxTopic;
       const requiredCapability = OUTBOX_TOPIC_AUTHORITY[topic];
       const aggregateValid = await isCurrentOutboxAggregate(tx, message);
@@ -1152,6 +1201,7 @@ export async function claimOutboxMessages(input: {
         });
         continue;
       }
+      if (input.claimBefore && new Date() >= input.claimBefore) break;
 
       const leaseToken = randomUUID();
       const attemptNumber = message.attemptCount + 1;
@@ -1737,7 +1787,7 @@ export async function failOutboxMessage(input: {
       },
     });
     if (!message) return false;
-    const deadLetter = message.attemptCount >= message.maxAttempts;
+    const deadLetter = message.attemptCount >= Math.max(1, Math.min(message.maxAttempts, OUTBOX_MAX_ATTEMPTS));
     await tx.outboxMessage.update({
       where: { id: message.id },
       data: {

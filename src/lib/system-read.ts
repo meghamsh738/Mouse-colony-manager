@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client";
+
 import { actorHasCapability } from "@/lib/capabilities";
 import { prisma } from "@/lib/prisma";
 import type { ResolvedActor } from "@/lib/session";
@@ -149,11 +151,48 @@ export async function getOutboxQueueView(actor: ResolvedActor, input: OutboxQueu
 export async function getTechnicalConsoleView(actor: ResolvedActor, input: SecurityHistoryInput | number = {}) {
   requireTechnicalConsoleAccess(actor);
   const historyInput = typeof input === "number" ? { limit: input } : input;
-  const [securityHistory, outboxStatusCounts, recentMigrations] = await Promise.all([
+  const now = new Date();
+  const [securityHistory, outboxStatusCounts, queueTopics, recentWorkerRuns, recentMigrations] = await Promise.all([
     getSecurityEventHistoryView(actor, historyInput),
     prisma.outboxMessage.groupBy({
       by: ["status"],
       _count: { _all: true },
+    }),
+    prisma.$queryRaw<Array<{
+      topic: string;
+      ready: number;
+      scheduled: number;
+      retry: number;
+      active: number;
+      expired: number;
+      deadLetter: number;
+      oldestReadyAt: Date | null;
+    }>>(Prisma.sql`
+      SELECT
+        topic,
+        COUNT(*) FILTER (WHERE status = 'pending' AND "availableAt" <= ${now})::int AS ready,
+        COUNT(*) FILTER (WHERE status IN ('pending', 'retry') AND "availableAt" > ${now})::int AS scheduled,
+        COUNT(*) FILTER (WHERE status = 'retry' AND "availableAt" <= ${now})::int AS retry,
+        COUNT(*) FILTER (WHERE status = 'leased' AND "leaseExpiresAt" > ${now})::int AS active,
+        COUNT(*) FILTER (WHERE status = 'leased' AND ("leaseExpiresAt" IS NULL OR "leaseExpiresAt" <= ${now}))::int AS expired,
+        COUNT(*) FILTER (WHERE status = 'dead_letter')::int AS "deadLetter",
+        MIN("availableAt") FILTER (WHERE status IN ('pending', 'retry') AND "availableAt" <= ${now}) AS "oldestReadyAt"
+      FROM "OutboxMessage"
+      GROUP BY topic
+      ORDER BY topic
+    `),
+    prisma.securityEvent.findMany({
+      where: { eventType: "technical.outbox.worker_run" },
+      orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+      take: 8,
+      select: {
+        id: true,
+        outcome: true,
+        severity: true,
+        subjectId: true,
+        summary: true,
+        occurredAt: true,
+      },
     }),
     prisma.migrationRun.findMany({
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -175,6 +214,17 @@ export async function getTechnicalConsoleView(actor: ResolvedActor, input: Secur
     outboxStatuses: outboxStatusCounts.map((status) => ({
       status: status.status,
       count: status._count._all,
+    })),
+    queueTopics: queueTopics.map((topic) => ({
+      ...topic,
+      oldestReadyAt: topic.oldestReadyAt?.toISOString() ?? null,
+      oldestReadyLagSeconds: topic.oldestReadyAt
+        ? Math.max(0, Math.floor((now.getTime() - topic.oldestReadyAt.getTime()) / 1_000))
+        : null,
+    })),
+    recentWorkerRuns: recentWorkerRuns.map((run) => ({
+      ...run,
+      occurredAt: run.occurredAt.toISOString(),
     })),
     recentMigrations: recentMigrations.map((migration) => ({
       ...migration,

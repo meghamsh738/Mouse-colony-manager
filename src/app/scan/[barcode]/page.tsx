@@ -20,12 +20,12 @@ import { ContextBand, InlineSection } from "@/components/app/layout-primitives";
 import { LabTransferRequestForm } from "@/components/app/lab-transfer-workflow";
 import { OperationalSection } from "@/components/app/operational-section";
 import { PageHeader } from "@/components/app/page-header";
-import { getAnimalTransferWorkspaceView, getScanCageViewByBarcode } from "@/lib/cages-read";
+import { getAnimalTransferWorkspacePageView, getScanCageViewByBarcode } from "@/lib/cages-read";
 import { getLabTransferRequestOptions } from "@/lib/lab-transfer-read";
 import { requireUser } from "@/lib/session";
 import { formatDate } from "@/lib/utils";
 
-export default async function ScanDetailPage({ params }: { params: Promise<{ barcode: string }> }) {
+export default async function ScanDetailPage({ params, searchParams }: { params: Promise<{ barcode: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser({ capability: "scan:use" });
   const { barcode } = await params;
   const snapshot = await getScanCageViewByBarcode(barcode, user);
@@ -38,7 +38,11 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ bar
   }
 
   const isOperational = snapshot.cage.active && snapshot.cage.status !== "closed";
-  const transferWorkspace = canTransferAnimals && isOperational ? await getAnimalTransferWorkspaceView(snapshot.cage.id, user) : null;
+  const query = (await searchParams) ?? {};
+  const requestedAction = Array.isArray(query.action) ? query.action[0] : query.action;
+  const transferWorkspace = canTransferAnimals && isOperational && requestedAction === "move-mouse"
+    ? await getAnimalTransferWorkspacePageView(snapshot.cage.id, user, query)
+    : null;
   const transferRequestOptions = isOperational && user.capabilities.includes("transfers:request")
     ? await getLabTransferRequestOptions(user)
     : null;
@@ -62,14 +66,20 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ bar
         />
       ),
     },
-    ...(transferWorkspace
+    ...(canTransferAnimals
       ? [
-          {
+          requestedAction === "move-mouse" && transferWorkspace ? {
             id: "move-mouse",
             label: "Move mouse",
             description: "Transfer animal",
             icon: <MoveRight aria-hidden="true" size={16} />,
-            panel: <AnimalTransferPanel action={moveAnimalTransferAction} workspace={transferWorkspace} />,
+            panel: <AnimalTransferPanel action={moveAnimalTransferAction} basePath={`/scan/${encodeURIComponent(snapshot.cage.barcode)}`} key={JSON.stringify(transferWorkspace.query)} workspace={transferWorkspace} />,
+          } : {
+            id: "move-mouse",
+            label: "Move mouse",
+            description: "Transfer animal",
+            href: `/scan/${encodeURIComponent(snapshot.cage.barcode)}?action=move-mouse`,
+            icon: <MoveRight aria-hidden="true" size={16} />,
           },
         ]
       : []),
@@ -323,7 +333,9 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ bar
           {routineOperations.length ? (
             <CompactActionTray
               actions={routineOperations}
+              defaultActionId={requestedAction === "move-mouse" && transferWorkspace ? "move-mouse" : undefined}
               eyebrow="Daily work"
+              key={requestedAction === "move-mouse" && transferWorkspace ? "move-mouse-open" : "daily-work-closed"}
               summary={<span>{snapshot.occupants.length} occupants · {alertCountLabel}</span>}
               title="Cage work"
             />
@@ -344,6 +356,9 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ bar
           ) : null}
           {snapshot.notes.length ? (
             <OperationalSection eyebrow="History" title="Recent notes">
+              <p className="mb-3 text-sm text-[var(--muted)]">
+                Showing up to 15 recent notes. <Link className="font-medium underline" href={`/cages/${snapshot.cage.id}`}>Open the cage record</Link> for more history.
+              </p>
               <div className="row-list">
                 {snapshot.notes.map((note) => (
                   <article key={note.id} className="record-row">

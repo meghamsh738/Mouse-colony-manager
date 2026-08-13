@@ -14,10 +14,13 @@ import {
 import { prisma } from "@/lib/prisma";
 import type {
   Alert,
+  AnimalPresenceCagePageView,
+  AnimalTransferWorkspaceQuery,
   AnimalTransferWorkspaceView,
   CageLabelPrintView,
   CageListItem,
   CageStatus,
+  CageTransferOption,
 } from "@/lib/types";
 import { formatAgeLabel } from "@/lib/utils";
 
@@ -29,6 +32,10 @@ type CageRuleContext = {
 
 export const CAGE_INVENTORY_DEFAULT_PAGE_SIZE = 80;
 export const CAGE_INVENTORY_MAX_PAGE_SIZE = 100;
+export const CAGE_DETAIL_HISTORY_LIMIT = 50;
+export const SCAN_HEALTH_NOTE_LIMIT = 15;
+export const ANIMAL_TRANSFER_DEFAULT_PAGE_SIZE = 20;
+export const ANIMAL_TRANSFER_MAX_PAGE_SIZE = 50;
 
 const cageInventoryStatuses: CageStatus[] = ["active", "breeding", "quarantine", "experiment", "retired", "closed"];
 const cageChargeStates = ["chargeable", "unpriced", "exited"] as const;
@@ -62,6 +69,7 @@ export type CageInventoryPageView = {
 };
 
 type RawCageInventoryQuery = Record<string, string | string[] | undefined>;
+type RawAnimalTransferQuery = Record<string, string | string[] | undefined>;
 
 function firstCageQueryValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
@@ -91,6 +99,32 @@ export function normalizeCageInventoryQuery(query: RawCageInventoryQuery = {}): 
       firstCageQueryValue(query.pageSize),
       CAGE_INVENTORY_DEFAULT_PAGE_SIZE,
       CAGE_INVENTORY_MAX_PAGE_SIZE,
+    ),
+  };
+}
+
+export function normalizeAnimalTransferQuery(query: RawAnimalTransferQuery = {}): AnimalTransferWorkspaceQuery {
+  return {
+    animalSearch: (firstCageQueryValue(query.animalSearch) ?? "").trim().slice(0, 120),
+    animalPage: boundedCagePositiveInteger(firstCageQueryValue(query.animalPage), 1, 100_000),
+    destinationSearch: (firstCageQueryValue(query.destinationSearch) ?? "").trim().slice(0, 120),
+    destinationPage: boundedCagePositiveInteger(firstCageQueryValue(query.destinationPage), 1, 100_000),
+    pageSize: boundedCagePositiveInteger(
+      firstCageQueryValue(query.pageSize),
+      ANIMAL_TRANSFER_DEFAULT_PAGE_SIZE,
+      ANIMAL_TRANSFER_MAX_PAGE_SIZE,
+    ),
+  };
+}
+
+function normalizeAnimalPresenceQuery(query: RawAnimalTransferQuery = {}) {
+  return {
+    search: (firstCageQueryValue(query.presenceSearch) ?? "").trim().slice(0, 120),
+    page: boundedCagePositiveInteger(firstCageQueryValue(query.presencePage), 1, 100_000),
+    pageSize: boundedCagePositiveInteger(
+      firstCageQueryValue(query.pageSize),
+      ANIMAL_TRANSFER_DEFAULT_PAGE_SIZE,
+      ANIMAL_TRANSFER_MAX_PAGE_SIZE,
     ),
   };
 }
@@ -132,6 +166,26 @@ function buildGenotypeSummary(
 
 function isActionableHealthNote(note: { severity: Alert["severity"]; followupRequired: boolean }) {
   return note.followupRequired || note.severity === "warning" || note.severity === "critical";
+}
+
+function getUnresolvedActionableCageHealthNotes(cageId: string, labId: string) {
+  return prisma.healthNote.findMany({
+    where: {
+      cageId,
+      labId,
+      resolved: false,
+      OR: [{ followupRequired: true }, { severity: { in: ["warning", "critical"] } }],
+    },
+    orderBy: [{ severity: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+    select: {
+      id: true,
+      note: true,
+      severity: true,
+      followupRequired: true,
+      resolved: true,
+      createdAt: true,
+    },
+  });
 }
 
 async function getCageRuleContext(): Promise<CageRuleContext> {
@@ -909,106 +963,56 @@ export async function getPrintableCageLabelView(
   };
 }
 
-export async function getAnimalTransferWorkspaceView(
-  requestedDestinationCageId: string,
-  actor?: LabActor,
-): Promise<AnimalTransferWorkspaceView> {
-  const access = actor ? await getActorLabAccess(actor) : null;
-  const [rules, animals, cages] = await Promise.all([
-    getCageRuleContext(),
-    prisma.animal.findMany({
-      where: {
-        outcomeStatus: "alive",
-        currentCageId: { not: null },
-        ...(access && !access.canViewAll ? { owningLabId: { in: access.memberLabIds } } : {}),
-      },
-      orderBy: { animalId: "asc" },
-      include: {
-        strain: {
-          select: {
-            name: true,
-          },
-        },
-        currentCage: {
-          select: {
-            id: true,
-            barcode: true,
-            cageNumber: true,
-            room: {
-              select: {
-                roomNumber: true,
-              },
-            },
-            rack: {
-              select: {
-                rackNumber: true,
-              },
-            },
-          },
-        },
-        owningLab: {
-          select: {
-            name: true,
-            code: true,
-          },
-        },
-      },
-    }),
-    prisma.cage.findMany({
-      where: {
-        active: true,
-        status: {
-          notIn: ["closed", "retired"],
-        },
-        ...(access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : {}),
-      },
-      orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
-      include: {
-        room: { select: { roomNumber: true, facility: { select: { maxCageOccupancy: true } } } },
-        rack: { select: { rackNumber: true } },
-        lab: {
-          select: {
-            name: true,
-            code: true,
-          },
-        },
-        animals: {
-          where: { outcomeStatus: "alive" },
-          include: {
-            strain: {
-              select: {
-                name: true,
-              },
-            },
-          },
-        },
+const transferCageSelect = {
+  id: true,
+  labId: true,
+  barcode: true,
+  cageNumber: true,
+  status: true,
+  capacityOverride: true,
+  room: { select: { roomNumber: true, facility: { select: { maxCageOccupancy: true } } } },
+  rack: { select: { rackNumber: true } },
+  lab: { select: { name: true, code: true } },
+  animals: {
+    where: { outcomeStatus: "alive" as const },
+    select: { sex: true, strain: { select: { name: true } } },
+  },
+  _count: {
+    select: {
       healthNotes: {
-        where: { cageId: { not: null } },
-        select: {
-          id: true,
-          labId: true,
-          note: true,
-            severity: true,
-            followupRequired: true,
-            resolved: true,
-            createdAt: true,
-          },
+        where: {
+          resolved: false,
+          OR: [{ followupRequired: true }, { severity: { in: ["warning", "critical"] as const } }],
         },
       },
-    }),
-  ]);
+    },
+  },
+} satisfies Prisma.CageSelect;
 
-  const cageOptions = cages.map((cage) => {
-    const healthNotes = cage.healthNotes.filter((note) => note.labId === cage.labId);
+async function getCageTransferOptions(
+  where: Prisma.CageWhereInput,
+  rules: CageRuleContext,
+  options: { skip?: number; take: number },
+): Promise<CageTransferOption[]> {
+  const cages = await prisma.cage.findMany({
+    where,
+    orderBy: [
+      { room: { roomNumber: "asc" } },
+      { rack: { rackNumber: "asc" } },
+      { cageNumber: "asc" },
+      { id: "asc" },
+    ],
+    skip: options.skip,
+    take: Math.min(options.take, ANIMAL_TRANSFER_MAX_PAGE_SIZE),
+    select: transferCageSelect,
+  });
+
+  return cages.map((cage) => {
     const maleCount = cage.animals.filter((animal) => animal.sex === "male").length;
     const femaleCount = cage.animals.filter((animal) => animal.sex === "female").length;
     const unknownCount = cage.animals.filter((animal) => animal.sex === "unknown").length;
     const sexComposition = cage.animals.length
-      ? [
-          maleCount ? `${maleCount}M` : null,
-          femaleCount ? `${femaleCount}F` : null,
-          unknownCount ? `${unknownCount}U` : null,
-        ]
+      ? [maleCount ? `${maleCount}M` : null, femaleCount ? `${femaleCount}F` : null, unknownCount ? `${unknownCount}U` : null]
           .filter(Boolean)
           .join(" / ")
       : "Empty";
@@ -1034,13 +1038,107 @@ export async function getAnimalTransferWorkspaceView(
       femaleCount,
       sexComposition,
       strainSummary: strainSummary || "No active occupants",
-      warningCount: buildCageRuleAlerts({ ...cage, healthNotes }, rules).length,
+      warningCount:
+        (cage.animals.length > capacity.effectiveLimit ? 1 : 0)
+        + (!rules.mixedSexHoldingAllowed && cage.status !== "breeding" && maleCount > 0 && femaleCount > 0 ? 1 : 0)
+        + cage._count.healthNotes,
     };
   });
+}
 
-  const defaultDestinationCageId = cageOptions.some((cage) => cage.id === requestedDestinationCageId)
-    ? requestedDestinationCageId
-    : (cageOptions[0]?.id ?? requestedDestinationCageId);
+function activeTransferCageWhere(access: ActorLabAccess | null): Prisma.CageWhereInput {
+  return {
+    active: true,
+    status: { notIn: ["closed", "retired"] },
+    ...(access && !access.canViewAll ? { labId: { in: access.manageableLabIds } } : {}),
+  };
+}
+
+function cageTransferSearchWhere(search: string): Prisma.CageWhereInput {
+  if (!search) return {};
+  return {
+    OR: [
+      { barcode: { contains: search, mode: "insensitive" } },
+      { cageNumber: { contains: search, mode: "insensitive" } },
+      { room: { roomNumber: { contains: search, mode: "insensitive" } } },
+      { rack: { rackNumber: { contains: search, mode: "insensitive" } } },
+      { lab: { is: { name: { contains: search, mode: "insensitive" } } } },
+      { lab: { is: { code: { contains: search, mode: "insensitive" } } } },
+    ],
+  };
+}
+
+export async function getAnimalTransferWorkspacePageView(
+  requestedDestinationCageId: string,
+  actor: LabActor,
+  rawQuery: RawAnimalTransferQuery = {},
+): Promise<AnimalTransferWorkspaceView> {
+  const query = normalizeAnimalTransferQuery(rawQuery);
+  const [rules, access] = await Promise.all([getCageRuleContext(), getActorLabAccess(actor)]);
+  const authorizedCageWhere = activeTransferCageWhere(access);
+  const animalWhere: Prisma.AnimalWhereInput = {
+    outcomeStatus: "alive",
+    currentCageId: { not: null },
+    ...(access && !access.canViewAll ? { owningLabId: { in: access.manageableLabIds } } : {}),
+    ...(query.animalSearch ? {
+      OR: [
+        { animalId: { contains: query.animalSearch, mode: "insensitive" } },
+        { labId: { contains: query.animalSearch, mode: "insensitive" } },
+        { healthStatus: { contains: query.animalSearch, mode: "insensitive" } },
+        { strain: { name: { contains: query.animalSearch, mode: "insensitive" } } },
+        { currentCage: { is: { barcode: { contains: query.animalSearch, mode: "insensitive" } } } },
+      ],
+    } : {}),
+  };
+  const destinationWhere: Prisma.CageWhereInput = {
+    AND: [authorizedCageWhere, cageTransferSearchWhere(query.destinationSearch)],
+  };
+  const [animalTotalCount, destinationTotalCount, requestedDestination] = await Promise.all([
+    prisma.animal.count({ where: animalWhere }),
+    prisma.cage.count({ where: destinationWhere }),
+    requestedDestinationCageId
+      ? getCageTransferOptions({ AND: [authorizedCageWhere, { id: requestedDestinationCageId }] }, rules, { take: 1 })
+      : Promise.resolve([]),
+  ]);
+  const animalPageCount = Math.max(1, Math.ceil(animalTotalCount / query.pageSize));
+  const destinationPageCount = Math.max(1, Math.ceil(destinationTotalCount / query.pageSize));
+  const animalPage = Math.min(query.animalPage, animalPageCount);
+  const destinationPageNumber = Math.min(query.destinationPage, destinationPageCount);
+  const [animals, destinationPage] = await Promise.all([
+    prisma.animal.findMany({
+      where: animalWhere,
+      orderBy: [{ animalId: "asc" }, { id: "asc" }],
+      skip: (animalPage - 1) * query.pageSize,
+      take: query.pageSize,
+      select: {
+        id: true,
+        version: true,
+        animalId: true,
+        labId: true,
+        owningLabId: true,
+        sex: true,
+        status: true,
+        healthStatus: true,
+        strain: { select: { name: true } },
+        currentCageId: true,
+        currentCage: {
+          select: {
+            barcode: true,
+            cageNumber: true,
+            room: { select: { roomNumber: true } },
+            rack: { select: { rackNumber: true } },
+          },
+        },
+        owningLab: { select: { name: true, code: true } },
+      },
+    }),
+    getCageTransferOptions(destinationWhere, rules, {
+      skip: (destinationPageNumber - 1) * query.pageSize,
+      take: query.pageSize,
+    }),
+  ]);
+  const pinnedDestination = requestedDestination[0];
+  const defaultDestinationCageId = pinnedDestination?.id ?? destinationPage[0]?.id ?? "";
 
   return {
     commandNonce: randomUUID(),
@@ -1050,32 +1148,123 @@ export async function getAnimalTransferWorkspaceView(
       cageMaxOccupancy: rules.cageMaxOccupancy,
       mixedSexHoldingAllowed: rules.mixedSexHoldingAllowed,
     },
-    animalOptions: animals
-      .filter((animal) => animal.currentCageId && animal.currentCage)
-      .map((animal) => ({
-        id: animal.id,
-        version: animal.version,
-        animalId: animal.animalId,
-        labId: animal.labId,
-        owningLabId: animal.owningLabId ?? "",
-        owningLabName: animal.owningLab?.name ?? "Unassigned lab",
-        owningLabCode: animal.owningLab?.code ?? null,
-        sex: animal.sex,
-        status: animal.status,
-        healthStatus: animal.healthStatus ?? "Not recorded",
-        strain: animal.strain.name,
-        currentCageId: animal.currentCageId ?? "",
-        currentCageBarcode: animal.currentCage?.barcode ?? "",
-        currentCageLabel: animal.currentCage ? buildCageLabel(animal.currentCage) : "Unassigned",
-      })),
-    cageOptions,
+    animalOptions: animals.flatMap((animal) => animal.currentCageId && animal.currentCage ? [{
+      id: animal.id,
+      version: animal.version,
+      animalId: animal.animalId,
+      labId: animal.labId,
+      owningLabId: animal.owningLabId ?? "",
+      owningLabName: animal.owningLab?.name ?? "Unassigned lab",
+      owningLabCode: animal.owningLab?.code ?? null,
+      sex: animal.sex,
+      status: animal.status,
+      healthStatus: animal.healthStatus ?? "Not recorded",
+      strain: animal.strain.name,
+      currentCageId: animal.currentCageId,
+      currentCageBarcode: animal.currentCage.barcode,
+      currentCageLabel: buildCageLabel(animal.currentCage),
+    }] : []),
+    cageOptions: destinationPage,
+    pinnedDestination,
+    animalResults: {
+      totalCount: animalTotalCount,
+      page: animalPage,
+      pageCount: animalPageCount,
+      pageSize: query.pageSize,
+    },
+    destinationResults: {
+      totalCount: destinationTotalCount,
+      page: destinationPageNumber,
+      pageCount: destinationPageCount,
+      pageSize: query.pageSize,
+    },
+    query: { ...query, animalPage, destinationPage: destinationPageNumber },
   };
 }
 
-export async function getCageDetailView(cageId: string, actor?: LabActor) {
+export async function getCageClosureDestinationOptions(
+  sourceCageId: string,
+  actor: LabActor,
+  rawQuery: RawAnimalTransferQuery = {},
+) {
+  const query = normalizeAnimalTransferQuery(rawQuery);
+  const access = await getActorLabAccess(actor);
+  const sourceCage = await prisma.cage.findFirst({
+    where: {
+      id: sourceCageId,
+      ...(access && !access.canViewAll ? { labId: { in: access.manageableLabIds } } : {}),
+    },
+    select: { id: true, labId: true },
+  });
+  if (!sourceCage?.labId) return null;
   const rules = await getCageRuleContext();
-  const cage = await prisma.cage.findUnique({
-    where: { id: cageId },
+  const where: Prisma.CageWhereInput = {
+    AND: [
+      { id: { not: sourceCage.id }, active: true, status: { notIn: ["closed", "retired"] }, labId: sourceCage.labId },
+      cageTransferSearchWhere(query.destinationSearch),
+    ],
+  };
+  const totalCount = await prisma.cage.count({ where });
+  const pageCount = Math.max(1, Math.ceil(totalCount / query.pageSize));
+  const page = Math.min(query.destinationPage, pageCount);
+  const items = await getCageTransferOptions(where, rules, {
+    skip: (page - 1) * query.pageSize,
+    take: query.pageSize,
+  });
+  return {
+    items,
+    totalCount,
+    page,
+    pageCount,
+    pageSize: query.pageSize,
+    search: query.destinationSearch,
+  };
+}
+
+export async function getAnimalPresenceCageOptions(
+  animalId: string,
+  actor: LabActor,
+  rawQuery: RawAnimalTransferQuery = {},
+): Promise<AnimalPresenceCagePageView | null> {
+  const query = normalizeAnimalPresenceQuery(rawQuery);
+  const access = await getActorLabAccess(actor);
+  const animal = await prisma.animal.findFirst({
+    where: {
+      id: animalId,
+      outcomeStatus: "missing",
+      ...(!access.canViewAll ? { owningLabId: { in: access.manageableLabIds } } : {}),
+    },
+    select: { id: true, owningLabId: true },
+  });
+  if (!animal?.owningLabId) return null;
+
+  const rules = await getCageRuleContext();
+  const where: Prisma.CageWhereInput = {
+    AND: [
+      { active: true, status: { notIn: ["closed", "retired"] }, labId: animal.owningLabId },
+      cageTransferSearchWhere(query.search),
+    ],
+  };
+  const totalCount = await prisma.cage.count({ where });
+  const pageCount = Math.max(1, Math.ceil(totalCount / query.pageSize));
+  const page = Math.min(query.page, pageCount);
+  const items = await getCageTransferOptions(where, rules, {
+    skip: (page - 1) * query.pageSize,
+    take: query.pageSize,
+  });
+  return { items, totalCount, page, pageCount, pageSize: query.pageSize, search: query.search };
+}
+
+export async function getCageDetailView(cageId: string, actor?: LabActor) {
+  const [rules, access] = await Promise.all([
+    getCageRuleContext(),
+    actor ? getActorLabAccess(actor) : Promise.resolve(null),
+  ]);
+  const cage = await prisma.cage.findFirst({
+    where: {
+      id: cageId,
+      ...(access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : {}),
+    },
     include: {
       room: { select: { roomNumber: true, facility: { select: { maxCageOccupancy: true } } } },
       rack: { select: { rackNumber: true } },
@@ -1114,18 +1303,31 @@ export async function getCageDetailView(cageId: string, actor?: LabActor) {
       animals: {
         where: { outcomeStatus: "alive" },
         orderBy: { animalId: "asc" },
-        include: {
+        select: {
+          id: true,
+          animalId: true,
+          labId: true,
+          owningLabId: true,
+          sex: true,
+          dob: true,
+          status: true,
+          healthStatus: true,
           owningLab: { select: { id: true, name: true, code: true } },
           alleles: {
-            include: {
+            select: {
+              zygosity: true,
               allele: { select: { name: true } },
             },
           },
         },
       },
       healthNotes: {
-        where: { cageId: { not: null } },
+        where: {
+          cageId: { not: null },
+          ...(access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : {}),
+        },
         orderBy: { createdAt: "desc" },
+        take: CAGE_DETAIL_HISTORY_LIMIT,
         select: {
           id: true,
           labId: true,
@@ -1148,6 +1350,7 @@ export async function getCageDetailView(cageId: string, actor?: LabActor) {
       },
       cageMovements: {
         orderBy: { movedAt: "desc" },
+        take: CAGE_DETAIL_HISTORY_LIMIT,
         select: {
           id: true,
           fromLocation: true,
@@ -1176,8 +1379,6 @@ export async function getCageDetailView(cageId: string, actor?: LabActor) {
       },
     },
   });
-  const access = actor ? await getActorLabAccess(actor) : null;
-
   if (!cage) {
     return null;
   }
@@ -1193,15 +1394,18 @@ export async function getCageDetailView(cageId: string, actor?: LabActor) {
     actor && access && canManageLab(access, cage.labId) ? getCageResponsibilityOptions(cage.labId) : Promise.resolve([]),
   ]);
 
-  const manualAlerts = await prisma.alert.findMany({
-    where: {
-      labId: cage.labId,
-      entityType: "cage",
-      entityId: cage.id,
-      status: "open",
-    },
-    orderBy: { generatedAt: "desc" },
-  });
+  const [manualAlerts, actionableHealthNotes] = await Promise.all([
+    prisma.alert.findMany({
+      where: {
+        labId: cage.labId,
+        entityType: "cage",
+        entityId: cage.id,
+        status: "open",
+      },
+      orderBy: { generatedAt: "desc" },
+    }),
+    getUnresolvedActionableCageHealthNotes(cage.id, cage.labId),
+  ]);
 
   const healthNotes = cage.healthNotes
     .filter((note) => note.labId === cage.labId)
@@ -1210,6 +1414,11 @@ export async function getCageDetailView(cageId: string, actor?: LabActor) {
       attachments: note.attachments.filter((attachment) => attachment.labId === cage.labId),
     }));
   const scopedAnimals = cage.animals.filter((animal) => animal.owningLabId === cage.labId);
+  const displayedHealthNoteIds = new Set(healthNotes.map((note) => note.id));
+  const ruleHealthNotes = [
+    ...healthNotes,
+    ...actionableHealthNotes.filter((note) => !displayedHealthNoteIds.has(note.id)),
+  ];
   const alerts = [
     ...manualAlerts.map<Alert>((alert) => ({
       id: alert.id,
@@ -1223,7 +1432,7 @@ export async function getCageDetailView(cageId: string, actor?: LabActor) {
       resolvedAt: alert.resolvedAt?.toISOString(),
       source: (alert.source as "rule" | "manual") ?? "manual",
     })),
-    ...buildCageRuleAlerts({ ...cage, animals: scopedAnimals, healthNotes }, rules),
+    ...buildCageRuleAlerts({ ...cage, animals: scopedAnimals, healthNotes: ruleHealthNotes }, rules),
   ].sort((left, right) => compareDesc(new Date(left.generatedAt), new Date(right.generatedAt)));
   const capacity = getCageCapacityState({
     facilityLimit: cage.room.facility.maxCageOccupancy,
@@ -1329,9 +1538,15 @@ export async function getCageDetailView(cageId: string, actor?: LabActor) {
 }
 
 export async function getScanCageViewByBarcode(barcode: string, actor?: LabActor) {
-  const rules = await getCageRuleContext();
-  const cage = await prisma.cage.findUnique({
-    where: { barcode },
+  const [rules, access] = await Promise.all([
+    getCageRuleContext(),
+    actor ? getActorLabAccess(actor) : Promise.resolve(null),
+  ]);
+  const cage = await prisma.cage.findFirst({
+    where: {
+      barcode,
+      ...(access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : {}),
+    },
     include: {
       room: { select: { roomNumber: true, facility: { select: { maxCageOccupancy: true } } } },
       rack: { select: { rackNumber: true } },
@@ -1387,8 +1602,12 @@ export async function getScanCageViewByBarcode(barcode: string, actor?: LabActor
         },
       },
       healthNotes: {
-        where: { cageId: { not: null } },
+        where: {
+          cageId: { not: null },
+          ...(access && !access.canViewAll ? { labId: { in: access.memberLabIds } } : {}),
+        },
         orderBy: { createdAt: "desc" },
+        take: SCAN_HEALTH_NOTE_LIMIT,
         select: {
           id: true,
           labId: true,
@@ -1434,8 +1653,6 @@ export async function getScanCageViewByBarcode(barcode: string, actor?: LabActor
       },
     },
   });
-  const access = actor ? await getActorLabAccess(actor) : null;
-
   if (!cage) {
     return null;
   }
@@ -1451,15 +1668,18 @@ export async function getScanCageViewByBarcode(barcode: string, actor?: LabActor
     actor && access && canManageLab(access, cage.labId) ? getCageResponsibilityOptions(cage.labId) : Promise.resolve([]),
   ]);
 
-  const manualAlerts = await prisma.alert.findMany({
-    where: {
-      labId: cage.labId,
-      entityType: "cage",
-      entityId: cage.id,
-      status: "open",
-    },
-    orderBy: { generatedAt: "desc" },
-  });
+  const [manualAlerts, actionableHealthNotes] = await Promise.all([
+    prisma.alert.findMany({
+      where: {
+        labId: cage.labId,
+        entityType: "cage",
+        entityId: cage.id,
+        status: "open",
+      },
+      orderBy: { generatedAt: "desc" },
+    }),
+    getUnresolvedActionableCageHealthNotes(cage.id, cage.labId),
+  ]);
 
   const healthNotes = cage.healthNotes
     .filter((note) => note.labId === cage.labId)
@@ -1468,7 +1688,12 @@ export async function getScanCageViewByBarcode(barcode: string, actor?: LabActor
       attachments: note.attachments.filter((attachment) => attachment.labId === cage.labId),
     }));
   const scopedAnimals = cage.animals.filter((animal) => animal.owningLabId === cage.labId);
-  const alerts = [...normalizeManualAlerts(manualAlerts), ...buildCageRuleAlerts({ ...cage, animals: scopedAnimals, healthNotes }, rules)].sort((left, right) =>
+  const displayedHealthNoteIds = new Set(healthNotes.map((note) => note.id));
+  const ruleHealthNotes = [
+    ...healthNotes,
+    ...actionableHealthNotes.filter((note) => !displayedHealthNoteIds.has(note.id)),
+  ];
+  const alerts = [...normalizeManualAlerts(manualAlerts), ...buildCageRuleAlerts({ ...cage, animals: scopedAnimals, healthNotes: ruleHealthNotes }, rules)].sort((left, right) =>
     compareDesc(new Date(left.generatedAt), new Date(right.generatedAt)),
   );
   const capacity = getCageCapacityState({

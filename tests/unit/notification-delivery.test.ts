@@ -7,6 +7,11 @@ import {
   deliverNotificationDigest,
   validateNotificationEmailProviderUrl,
 } from "@/lib/notification-delivery";
+import {
+  authenticateOutboxWorker,
+  claimOutboxMessages,
+  maintainExpiredOutboxLeases,
+} from "@/lib/command-foundation";
 import { materializeDashboardNotifications } from "@/lib/notification-materialization";
 import { prisma } from "@/lib/prisma";
 import type { ResolvedActor } from "@/lib/session";
@@ -113,6 +118,82 @@ describe("notification delivery", () => {
       configured: false,
       error: expect.stringContaining("SUPPORTS_IDEMPOTENCY=true"),
     });
+  });
+
+  it("sweeps an expired final lease even while the email provider is disabled", async () => {
+    const token = "disabled-provider-maintenance-token-0123456789";
+    vi.stubEnv("OUTBOX_WORKER_TOKEN_NOTIFICATION_DELIVERY", token);
+    await materializeUrgentAlert();
+    const worker = authenticateOutboxWorker({
+      workerId: "disabled-provider-maintenance",
+      workerType: "notification_delivery",
+      token,
+    });
+    expect(worker).not.toBeNull();
+    if (!worker) return;
+    const [claimed] = await claimOutboxMessages({ worker, limit: 1 });
+    expect(claimed).toBeDefined();
+    if (!claimed) throw new Error("Expected a notification job to be claimed.");
+    await prisma.outboxMessage.update({
+      where: { id: claimed.id },
+      data: { maxAttempts: 1, leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+
+    const result = await deliverNotificationDigest({ dryRun: false, limit: 1 }, deliveryActor);
+
+    expect(result.message).toBe("Email delivery is disabled.");
+    await expect(prisma.outboxMessage.findUniqueOrThrow({ where: { id: claimed.id } })).resolves.toMatchObject({
+      status: "dead_letter",
+      leaseToken: null,
+    });
+    await expect(prisma.outboxDeliveryAttempt.findUniqueOrThrow({ where: { leaseToken: claimed.leaseToken! } })).resolves.toMatchObject({
+      status: "failed",
+      completedAt: expect.any(Date),
+    });
+  });
+
+  it("returns a non-final expired lease to retry and permits a new durable attempt", async () => {
+    const token = "expired-retry-maintenance-token-0123456789";
+    vi.stubEnv("OUTBOX_WORKER_TOKEN_NOTIFICATION_DELIVERY", token);
+    await materializeUrgentAlert();
+    const worker = authenticateOutboxWorker({
+      workerId: "expired-retry-maintenance",
+      workerType: "notification_delivery",
+      token,
+    });
+    expect(worker).not.toBeNull();
+    if (!worker) return;
+    const [firstClaim] = await claimOutboxMessages({ worker, limit: 1 });
+    if (!firstClaim) throw new Error("Expected the first notification claim.");
+    await prisma.outboxMessage.update({
+      where: { id: firstClaim.id },
+      data: { maxAttempts: 3, leaseExpiresAt: new Date(Date.now() - 1_000) },
+    });
+
+    await expect(maintainExpiredOutboxLeases({ worker, limit: 1 })).resolves.toEqual({
+      scanned: 1,
+      retried: 1,
+      deadLettered: 0,
+    });
+    await expect(prisma.outboxMessage.findUniqueOrThrow({ where: { id: firstClaim.id } })).resolves.toMatchObject({
+      status: "retry",
+      attemptCount: 1,
+      leaseToken: null,
+    });
+    await expect(prisma.outboxDeliveryAttempt.findUniqueOrThrow({ where: { leaseToken: firstClaim.leaseToken! } })).resolves.toMatchObject({
+      status: "failed",
+      completedAt: expect.any(Date),
+    });
+
+    // Other valid seed jobs share this worker topic. Make this retry the oldest
+    // eligible job so the assertion identifies the lease we intentionally expired.
+    await prisma.outboxMessage.update({
+      where: { id: firstClaim.id },
+      data: { availableAt: new Date(0) },
+    });
+    const [secondClaim] = await claimOutboxMessages({ worker, limit: 1, maintainExpiredLeases: false });
+    expect(secondClaim).toMatchObject({ id: firstClaim.id, status: "leased", attemptCount: 2 });
+    await expect(prisma.outboxDeliveryAttempt.count({ where: { messageId: firstClaim.id } })).resolves.toBe(2);
   });
 
   it("claims and completes exact-recipient email jobs", async () => {

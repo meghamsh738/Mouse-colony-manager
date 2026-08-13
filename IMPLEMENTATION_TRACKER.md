@@ -1,6 +1,6 @@
 # Role-Scoped Colony Platform Implementation Tracker
 
-Last updated: 2026-07-18
+Last updated: 2026-08-13
 
 This is the source of truth for the role-scoped redesign in the `codex/empty-colony` worktree. A requirement is complete only when its status is **Verified** and evidence is recorded below.
 
@@ -9,6 +9,7 @@ This is the source of truth for the role-scoped redesign in the `codex/empty-col
 - **Not started**: no implementation work has begun.
 - **In progress**: implementation or verification is active.
 - **Blocked**: progress requires an external decision or state change; record the blocker.
+- **Deferred**: intentionally postponed because its prerequisite does not yet exist or requires a future owner-approved rollout; record why it does not block the current local product.
 - **Implemented**: code exists, but the complete acceptance gate has not passed.
 - **Verified**: implementation, tests, review, and required browser/database evidence pass.
 
@@ -119,12 +120,12 @@ This is the source of truth for the role-scoped redesign in the `codex/empty-col
 | ID | Requirement | Status |
 | --- | --- | --- |
 | M6-01 | Full lab Experiments workspace | Verified |
-| M6-02 | CMU operational Procedures workspace and DTO | Implemented; browser acceptance pending |
-| M6-03 | Lab/user/cage-scoped Forecast | Implemented; browser acceptance pending |
+| M6-02 | CMU operational Procedures workspace and DTO | Verified |
+| M6-03 | Lab/user/cage-scoped Forecast | Verified |
 | M6-04 | Lab-owned Biosamples with optional experiment linkage | Verified |
-| M6-05 | Lab cryostorage request plus CMU execution | Implemented; browser acceptance pending |
-| M6-06 | Immutable facility/lab SOP versions, approvals, assignment, acknowledgement | Implemented; browser acceptance pending |
-| M6-07 | Historical procedure/lifecycle references to exact SOP version | Implemented; browser acceptance pending |
+| M6-05 | Lab cryostorage request plus CMU execution | Verified |
+| M6-06 | Immutable facility/lab SOP versions, approvals, assignment, acknowledgement | Verified |
+| M6-07 | Historical procedure/lifecycle references to exact SOP version | Verified |
 
 ## Milestone 7: Notifications, Billing, Audit, Administration
 
@@ -170,11 +171,11 @@ M8-07 evidence: mobile touch targets have been tightened across dashboard, rule 
 
 | ID | Requirement | Status |
 | --- | --- | --- |
-| M9-01 | Production-shaped backup restore | In progress |
-| M9-02 | Expand/backfill/verify/constrain/cutover/contract rehearsal | Not started |
-| M9-03 | Ownership and legacy-state exception resolution | Not started |
-| M9-04 | Revoke legacy sessions at cutover | Not started |
-| M9-05 | Row-count, constraint, rollback, and roll-forward evidence | Not started |
+| M9-01 | Production-shaped backup restore | Deferred — no real colony database exists |
+| M9-02 | Expand/backfill/verify/constrain/cutover/contract rehearsal | Deferred — no legacy dataset exists |
+| M9-03 | Ownership and legacy-state exception resolution | Deferred — no legacy exceptions exist |
+| M9-04 | Revoke legacy sessions at cutover | Deferred — no production cutover is scheduled |
+| M9-05 | Row-count, constraint, rollback, and roll-forward evidence | Deferred — production-shaped rehearsal awaits real data |
 
 M9-01 progress: the synthetic-only backup/restore evidence harness completed its guarded two-database integration run against disposable PostgreSQL 16.14 databases `mcm_test_m9_source_20260726_r1` and `mcm_test_m9_restore_20260726_r1`, using application schema `mcm_test_populated`. Its fail-closed boundary requires distinct loopback `mcm_test_*` databases with matching application schemas, production mode disabled, data class exactly `synthetic`, a database-level default read-only source setting with no conflicting settings for any role or other client sessions, and canonical mode-restricted artifact paths under an approved runtime root outside the source worktree. The implementation inventories non-extension-owned user relations, routines, types, operators, collations, conversions, text-search objects, large objects, event triggers, foreign wrappers/servers, publications, subscriptions, custom access methods, and casts; permits application objects only in the exact application schema and only `pgcrypto` in `public`; rejects unsupported database-wide objects; archives only the selected application schema plus `pgcrypto`; checks an empty restore baseline; matches PostgreSQL cluster identity and server/client majors; keeps credentials and unrelated application secrets out of command arguments and subprocess environments; derives schema evidence from the custom archive; and performs an atomic restore.
 
@@ -183,6 +184,8 @@ M9-01 synthetic evidence: run `m9-backup-2026-07-26T21-22-52-730Z-38145` produce
 The M9 synthetic fixture is additive-only because execution policy prohibits reset-style seeds. It requires a freshly migrated loopback database and matching `mcm_test_*` schema. In one transaction it rejects other database clients, locks every application table, proves every non-migration fixture table is empty, verifies the exact migration-managed `FacilityIdentitySequence` baseline, and inserts one minimal lab/facility identity fixture. It contains no delete, update, upsert, or attachment-file cleanup path.
 
 M9-01 synthetic-slice validation passed 92 unit files / 444 tests, focused seed/harness workflow tests (3 files / 18 tests), typecheck, scoped ESLint, Prisma validation, retained-data workflow validation, production build (50 routes), and `git diff --check`. One date-sensitive procedure wiring test now pins its clock so its fixed future-schedule fixture does not expire. Independent high-risk review returned CLEAR with no P0/P1/P2 blockers after atomic seed and source-bound runbook corrections.
+
+M9 deferral: the user confirmed there is no real colony database yet and approved the synthetic empty-colony example as the current product baseline. The guarded synthetic backup/restore harness remains available, but a production-shaped rehearsal, legacy exception cleanup, session cutover, and rollback/roll-forward evidence would be fictional without a real source dataset and approved encryption/retention controls. These items are therefore Deferred rather than treated as local product blockers.
 
 ## Approved Product Slice: Unit-wide Strain Directory
 
@@ -196,19 +199,27 @@ SD-01 evidence: migration `0036_strain_directory` adds lab-owned strain listings
 
 | ID | Requirement | Status |
 | --- | --- | --- |
-| M10-01 | Pagination and bounded relationship history | In progress — Animals and Cages inventory slices complete |
-| M10-02 | Narrow projections and request-scoped actor/access context | In progress — safe first pass complete |
-| M10-03 | Loading boundaries and measured indexes | In progress — loading boundaries complete |
-| M10-04 | Bounded outbox workers and queue observability | Not started |
-| M10-05 | 10k animals, 2k cages, 50-user stress run | Not started |
-| M10-06 | Record p50/p95, query count, memory, pool failures, queue delay, and error rate | Not started |
-| M10-07 | Hosting decision based on measured evidence | Not started |
+| M10-01 | Pagination and bounded relationship history | In progress — final review fixes active |
+| M10-02 | Narrow projections and request-scoped actor/access context | Implemented; final acceptance pending |
+| M10-03 | Loading boundaries and measured indexes | In progress — explicit transfer workspace bound pending |
+| M10-04 | Bounded outbox workers and queue observability | Implemented; final behavioral tests pending |
+| M10-05 | Maximum schema-valid scale: 9,999 animals, 2,000 cages, 50-user stress run | Implemented; clean-commit acceptance run pending |
+| M10-06 | Record p50/p95, query count, memory, pool failures, queue delay, and error rate | Implemented; clean-commit acceptance run pending |
+| M10-07 | Hosting topology decision based on measured evidence | Implemented; final acceptance pending |
 
 M10 first-pass evidence: the ChatGPT Pro source review is retained in `docs/PERFORMANCE_REVIEW.md`. The implementation request-deduplicates actor resolution, gives read models an explicit request-scoped access helper while command handlers always re-check live database membership (including inside cage-detail updates), and streams non-critical alert status behind independent loading boundaries. Animals, biosamples, and cryostorage no longer load create-form options for users without the matching capability; lab-transfer destination cages are batched by authorized destination lab; barcode scanning uses in-app routing; and common operational pages now have synchronous lightweight loading states. No schema migration, persistent cache, real colony data, or production service changed. Focused tests, the full unit suite, Prisma validation, authorization-manifest validation, type checking, ESLint, diff checks, desktop route navigation, and 390 x 844 mobile QA passed; independent re-review found no P0/P1/P2 blockers. Pagination/history bounds, measured index work, and the remaining load/stress/hosting decisions remain open behind the documented measurement gate.
 
 M10-01 Animals evidence: the interactive Animals inventory now applies authorization before counting or fetching rows, performs whole-authorized-colony search/status/availability filtering in PostgreSQL, and returns stable URL-addressable pages of 80 rows with a hard maximum of 100. Out-of-range pages redirect to the canonical last page, filtered CSV exports retain the active filters, and the existing integration API and Workbook keep their intentional full-list behavior. No schema migration, persistent cache, production service, or real colony data changed. Focused pagination/privacy tests, 100 unit files / 464 tests, 8 guarded disposable-database files / 148 tests, Prisma validation, TypeScript, ESLint (five pre-existing non-blocking warnings), the 51-page production build, and the complete 78-scenario browser suite (39 desktop and 39 mobile) passed. Manual diff review found no blocking issue; independent subagent review was unavailable under the active no-delegation constraint. The subsequent Cages slice is recorded below; biosample, cryostorage, and bounded detail-history work remains open, so M10-01 stays In progress.
 
-M10-01 Cages evidence: the interactive Cages inventory now applies lab authorization before its count, warning derivation, filter-option queries, and row fetch. Search, status, lab, active charge category/state, occupancy, sex mix, and calculated/stored warnings are URL-backed whole-authorized-colony filters with stable pages of 80 and a hard maximum of 100; out-of-range pages redirect to the canonical last page. The list projection now selects only the cage, active charge, live occupant, active project, and unresolved actionable welfare fields required by the UI instead of loading complete cage/animal records. Warning-only pagination performs a narrow scoped candidate read before the final count/page query. Existing integration API, Workbook, CSV, label-print, and scan full-list contracts remain unchanged. No schema migration, persistent cache, production service, or real colony data changed. Focused cage security/query tests (4) and combined inventory tests (9), 100 unit files / 467 tests, 8 guarded disposable-database files / 148 tests, Prisma validation, TypeScript, ESLint (five pre-existing non-blocking warnings), the 51-page production build, and the complete 80-scenario browser suite (40 desktop and 40 mobile) passed. Manual diff review found no blocking issue; independent subagent review was unavailable under the active no-delegation constraint. Biosample, cryostorage, and bounded detail-history work remains open, so M10-01 stays In progress.
+M10-01 Cages slice evidence: the interactive Cages inventory now applies lab authorization before its count, warning derivation, filter-option queries, and row fetch. Search, status, lab, active charge category/state, occupancy, sex mix, and calculated/stored warnings are URL-backed whole-authorized-colony filters with stable pages of 80 and a hard maximum of 100; out-of-range pages redirect to the canonical last page. The list projection now selects only the cage, active charge, live occupant, active project, and unresolved actionable welfare fields required by the UI instead of loading complete cage/animal records. Warning-only pagination performs a narrow scoped candidate read before the final count/page query. Existing integration API, Workbook, CSV, label-print, and scan full-list contracts remain unchanged. No schema migration, persistent cache, production service, or real colony data changed. Focused cage security/query tests (4) and combined inventory tests (9), 100 unit files / 467 tests, 8 guarded disposable-database files / 148 tests, Prisma validation, TypeScript, ESLint (five pre-existing non-blocking warnings), the 51-page production build, and the complete 80-scenario browser suite (40 desktop and 40 mobile) passed. Biosample, cryostorage, and bounded detail-history work was completed in the final M10 gate below.
+
+M10-01 through M10-03 completion evidence: Samples and Cryostorage now apply authorization in PostgreSQL before count/search/filter/page operations, use stable URL-backed pages of 80 with a hard maximum of 100, and expose only narrow request-target fields to eligible request forms. Animal, cage, and scan detail histories are bounded to the newest relevant records (50 animal events, 50 cage events, and 15 scan notes), select only displayed fields, and preserve explicit truncation/fallback signals. Default cage and scan renders no longer load or serialize the colony-wide animal-transfer workspace; an authorized operational user loads it only after explicitly choosing **Move mouse**. The 9,999-animal query-plan check completed in 16.6 ms for the broad animal search and 3.6 ms for the cage query, so no speculative index or schema migration was added. Deferring the transfer workspace reduced scan/cage React Server Component response p95 from roughly 4.66 MB to under 79 KB.
+
+M10-04 evidence: the application now has a one-shot, scheduler-friendly outbox worker with topic-specific authentication, bounded batches/concurrency/runtime/provider timeout, leases sized for DNS plus provider and finalization time, bounded expired-lease maintenance, per-invocation single-attempt semantics, durable retry/dead-letter state, and privacy-safe aggregate System observability. Notification delivery requires an explicitly allowlisted idempotent provider; SOP delivery revalidates the already-committed durable assignment before acknowledgement. A dedicated guarded loopback probe used the normal notification materializer, real worker, and idempotent local provider for ten deliveries. Aggregate queue wait p50/p95/max was 1,088/1,420/1,420 ms, service time 40/285/285 ms, and end-to-end time 736/1,030/1,030 ms. The database-backed delivery suite passed 9 focused cases and the full guarded database suite passed 8 files / 149 tests.
+
+M10-05 and M10-06 evidence: the guarded additive-only load seed populated a fresh loopback PostgreSQL 16.14 target with exactly 9,999 animals, 2,000 cages, 50 distinct synthetic load users (55 total including base identities), identity-assignment parity, and maximum occupancy six. Exact 10,000 is impossible under the reviewed four-digit `0001`–`9999` facility-animal identity contract and its database trigger; the load gate therefore uses the maximum valid population rather than weakening identity integrity for one artificial row. A Node.js 22.23.2 production build sustained an observed peak of 50 authenticated concurrent requests across 1,536 samples with zero HTTP/content/network errors and zero unexpected writes: p50 2.795 s, p95 4.824 s, 16.19 requests/s actual throughput, schedule-delay p95 35.4 s, application RSS p95 2.302 GB/max 2.413 GB, maximum 21 PostgreSQL connections, an estimated 44,861 aggregate application database calls, and zero pool/connection failure signals. The source-dirty local run is diagnostic evidence; a clean-commit reproducibility run remains the final artifact gate before external staging.
+
+M10-07 evidence: `docs/HOSTING_DECISION.md` records the vendor-neutral production topology supported by the current application: a long-running Node.js 22 service, same-region managed PostgreSQL 16 with a bounded pool and direct migration connection, private persistent object storage, a separately scheduled bounded outbox worker, and privacy-safe monitoring. The measured local maximum requires a staging candidate with at least 4.826 GB usable application-memory capacity for 2× headroom; a practical first candidate should provide at least 6 GB without preselecting a vendor tier. Vendor, region, budget, recovery objectives, identity/domain, provider, and production rollout remain deliberately deferred until the owner approves them and the identical synthetic profile, object-storage checks, queue recovery, and encrypted restore pass in staging.
 
 ## Required Gate For Every Milestone
 

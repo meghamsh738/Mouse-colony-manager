@@ -1,12 +1,12 @@
 "use client";
 
+import Form from "next/form";
 import Link from "next/link";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
-  getFilteredRowModel,
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
@@ -15,11 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { RowActionMenu } from "@/components/app/worksheet-shell";
 import { SampleInlineEditForm } from "@/components/app/sample-inline-edit-form";
-import {
-  INITIAL_VISIBLE_RECORDS,
-  VISIBLE_RECORD_BATCH,
-  VisibleRecordControls,
-} from "@/components/app/visible-record-controls";
+import { InventoryPagination } from "@/components/app/inventory-pagination";
+import type { SampleInventoryQuery } from "@/lib/samples-read";
 import type { SampleInventoryItem } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -49,6 +46,12 @@ type SampleTableProps = {
   data: SampleInventoryItem[];
   experimentOptions: Array<{ id: string; label: string; status: string }>;
   canManage: boolean;
+  page: number;
+  pageCount: number;
+  pageSize: number;
+  query: SampleInventoryQuery;
+  sampleTypes: string[];
+  totalCount: number;
 };
 
 function editableExperimentOptions(
@@ -60,74 +63,19 @@ function editableExperimentOptions(
   );
 }
 
-export function SampleTable({ data, experimentOptions, canManage }: SampleTableProps) {
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | SampleInventoryItem["status"]>("all");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [experimentFilter, setExperimentFilter] = useState("all");
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_RECORDS);
-  const deferredSearch = useDeferredValue(search);
-
-  const sampleTypes = useMemo(
-    () => Array.from(new Set(data.map((record) => record.sampleType))).sort((left, right) => left.localeCompare(right)),
-    [data],
-  );
-
-  const filteredData = useMemo(
-    () =>
-      data.filter((record) => {
-        const haystack = [
-          record.sampleLabel,
-          record.sampleType,
-          record.animalCode,
-          record.labId,
-          record.projectCode ?? "",
-          record.experimentCode ?? "",
-          record.storageLocation ?? "",
-          record.quantityLabel ?? "",
-          record.notes ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
-
-        const matchesSearch = haystack.includes(deferredSearch.toLowerCase());
-        const matchesStatus = statusFilter === "all" ? true : record.status === statusFilter;
-        const matchesType = typeFilter === "all" ? true : record.sampleType === typeFilter;
-        const matchesExperiment = experimentFilter === "all"
-          ? true
-          : experimentFilter === "none"
-            ? !record.experimentId
-            : record.experimentId === experimentFilter;
-
-        return matchesSearch && matchesStatus && matchesType && matchesExperiment;
-      }),
-    [data, deferredSearch, experimentFilter, statusFilter, typeFilter],
-  );
-
-  useEffect(() => {
-    setVisibleCount(INITIAL_VISIBLE_RECORDS);
-  }, [data.length, deferredSearch, experimentFilter, statusFilter, typeFilter]);
-
-  const visibleData = useMemo(() => filteredData.slice(0, visibleCount), [filteredData, visibleCount]);
-
-  const counts = useMemo(
-    () =>
-      filteredData.reduce(
-        (summary, record) => {
-          summary.total += 1;
-          summary[record.status] += 1;
-          return summary;
-        },
-        {
-          total: 0,
-          collected: 0,
-          stored: 0,
-          allocated: 0,
-          consumed: 0,
-          discarded: 0,
-        },
-      ),
-    [filteredData],
+export function SampleTable({
+  canManage,
+  data,
+  experimentOptions,
+  page,
+  pageCount,
+  pageSize,
+  query,
+  sampleTypes,
+  totalCount,
+}: SampleTableProps) {
+  const filtersActive = Boolean(
+    query.search || query.status !== "all" || query.sampleType !== "all" || query.experimentId !== "all",
   );
 
   const columns = useMemo(
@@ -205,28 +153,28 @@ export function SampleTable({ data, experimentOptions, canManage }: SampleTableP
   // React Compiler compatibility warning is appropriate for this boundary.
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: visibleData,
+    data,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
 
   return (
     <div className="space-y-5" data-testid="sample-table">
       <div className="space-y-3">
-        <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto_auto]">
+        <Form action="/samples" className="grid min-w-0 gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto] 2xl:grid-cols-[minmax(16rem,1fr)_auto_auto_auto_auto]" scroll={false}>
           <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            defaultValue={query.search}
+            name="search"
             placeholder="Search sample label, animal ID, project, storage, or notes"
             className="min-w-0"
             data-testid="sample-search"
           />
           <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+            defaultValue={query.status}
+            name="status"
             className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
+            aria-label="Filter biosamples by status"
           >
             <option value="all">All statuses</option>
             <option value="stored">Stored</option>
@@ -236,8 +184,8 @@ export function SampleTable({ data, experimentOptions, canManage }: SampleTableP
             <option value="discarded">Discarded</option>
           </select>
           <select
-            value={experimentFilter}
-            onChange={(event) => setExperimentFilter(event.target.value)}
+            defaultValue={query.experimentId}
+            name="experimentId"
             className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
             aria-label="Filter biosamples by experiment"
           >
@@ -248,9 +196,10 @@ export function SampleTable({ data, experimentOptions, canManage }: SampleTableP
             ))}
           </select>
           <select
-            value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value)}
+            defaultValue={query.sampleType}
+            name="sampleType"
             className="h-11 w-full min-w-0 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm text-[var(--ink)] md:w-auto"
+            aria-label="Filter biosamples by sample type"
           >
             <option value="all">All sample types</option>
             {sampleTypes.map((sampleType) => (
@@ -259,32 +208,33 @@ export function SampleTable({ data, experimentOptions, canManage }: SampleTableP
               </option>
             ))}
           </select>
-        </div>
-        <div className="count-strip">
-          <span>
-            Showing <span className="font-medium text-[var(--ink)]">{visibleData.length}</span> of{" "}
-            <span className="font-medium text-[var(--ink)]">{counts.total}</span> matching records
-          </span>
-          <span>
-            <span className="font-medium text-[var(--ink)]">{counts.stored}</span> stored
-          </span>
-          <span>
-            <span className="font-medium text-[var(--ink)]">{counts.allocated}</span> allocated
-          </span>
-          <span>
-            <span className="font-medium text-[var(--ink)]">{counts.consumed + counts.discarded}</span> closed out
-          </span>
+          <input name="pageSize" type="hidden" value={pageSize} />
+          <button
+            className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--accent)] px-4 text-sm font-semibold text-white transition-colors hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+            data-testid="sample-filter-submit"
+            type="submit"
+          >
+            Apply filters
+          </button>
+        </Form>
+        <div className="count-strip justify-between">
+          <span><span className="font-medium text-[var(--ink)]">{totalCount}</span> matching biosamples across the authorized inventory</span>
+          {filtersActive ? <Link href="/samples" className="text-sm font-medium text-[var(--accent)] hover:text-[var(--accent-strong)]">Clear filters</Link> : null}
         </div>
       </div>
-      <VisibleRecordControls
-        matchingCount={filteredData.length}
-        noun="samples"
-        onShowAll={() => setVisibleCount(filteredData.length)}
-        onShowMore={() =>
-          setVisibleCount((current) => Math.min(current + VISIBLE_RECORD_BATCH, filteredData.length))
-        }
-        totalCount={data.length}
-        visibleCount={visibleData.length}
+      <InventoryPagination
+        basePath="/samples"
+        page={page}
+        pageCount={pageCount}
+        pageSize={pageSize}
+        query={{
+          experimentId: query.experimentId,
+          pageSize,
+          sampleType: query.sampleType,
+          search: query.search,
+          status: query.status,
+        }}
+        totalCount={totalCount}
       />
       <div className="grid gap-3 md:hidden">
         {table.getRowModel().rows.map((row) => {

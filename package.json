@@ -56,7 +56,12 @@
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
     "db:seed": "tsx prisma/seed.ts",
-    "db:seed:role-qa": "tsx prisma/seed-role-qa-cli.ts"
+    "db:seed:role-qa": "tsx prisma/seed-role-qa-cli.ts",
+    "db:seed:m10-load": "tsx scripts/seed-m10-load.ts",
+    "load:m10": "tsx scripts/run-m10-load.ts",
+    "test:m10-load": "vitest run --project unit-node tests/unit/m10-load-harness.test.ts",
+    "worker:outbox": "tsx scripts/run-outbox-worker.ts",
+    "probe:m10-outbox": "tsx scripts/run-m10-outbox-probe.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

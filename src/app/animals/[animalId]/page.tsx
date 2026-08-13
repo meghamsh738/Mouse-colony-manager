@@ -18,7 +18,7 @@ import { SampleCreateForm } from "@/components/app/sample-create-form";
 import { Surface } from "@/components/app/surface";
 import { Badge } from "@/components/ui/badge";
 import { getAnimalDetailView } from "@/lib/animals-read";
-import { getAnimalTransferWorkspaceView } from "@/lib/cages-read";
+import { getAnimalPresenceCageOptions } from "@/lib/cages-read";
 import { getLabTransferRequestOptions } from "@/lib/lab-transfer-read";
 import { requireUser } from "@/lib/session";
 import { getCurrentOperationalSopOptions } from "@/lib/sop-read";
@@ -61,7 +61,7 @@ function getLifecycleActions(
   return [{ value: "archived", label: "Archive record" }];
 }
 
-export default async function AnimalDetailPage({ params, searchParams }: { params: Promise<{ animalId: string }>; searchParams?: Promise<{ action?: string }> }) {
+export default async function AnimalDetailPage({ params, searchParams }: { params: Promise<{ animalId: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const user = await requireUser({ capability: "animals:read" });
   const { animalId } = await params;
   const snapshot = await getAnimalDetailView(animalId, user);
@@ -74,8 +74,9 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
   const canRecordGenotype = user.capabilities.includes("animals:manage") && snapshot.canRecordGenotype;
   const canRecordSample = user.capabilities.includes("biosamples:manage") && snapshot.canRecordSample;
   const canManageLifecycle = user.capabilities.includes("animals:manage");
-  const presenceWorkspace = canManageLifecycle && snapshot.animal.outcomeStatus === "missing"
-    ? await getAnimalTransferWorkspaceView("", user)
+  const query = (await searchParams) ?? {};
+  const presenceCages = canManageLifecycle && snapshot.animal.outcomeStatus === "missing"
+    ? await getAnimalPresenceCageOptions(snapshot.animal.id, user, query)
     : null;
   const lifecycleActions = getLifecycleActions(snapshot.animal.status, snapshot.animal.outcomeStatus);
   const lifecycleSopOptions = canManageLifecycle && lifecycleActions.some((action) => action.value === "euthanized")
@@ -84,7 +85,7 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
   const transferRequestOptions = snapshot.animal.outcomeStatus === "alive" && user.capabilities.includes("transfers:request")
     ? await getLabTransferRequestOptions(user)
     : null;
-  const requestedAction = (await searchParams)?.action;
+  const requestedAction = Array.isArray(query.action) ? query.action[0] : query.action;
   if (requestedAction === "lifecycle") {
     if (!canManageLifecycle) notFound();
     return (
@@ -125,14 +126,34 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
           description: "Location status",
           tone: snapshot.animal.outcomeStatus === "missing" ? "default" as const : "danger" as const,
           panel: (
-            <AnimalPresenceForm
-              animalId={snapshot.animal.id}
-              cages={presenceWorkspace?.cageOptions ?? []}
-              commandNonce={randomUUID()}
-              defaultDate={snapshot.defaultLifecycleDate}
-              isMissing={snapshot.animal.outcomeStatus === "missing"}
-              version={snapshot.animal.version}
-            />
+            <div className="space-y-4">
+              {snapshot.animal.outcomeStatus === "missing" && presenceCages ? <>
+                <form action={`/animals/${snapshot.animal.id}`} className="flex flex-wrap items-end gap-3" method="get">
+                  <input name="action" type="hidden" value="presence" />
+                  <label className="min-w-64 flex-1 space-y-2 text-sm">
+                    <span className="text-[var(--muted)]">Find a cage in this animal&apos;s lab</span>
+                    <input className="h-11 w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4" defaultValue={presenceCages.search} name="presenceSearch" placeholder="Barcode, room, rack, or cage" />
+                  </label>
+                  <button className="table-action min-h-11" type="submit">Search cages</button>
+                </form>
+                <div className="flex items-center justify-between gap-3 text-sm text-[var(--muted)]">
+                  <span>{presenceCages.totalCount} matches · page {presenceCages.page} of {presenceCages.pageCount}</span>
+                  <div className="flex gap-2">
+                    {presenceCages.page > 1 ? <Link className="table-action" href={`/animals/${snapshot.animal.id}?action=presence&presenceSearch=${encodeURIComponent(presenceCages.search)}&presencePage=${presenceCages.page - 1}`}>Previous</Link> : null}
+                    {presenceCages.page < presenceCages.pageCount ? <Link className="table-action" href={`/animals/${snapshot.animal.id}?action=presence&presenceSearch=${encodeURIComponent(presenceCages.search)}&presencePage=${presenceCages.page + 1}`}>Next</Link> : null}
+                  </div>
+                </div>
+              </> : null}
+              <AnimalPresenceForm
+                animalId={snapshot.animal.id}
+                cages={presenceCages?.items ?? []}
+                commandNonce={randomUUID()}
+                defaultDate={snapshot.defaultLifecycleDate}
+                isMissing={snapshot.animal.outcomeStatus === "missing"}
+                key={presenceCages ? `${presenceCages.search}:${presenceCages.page}` : "present"}
+                version={snapshot.animal.version}
+              />
+            </div>
           ),
         }]
       : []),
@@ -244,7 +265,9 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
         {actions.length ? (
           <CompactActionTray
             actions={actions}
+            defaultActionId={requestedAction === "presence" && presenceCages ? "presence" : undefined}
             eyebrow="Actions"
+            key={requestedAction === "presence" && presenceCages ? "presence-open" : "animal-work-closed"}
             summary={
               <>
                 <span>{snapshot.animal.labId}</span>
@@ -362,7 +385,10 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
               </div>
             </Surface>
             <Surface className="space-y-4" data-testid="genotype-record-history">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Genotyping history</p>
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Genotyping history</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">Showing up to the 50 most recent records.</p>
+              </div>
               <div className="space-y-3">
                 {snapshot.genotypingRecords.length ? (
                   snapshot.genotypingRecords.map((record) => (
@@ -395,7 +421,10 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
               </div>
             </Surface>
             <Surface className="space-y-4" data-testid="sample-record-history">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Sample history</p>
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Sample history</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">Showing up to the 50 most recent records.</p>
+              </div>
               <div className="space-y-3">
                 {snapshot.sampleRecords.length ? (
                   snapshot.sampleRecords.map((record) => (
@@ -424,7 +453,10 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
               </div>
             </Surface>
             <Surface className="space-y-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Timeline</p>
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Timeline</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">Built from the recent history shown on this page.</p>
+              </div>
               <div className="space-y-3">
                 {snapshot.timeline.map((event) => (
                   <article key={event.id} className="rounded-2xl border border-[var(--line)] p-4">
@@ -438,7 +470,10 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
               </div>
             </Surface>
             <Surface className="space-y-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Health notes</p>
+              <div>
+                <p className="text-xs uppercase tracking-[0.18em] text-[var(--muted)]">Health notes</p>
+                <p className="mt-2 text-sm text-[var(--muted)]">Showing up to the 50 most recent records.</p>
+              </div>
               <div className="space-y-3">
                 {snapshot.notes.length ? (
                   snapshot.notes.map((note) => (

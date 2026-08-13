@@ -1,6 +1,6 @@
 # Resume Checkpoint
 
-Recorded: 2026-08-10
+Recorded: 2026-08-13
 
 ## Workspace
 
@@ -8,49 +8,60 @@ Recorded: 2026-08-10
 - Authoritative worktree: `/Volumes/Coding Projects/Active/mouse-colony-manager/.runtime-data/worktrees/empty-colony`
 - Branch: `codex/empty-colony`
 - Primary tracker: `IMPLEMENTATION_TRACKER.md`
-- Preserve this external-drive worktree. Do not reset, clean, or overwrite unrelated uncommitted work.
+- Preserve this external-drive worktree. Do not reset, clean, or overwrite unrelated work.
 
-## Current State
+## Practical State
 
-- Milestones 8 and the bounded Unit-wide Strain Directory slice are verified in the tracker.
-- The optional production-shaped M9 restore rehearsal is deferred because no real colony database exists yet. Do not request or handle production data until the user has real data and approves the documented controls.
-- Milestone 10 performance work is active.
-- M10-01 Animals and Cages inventory slices are complete: authorization-scoped PostgreSQL search/filtering, stable server pagination (80 rows by default, hard maximum 100), canonical out-of-range redirects, and desktop/mobile coverage.
-- The Cages list now selects only the fields needed for its list projection and derives warning-only pages from an authorization-scoped narrow candidate query. Existing API, Workbook, export, label, and scan full-list contracts remain unchanged.
-- M10-01 remains **In progress** because biosamples, cryostorage, and bounded relationship/detail histories are still open.
-- M10-02 and M10-03 retain their earlier safe first passes. M10-04 through M10-07 remain open.
-- No schema migration, persistent cache, production service, real colony data, or hosting decision changed in the Animals slice.
+- The Mouse Colony Manager is in its final Milestone 10 acceptance pass. Role-scoped workflows, the unit-wide privacy-safe Strain Directory, bounded inventories and histories, the scheduler-ready outbox worker, and the synthetic performance harness are implemented; final review fixes, clean-commit load evidence, and closeout status remain pending.
+- This does **not** mean the app is deployed to production. Hosting region, budget/operator, recovery objectives, institutional identity/domain, email provider, private object storage, and a synthetic staging candidate still require owner decisions.
+- Milestone 9 production-shaped restore/cutover work is Deferred because the user has no real colony database. The guarded synthetic restore rehearsal remains available; do not request or invent production data.
+- No retained migration was modified, no identifier trigger was bypassed, and no real colony data or external service was changed.
+- The exact 10,000-animal load target is impossible under the reviewed four-digit facility identity contract (`0001`–`9999`). The verified boundary is 9,999 animals, which tests every valid facility animal ID without a risky contract expansion.
 
-## Disposable QA Runtime
+## Completed Milestone 10 Work
 
-- PostgreSQL 16 is configured on loopback `127.0.0.1:51422` with data directory `/Volumes/Coding Projects/Active/mouse-colony-manager/.runtime-data/qa-empty-colony-20260726/postgres16-m8-qa`.
-- The current disposable database is `mcm_test_role_qa_20260808_r1`, schema `mcm_test_role_qa`.
-- Readback at this checkpoint: 36 completed migrations, 5 synthetic users, 3 synthetic labs, 14 synthetic animals, and 5 synthetic cages.
-- This is synthetic example data only. Guarded destructive reseeding is allowed only with the existing disposable-target checks and explicit `ALLOW_DESTRUCTIVE_SEED=true`.
-- The temporary production-mode QA app on port `3012` and PostgreSQL server are stopped after validation. Restart them only when needed.
+- Samples and Cryostorage use authorization-first database filtering, stable pages of 80 (maximum 100), narrow projections, and canonical out-of-range handling.
+- Animal/cage histories are bounded to 50 records and scan notes to 15, with explicit truncation/fallback behavior.
+- Cage and scan pages load the large animal-transfer workspace only after an authorized operational user chooses **Move mouse**. Manual scan lookup stays in the authenticated App Router session.
+- The one-shot outbox worker has bounded claims/concurrency/runtime, honest leases/retries/dead letters, topic-specific secrets, provider idempotency requirements, and privacy-safe System aggregates.
+- The additive-only M10 load seed and runner enforce a dedicated loopback target and mode-restricted, sanitized artifacts outside the source worktree.
+- The vendor-neutral hosting topology is recorded in `docs/HOSTING_DECISION.md`.
 
-## Last Successful Verification
+## Preserved Disposable Evidence
 
-- Focused combined Animals/Cages query and privacy tests: 9 passed.
-- Full unit suite: 100 files / 467 tests passed.
-- Guarded disposable-database suite: 8 files / 148 tests passed.
-- Complete Playwright smoke suite: 80 scenarios passed (40 desktop and 40 mobile).
-- TypeScript, Prisma validation, production build (51 pages), and `git diff --check` passed.
-- ESLint passed with zero errors and five unchanged warnings in `src/app/administration/labs/actions.ts`.
-- Manual final diff review found no blocking issue. Independent subagent review was unavailable under the active no-delegation constraint.
+- PostgreSQL 16.14 remains loopback-only at `127.0.0.1:51422`, using the external runtime data directory.
+- Final role/browser QA target: database `mcm_test_final_20260812_r1`, schema `mcm_test_final`.
+- Load target: database `mcm_test_m10_load_20260812_r1`, schema `mcm_test_m10_load`; exact 9,999 animals, 2,000 cages, and 50 synthetic load identities (55 users including the base seed).
+- Queue target: database `mcm_test_m10_queue_20260812_r1`, schema `mcm_test_m10_queue`; ten delivered synthetic notifications retained for review.
+- Optimized diagnostic load artifact: `.runtime-data/m10-load/20260812-r1/2026-08-12T22-57-31-555Z`.
+- Queue artifact: `.runtime-data/m10-load/queue-probes/queue-probe-2026-08-12T22-20-55-990Z`.
+- These targets and artifacts are synthetic and intentionally preserved. Do not reset or reuse them; create a fresh guarded target for a new run.
 
-## Resume Order
+## Verification Evidence
 
-1. Read this file and `IMPLEMENTATION_TRACKER.md`; confirm the branch and worktree are clean before editing.
-2. Confirm the external drive and PostgreSQL data directory are present before starting the disposable runtime.
-3. Continue M10-01 with one bounded inventory/history surface at a time; biosamples are the natural next inventory candidate.
-4. Preserve authorization-first filtering and intentional full-list API/Workbook consumers unless their contracts are separately redesigned.
-5. Run focused tests, full unit/database gates as appropriate, production build, and desktop/mobile QA before committing each slice.
-6. Keep the production-shaped M9 rehearsal deferred until real data exists and the user explicitly approves its encryption, retention, access, and artifact-location controls.
+- Node.js 22.23.2 production build: 51 generated application entries.
+- Unit tests: 100 Node files / 498 tests plus 6 DOM files / 7 tests (505 total).
+- Guarded disposable-database tests: 8 files / 149 tests.
+- Authorization manifest: 82 protected entry points.
+- Focused load-harness tests: 12 passed; queue-probe tests: 6 passed.
+- Production load diagnostic: 1,536 requests, observed concurrency 50, zero errors/writes/pool failures, p50 2.795 s, p95 4.824 s, 16.19 requests/s, RSS maximum 2.413 GB, and maximum 21 PostgreSQL connections.
+- Queue probe: ten deliveries; queue-wait p50/p95 1,088/1,420 ms, service p50/p95 40/285 ms, end-to-end p50/p95 736/1,030 ms.
+- Desktop/mobile Playwright role and workflow acceptance is part of the still-open final gate recorded in `IMPLEMENTATION_TRACKER.md`.
+- TypeScript, Prisma validation, scoped/full lint with only five longstanding non-blocking administration warnings, production build, and diff checks passed.
+- The first final independent diff review found blocking issues that are being corrected; a clear re-review plus a clean-commit load artifact are required before handoff.
+
+## Safe Resume Order
+
+1. Read this file, `IMPLEMENTATION_TRACKER.md`, `docs/HOSTING_DECISION.md`, `docs/M10_LOAD_TEST.md`, and `docs/OUTBOX_WORKER_RUNBOOK.md`.
+2. Confirm the external drive, branch, and loopback PostgreSQL target before running anything. Never point destructive seeds or probes at a retained/shared/remote target.
+3. If continuing local development, create a new uniquely named `mcm_test_*` database/schema instead of overwriting preserved evidence.
+4. If preparing deployment, first obtain the owner decisions listed in the hosting record. Externalize attachment storage, configure a provider/scheduler/secret store, and run the identical synthetic snapshot three times in approved staging.
+5. Do not select a hosting vendor/tier or call the app production-ready until object-storage authorization, worker recovery, encrypted backup restore, data residency, cost, and recovery objectives pass the staging gate.
+6. When real colony data eventually exists, resume Milestone 9 through the documented sanitized production-shaped restore rehearsal; until then it remains Deferred.
 
 ## Safety Notes
 
-- Never point destructive verification at a database or schema that does not satisfy the repository's disposable `mcm_test_*` guards.
-- Keep PostgreSQL bound to loopback for local QA.
-- Do not alter retained migrations or real colony data.
-- Do not infer production readiness from synthetic QA, and do not select hosting until M10 load measurements are recorded.
+- All destructive local tools must satisfy the repository's explicit `mcm_test_*`, loopback, matching-URL, non-production, and opt-in guards.
+- Keep credentials, cookies, database URLs, SQL, record identifiers, lab names, scientific payloads, and provider bodies out of evidence artifacts.
+- Preserve checked-in migrations and database audit/identity triggers.
+- Local synthetic success informs capacity and architecture; it is not clinical, institutional, security, backup, or production approval.
