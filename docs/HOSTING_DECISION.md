@@ -34,22 +34,22 @@ Local evidence is suitable for finding application bottlenecks and rejecting uns
 
 ## Measured local baseline
 
-The final pre-commit diagnostic used Node.js 22.23.2, PostgreSQL 16.14, 9,999 synthetic animals, 2,000 cages, and 50 distinct authenticated load users. The production server handled an observed peak of 50 concurrent requests and 1,536 total samples with zero unexpected HTTP/content/network errors, zero pool or connection failures, and zero unexpected database writes.
+The final clean-commit acceptance used commit `a032202d09e6ccee0be1386b20aae9b93b7b3b89`, Node.js 22.23.1, PostgreSQL 16.14, 9,999 synthetic animals, 2,000 cages, and 50 distinct authenticated load users. The production server handled an observed peak of 50 concurrent requests and 1,536 total samples across 14 route types with zero unexpected HTTP/content/network errors, zero pool or connection failures, and zero unexpected database writes.
 
 | Measure | Result |
 | --- | ---: |
-| Request latency p50 / p95 | 2.795 s / 4.824 s |
-| Actual throughput | 16.19 requests/s |
-| Load-generator schedule-delay p95 | 35.4 s |
-| Application RSS p95 / maximum | 2.302 GB / 2.413 GB |
-| PostgreSQL connections maximum | 21 |
-| Estimated aggregate application database calls | 44,861 |
+| Request latency p50 / p95 | 1.840 s / 3.764 s |
+| Actual throughput | 20.96 requests/s |
+| Load-generator schedule-delay p95 | 20.91 s |
+| Application RSS p95 / maximum | 2.202 GB / 2.298 GB |
+| PostgreSQL connections maximum | 26 (25-connection app pool plus monitor) |
+| Estimated aggregate application database calls | 50,336 |
 
 The response-size bottleneck found in the first run was the default cage/scan page serializing the full animal-transfer workspace. Loading it only after the authorized user explicitly chooses **Move mouse** improved throughput by about 42%, reduced overall latency p95 from 7.516 s to 4.824 s, and reduced the affected route response p95 from about 4.66 MB to under 79 KB. The remaining highest-latency route in this laptop run was Workbook; it should receive first attention only if staging reproduces the same ranking.
 
-The source-dirty runs are diagnostic rather than the final reproducibility artifact. A clean-commit run must still be retained before external staging. The schedule-delay result also shows that this laptop is not a hosting benchmark even though actual concurrency reached 50.
+Earlier source-dirty runs remain diagnostic; the final clean-commit artifact is retained at `.runtime-data/m10-load/20260813-final/2026-08-13T00-09-41-235Z`. The schedule-delay result still shows that this laptop is not a hosting benchmark even though actual concurrency reached 50.
 
-For the first staging candidate, 2× measured application-memory headroom is at least 4.826 GB and 2× local throughput is at least 32.38 requests/s. Use at least 6 GB of usable application memory as the initial vendor-neutral candidate floor, then accept or reject it using three identical runs and the database connection formula above. This is a capacity gate, not a vendor or tier recommendation.
+For the first staging candidate, 2× measured application-memory headroom is at least 4.596 GB and 2× local throughput is at least 41.92 requests/s. Use at least 6 GB of usable application memory as the initial vendor-neutral candidate floor, then accept or reject it using three identical runs and the database connection formula above. This is a capacity gate, not a vendor or tier recommendation.
 
 The dedicated ten-delivery queue probe used the normal materializer, bounded worker, and an idempotent loopback provider. Queue wait p50/p95/max was 1,088/1,420/1,420 ms, service time was 40/285/285 ms, and end-to-end time was 736/1,030/1,030 ms. External provider latency, scheduler jitter, and recovery behavior must still be measured in staging.
 

@@ -12,7 +12,7 @@ Recorded: 2026-08-13
 
 ## Practical State
 
-- The Mouse Colony Manager is in its final Milestone 10 acceptance pass. Role-scoped workflows, the unit-wide privacy-safe Strain Directory, bounded inventories and histories, the scheduler-ready outbox worker, and the synthetic performance harness are implemented; final review fixes, clean-commit load evidence, and closeout status remain pending.
+- The Mouse Colony Manager's locally completable product milestones are finished and verified. Role-scoped workflows, the unit-wide privacy-safe Strain Directory, bounded inventories and histories, the scheduler-ready outbox worker, and the synthetic performance harness passed final review and acceptance on clean commit `a032202d09e6ccee0be1386b20aae9b93b7b3b89`.
 - This does **not** mean the app is deployed to production. Hosting region, budget/operator, recovery objectives, institutional identity/domain, email provider, private object storage, and a synthetic staging candidate still require owner decisions.
 - Milestone 9 production-shaped restore/cutover work is Deferred because the user has no real colony database. The guarded synthetic restore rehearsal remains available; do not request or invent production data.
 - No retained migration was modified, no identifier trigger was bypassed, and no real colony data or external service was changed.
@@ -22,7 +22,7 @@ Recorded: 2026-08-13
 
 - Samples and Cryostorage use authorization-first database filtering, stable pages of 80 (maximum 100), narrow projections, and canonical out-of-range handling.
 - Animal/cage histories are bounded to 50 records and scan notes to 15, with explicit truncation/fallback behavior.
-- Cage and scan pages load the large animal-transfer workspace only after an authorized operational user chooses **Move mouse**. Manual scan lookup stays in the authenticated App Router session.
+- Cage and scan pages load bounded, server-searched/paginated transfer options only after an authorized operational user chooses **Move mouse**. Cage closure uses a same-lab destination-only read, missing-animal recovery is animal-authorized and same-lab scoped, and manual scan lookup stays in the authenticated App Router session.
 - The one-shot outbox worker has bounded claims/concurrency/runtime, honest leases/retries/dead letters, topic-specific secrets, provider idempotency requirements, and privacy-safe System aggregates.
 - The additive-only M10 load seed and runner enforce a dedicated loopback target and mode-restricted, sanitized artifacts outside the source worktree.
 - The vendor-neutral hosting topology is recorded in `docs/HOSTING_DECISION.md`.
@@ -34,21 +34,22 @@ Recorded: 2026-08-13
 - Load target: database `mcm_test_m10_load_20260812_r1`, schema `mcm_test_m10_load`; exact 9,999 animals, 2,000 cages, and 50 synthetic load identities (55 users including the base seed).
 - Queue target: database `mcm_test_m10_queue_20260812_r1`, schema `mcm_test_m10_queue`; ten delivered synthetic notifications retained for review.
 - Optimized diagnostic load artifact: `.runtime-data/m10-load/20260812-r1/2026-08-12T22-57-31-555Z`.
+- Final clean-commit load artifact: `.runtime-data/m10-load/20260813-final/2026-08-13T00-09-41-235Z`.
 - Queue artifact: `.runtime-data/m10-load/queue-probes/queue-probe-2026-08-12T22-20-55-990Z`.
 - These targets and artifacts are synthetic and intentionally preserved. Do not reset or reuse them; create a fresh guarded target for a new run.
 
 ## Verification Evidence
 
-- Node.js 22.23.2 production build: 51 generated application entries.
-- Unit tests: 100 Node files / 498 tests plus 6 DOM files / 7 tests (505 total).
-- Guarded disposable-database tests: 8 files / 149 tests.
+- Node.js 22.23.1 production build: 51 generated application entries.
+- Unit tests: 109 files / 513 tests.
+- Guarded disposable-database tests: 8 files / 150 tests.
 - Authorization manifest: 82 protected entry points.
 - Focused load-harness tests: 12 passed; queue-probe tests: 6 passed.
-- Production load diagnostic: 1,536 requests, observed concurrency 50, zero errors/writes/pool failures, p50 2.795 s, p95 4.824 s, 16.19 requests/s, RSS maximum 2.413 GB, and maximum 21 PostgreSQL connections.
+- Clean-commit production load acceptance: 1,536 requests across 14 authenticated route types, observed concurrency 50, zero errors/writes/pool failures, p50 1.840 s, p95 3.764 s, 20.96 requests/s, RSS p95/max 2.202/2.298 GB, maximum 26 PostgreSQL connections with a 25-connection application pool, and 50,336 estimated application database calls.
 - Queue probe: ten deliveries; queue-wait p50/p95 1,088/1,420 ms, service p50/p95 40/285 ms, end-to-end p50/p95 736/1,030 ms.
-- Desktop/mobile Playwright role and workflow acceptance is part of the still-open final gate recorded in `IMPLEMENTATION_TRACKER.md`.
+- Desktop/mobile Playwright role and workflow acceptance passed all 96 scenarios, covering every seeded role; background visual checks of the built dashboard and transfer workspace also passed at desktop and 412 x 915 with no horizontal overflow.
 - TypeScript, Prisma validation, scoped/full lint with only five longstanding non-blocking administration warnings, production build, and diff checks passed.
-- The first final independent diff review found blocking issues that are being corrected; a clear re-review plus a clean-commit load artifact are required before handoff.
+- Final independent re-review returned CLEAR with no remaining P0/P1/P2 blockers after the cage-alert, bounded-transfer, missing-animal, pinned-destination, and outbox-behavior fixes.
 
 ## Safe Resume Order
 

@@ -17,13 +17,13 @@ This is the source of truth for the role-scoped redesign in the `codex/empty-col
 
 | Item | State | Evidence / note |
 | --- | --- | --- |
-| Active Codex goal | In progress | Complete role-scoped redesign, empty instance first |
+| Active Codex goal | Verified locally | Role-scoped redesign through M10 is complete; real-data M9 and production rollout remain explicitly Deferred |
 | Target worktree | Verified | `.runtime-data/worktrees/empty-colony`, branch `codex/empty-colony` |
 | Existing dirty work preserved | Verified | No reset, checkout, or unrelated reversion performed |
 | Architecture reviews 1-4 | Verified | Roles/privacy, workflows, data/migration, role-specific UI |
-| Canonical role foundation | Implemented | `it_head`, `facility_admin`, `cmu_staff`, `lab_user` plus migration compatibility values |
-| Capability navigation | Implemented | Central capability and navigation registries; page guards started |
-| Empty profiles | Implemented | IT, Facility Admin, CMU, Lab 1, Lab 2; production switch blocked |
+| Canonical role foundation | Verified | `it_head`, `facility_admin`, `cmu_staff`, `lab_user` plus migration compatibility values; role/access suites pass |
+| Capability navigation | Verified | Central capability/navigation registries and all 82 protected entry points pass final manifest and role QA |
+| Empty profiles | Verified | IT, Facility Admin, CMU, Lab 1, and Lab 2 onboarding profiles; production switch remains blocked |
 | Foundation checks | Verified | Prisma validate, TypeScript, lint, 17 focused tests, build, diff check |
 | Independent foundation review | Verified | Milestone 0 independent re-review returned with no blockers |
 
@@ -37,7 +37,7 @@ This is the source of truth for the role-scoped redesign in the `codex/empty-col
 | M0-02 | Record migration files and checksums without rewriting them | Verified | Migrations `0001`-`0005`; checksums captured in milestone ledger |
 | M0-03 | Make migration history recreate the canonical empty schema | Verified | Reviewed guard passed fresh migrate, empty seed, migration status, and zero diff |
 | M0-04 | Keep `db push` only for disposable databases | Verified | Alias removed; explicit local disposable guard and retained-workflow checker pass |
-| M0-05 | Restore-and-test backup procedure | Implemented | `docs/DATABASE_RECOVERY.md`; execution remains a Milestone 9 gate |
+| M0-05 | Restore-and-test backup procedure | Verified | Guarded synthetic backup/restore rehearsal passes; production-shaped execution remains Deferred in M9 until real data exists |
 | M0-06 | Record schema/database/application versions | Verified | Node 26.2.0, Prisma 6.19.3, TypeScript 5.9.3, PostgreSQL 17.5, Next.js 16.2.2 |
 
 ## Milestone 1: Identity And Authorization
@@ -199,13 +199,13 @@ SD-01 evidence: migration `0036_strain_directory` adds lab-owned strain listings
 
 | ID | Requirement | Status |
 | --- | --- | --- |
-| M10-01 | Pagination and bounded relationship history | In progress — final review fixes active |
-| M10-02 | Narrow projections and request-scoped actor/access context | Implemented; final acceptance pending |
-| M10-03 | Loading boundaries and measured indexes | In progress — explicit transfer workspace bound pending |
-| M10-04 | Bounded outbox workers and queue observability | Implemented; final behavioral tests pending |
-| M10-05 | Maximum schema-valid scale: 9,999 animals, 2,000 cages, 50-user stress run | Implemented; clean-commit acceptance run pending |
-| M10-06 | Record p50/p95, query count, memory, pool failures, queue delay, and error rate | Implemented; clean-commit acceptance run pending |
-| M10-07 | Hosting topology decision based on measured evidence | Implemented; final acceptance pending |
+| M10-01 | Pagination and bounded relationship history | Verified in disposable QA |
+| M10-02 | Narrow projections and request-scoped actor/access context | Verified in disposable QA |
+| M10-03 | Loading boundaries and measured indexes | Verified in disposable QA |
+| M10-04 | Bounded outbox workers and queue observability | Verified in disposable QA |
+| M10-05 | Maximum schema-valid scale: 9,999 animals, 2,000 cages, 50-user stress run | Verified on clean local commit |
+| M10-06 | Record p50/p95, query count, memory, pool failures, queue delay, and error rate | Verified with sanitized local artifacts |
+| M10-07 | Hosting topology decision based on measured evidence | Verified locally; production selection remains an owner/staging gate |
 
 M10 first-pass evidence: the ChatGPT Pro source review is retained in `docs/PERFORMANCE_REVIEW.md`. The implementation request-deduplicates actor resolution, gives read models an explicit request-scoped access helper while command handlers always re-check live database membership (including inside cage-detail updates), and streams non-critical alert status behind independent loading boundaries. Animals, biosamples, and cryostorage no longer load create-form options for users without the matching capability; lab-transfer destination cages are batched by authorized destination lab; barcode scanning uses in-app routing; and common operational pages now have synchronous lightweight loading states. No schema migration, persistent cache, real colony data, or production service changed. Focused tests, the full unit suite, Prisma validation, authorization-manifest validation, type checking, ESLint, diff checks, desktop route navigation, and 390 x 844 mobile QA passed; independent re-review found no P0/P1/P2 blockers. Pagination/history bounds, measured index work, and the remaining load/stress/hosting decisions remain open behind the documented measurement gate.
 
@@ -213,26 +213,26 @@ M10-01 Animals evidence: the interactive Animals inventory now applies authoriza
 
 M10-01 Cages slice evidence: the interactive Cages inventory now applies lab authorization before its count, warning derivation, filter-option queries, and row fetch. Search, status, lab, active charge category/state, occupancy, sex mix, and calculated/stored warnings are URL-backed whole-authorized-colony filters with stable pages of 80 and a hard maximum of 100; out-of-range pages redirect to the canonical last page. The list projection now selects only the cage, active charge, live occupant, active project, and unresolved actionable welfare fields required by the UI instead of loading complete cage/animal records. Warning-only pagination performs a narrow scoped candidate read before the final count/page query. Existing integration API, Workbook, CSV, label-print, and scan full-list contracts remain unchanged. No schema migration, persistent cache, production service, or real colony data changed. Focused cage security/query tests (4) and combined inventory tests (9), 100 unit files / 467 tests, 8 guarded disposable-database files / 148 tests, Prisma validation, TypeScript, ESLint (five pre-existing non-blocking warnings), the 51-page production build, and the complete 80-scenario browser suite (40 desktop and 40 mobile) passed. Biosample, cryostorage, and bounded detail-history work was completed in the final M10 gate below.
 
-M10-01 through M10-03 completion evidence: Samples and Cryostorage now apply authorization in PostgreSQL before count/search/filter/page operations, use stable URL-backed pages of 80 with a hard maximum of 100, and expose only narrow request-target fields to eligible request forms. Animal, cage, and scan detail histories are bounded to the newest relevant records (50 animal events, 50 cage events, and 15 scan notes), select only displayed fields, and preserve explicit truncation/fallback signals. Default cage and scan renders no longer load or serialize the colony-wide animal-transfer workspace; an authorized operational user loads it only after explicitly choosing **Move mouse**. The 9,999-animal query-plan check completed in 16.6 ms for the broad animal search and 3.6 ms for the cage query, so no speculative index or schema migration was added. Deferring the transfer workspace reduced scan/cage React Server Component response p95 from roughly 4.66 MB to under 79 KB.
+M10-01 through M10-03 completion evidence: Samples and Cryostorage now apply authorization in PostgreSQL before count/search/filter/page operations, use stable URL-backed pages of 80 with a hard maximum of 100, and expose only narrow request-target fields to eligible request forms. Animal, cage, and scan detail histories are bounded to the newest relevant records (50 animal events, 50 cage events, and 15 scan notes), select only displayed fields, and preserve explicit truncation/fallback signals; a separate narrow unresolved-actionable welfare query ensures older critical cage alerts remain visible even when display history is full. Default cage and scan renders no longer load or serialize the colony-wide animal-transfer workspace. **Move mouse** now uses authorization-first, independently searched and paginated animal/destination reads (20 by default, maximum 50), while permanent cage closure uses a same-lab destination-only reader and never queries colony-wide animals. Missing-animal recovery authorizes the exact animal first, restricts choices to that animal's owning lab even for global actors, and provides bounded server search/pagination. The 9,999-animal query-plan check completed in 16.6 ms for the broad animal search and 3.6 ms for the cage query, so no speculative index or schema migration was added. Deferring and bounding transfer work reduced default scan/cage React Server Component responses from roughly 4.66 MB to under 79 KB; clean-load action-route p95 response sizes remained under 81 KB.
 
-M10-04 evidence: the application now has a one-shot, scheduler-friendly outbox worker with topic-specific authentication, bounded batches/concurrency/runtime/provider timeout, leases sized for DNS plus provider and finalization time, bounded expired-lease maintenance, per-invocation single-attempt semantics, durable retry/dead-letter state, and privacy-safe aggregate System observability. Notification delivery requires an explicitly allowlisted idempotent provider; SOP delivery revalidates the already-committed durable assignment before acknowledgement. A dedicated guarded loopback probe used the normal notification materializer, real worker, and idempotent local provider for ten deliveries. Aggregate queue wait p50/p95/max was 1,088/1,420/1,420 ms, service time 40/285/285 ms, and end-to-end time 736/1,030/1,030 ms. The database-backed delivery suite passed 9 focused cases and the full guarded database suite passed 8 files / 149 tests.
+M10-04 evidence: the application now has a one-shot, scheduler-friendly outbox worker with topic-specific authentication, bounded batches/concurrency/runtime/provider timeout, leases sized for DNS plus provider and finalization time, bounded expired-lease maintenance, per-invocation single-attempt semantics, durable retry/dead-letter state, and privacy-safe aggregate System observability. Notification delivery requires an explicitly allowlisted idempotent provider; SOP delivery revalidates the already-committed durable assignment before acknowledgement. A dedicated guarded loopback probe used the normal notification materializer, real worker, and idempotent local provider for ten deliveries. Aggregate queue wait p50/p95/max was 1,088/1,420/1,420 ms, service time 40/285/285 ms, and end-to-end time 736/1,030/1,030 ms. Executable tests cover provider overruns, one attempt per invocation on failure, non-final expired-lease retry/reclaim with durable attempts, and SOP acknowledgement/cancellation revalidation. The database-backed delivery file passed 10 cases and the full guarded database suite passed 8 files / 150 tests.
 
-M10-05 and M10-06 evidence: the guarded additive-only load seed populated a fresh loopback PostgreSQL 16.14 target with exactly 9,999 animals, 2,000 cages, 50 distinct synthetic load users (55 total including base identities), identity-assignment parity, and maximum occupancy six. Exact 10,000 is impossible under the reviewed four-digit `0001`–`9999` facility-animal identity contract and its database trigger; the load gate therefore uses the maximum valid population rather than weakening identity integrity for one artificial row. A Node.js 22.23.2 production build sustained an observed peak of 50 authenticated concurrent requests across 1,536 samples with zero HTTP/content/network errors and zero unexpected writes: p50 2.795 s, p95 4.824 s, 16.19 requests/s actual throughput, schedule-delay p95 35.4 s, application RSS p95 2.302 GB/max 2.413 GB, maximum 21 PostgreSQL connections, an estimated 44,861 aggregate application database calls, and zero pool/connection failure signals. The source-dirty local run is diagnostic evidence; a clean-commit reproducibility run remains the final artifact gate before external staging.
+M10-05 and M10-06 evidence: the guarded additive-only load seed populated a fresh loopback PostgreSQL 16.14 target with exactly 9,999 animals, 2,000 cages, 50 distinct synthetic load users (55 total including base identities), identity-assignment parity, and maximum occupancy six. Exact 10,000 is impossible under the reviewed four-digit `0001`–`9999` facility-animal identity contract and its database trigger; the load gate therefore uses the maximum valid population rather than weakening identity integrity for one artificial row. Clean commit `a032202d09e6ccee0be1386b20aae9b93b7b3b89` and Node.js 22.23.1 sustained an observed peak of 50 authenticated concurrent requests across 1,536 samples and 14 route types with zero HTTP/content/network errors, zero pool/connection failure signals, and zero unexpected writes. Overall p50/p95 was 1.840/3.764 s, actual throughput was 20.96 requests/s, schedule-delay p95 was 20.91 s, application RSS p95/max was 2.202/2.298 GB, maximum observed PostgreSQL connections was 26 with an explicit 25-connection application pool, and estimated aggregate application database calls were 50,336. Every route received samples; bounded cage/scan transfer action routes had p95 latency below 3.86 s and p95 response size below 81 KB. The mode-restricted sanitized artifact is retained outside the worktree at `.runtime-data/m10-load/20260813-final/2026-08-13T00-09-41-235Z`.
 
-M10-07 evidence: `docs/HOSTING_DECISION.md` records the vendor-neutral production topology supported by the current application: a long-running Node.js 22 service, same-region managed PostgreSQL 16 with a bounded pool and direct migration connection, private persistent object storage, a separately scheduled bounded outbox worker, and privacy-safe monitoring. The measured local maximum requires a staging candidate with at least 4.826 GB usable application-memory capacity for 2× headroom; a practical first candidate should provide at least 6 GB without preselecting a vendor tier. Vendor, region, budget, recovery objectives, identity/domain, provider, and production rollout remain deliberately deferred until the owner approves them and the identical synthetic profile, object-storage checks, queue recovery, and encrypted restore pass in staging.
+M10-07 evidence: `docs/HOSTING_DECISION.md` records the vendor-neutral production topology supported by the current application: a long-running Node.js 22 service, same-region managed PostgreSQL 16 with a bounded pool and direct migration connection, private persistent object storage, a separately scheduled bounded outbox worker, and privacy-safe monitoring. The clean measured local maximum requires a staging candidate with at least 4.596 GB usable application-memory capacity for 2× headroom; a practical first candidate should provide at least 6 GB without preselecting a vendor tier. Vendor, region, budget, recovery objectives, identity/domain, provider, and production rollout remain deliberately deferred until the owner approves them and the identical synthetic profile, object-storage checks, queue recovery, and encrypted restore pass in staging.
 
 ## Required Gate For Every Milestone
 
-- [ ] Focused unit and integration tests pass.
-- [ ] `npm run prisma:validate` passes when schema is affected.
-- [ ] `npm run typecheck` passes.
-- [ ] `npm run lint` passes.
-- [ ] `npm run build` passes.
-- [ ] `git diff --check` passes.
-- [ ] Required database migration/recovery tests pass.
-- [ ] Required desktop/mobile browser and accessibility checks pass.
-- [ ] Independent bounded review has no blocking findings, or reviewer unavailability and manual review are recorded.
-- [ ] Tracker statuses and evidence are updated.
+- [x] Focused unit and integration tests pass.
+- [x] `npm run prisma:validate` passes when schema is affected.
+- [x] `npm run typecheck` passes.
+- [x] `npm run lint` passes.
+- [x] `npm run build` passes.
+- [x] `git diff --check` passes.
+- [x] Required database migration/recovery tests pass.
+- [x] Required desktop/mobile browser and accessibility checks pass.
+- [x] Independent bounded review has no blocking findings, or reviewer unavailability and manual review are recorded.
+- [x] Tracker statuses and evidence are updated.
 
 ## Milestone Ledger
 
