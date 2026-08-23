@@ -20,6 +20,7 @@ export type CompactActionItem = {
 type CompactActionTrayProps = {
   actions: CompactActionItem[];
   className?: string;
+  closeHref?: string;
   defaultActionId?: string;
   eyebrow?: string;
   summary?: ReactNode;
@@ -37,6 +38,7 @@ const buttonToneClassNames: Record<CompactActionTone, string> = {
 export function CompactActionTray({
   actions,
   className,
+  closeHref,
   defaultActionId,
   eyebrow,
   summary,
@@ -76,12 +78,16 @@ export function CompactActionTray({
               isActive && "is-active shadow-sm ring-2 ring-[var(--focus)] ring-offset-1 ring-offset-[var(--page-soft)]",
             );
 
-            if (action.href) {
+            const href = action.href ?? (isActive ? closeHref : undefined);
+
+            if (href) {
               return (
                 <Link
                   aria-label={action.description ? `${action.label}: ${action.description}` : action.label}
+                  aria-controls={action.panel ? panelId : undefined}
+                  aria-expanded={action.panel ? isActive : undefined}
                   className={className}
-                  href={action.href}
+                  href={href}
                   key={action.id}
                 >
                   {action.icon}
@@ -116,9 +122,15 @@ export function CompactActionTray({
                 <p className="wrap-value text-sm text-[var(--muted)]">{activeAction.description}</p>
               ) : null}
             </div>
-            <button className="table-action" onClick={() => setActiveId(null)} type="button">
-              Close
-            </button>
+            {closeHref ? (
+              <Link className="table-action" href={closeHref}>
+                Close
+              </Link>
+            ) : (
+              <button className="table-action" onClick={() => setActiveId(null)} type="button">
+                Close
+              </button>
+            )}
           </div>
           <div className="mt-4 min-w-0">{activeAction.panel}</div>
         </div>

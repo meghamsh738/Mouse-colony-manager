@@ -8,6 +8,7 @@ import { ColonyTable } from "@/components/app/colony-table";
 import { CompactActionTray, type CompactActionItem } from "@/components/app/compact-action-tray";
 import { PageHeader } from "@/components/app/page-header";
 import { WorksheetShell } from "@/components/app/worksheet-shell";
+import { getRequestedAction, withActionQuery } from "@/lib/action-route";
 import {
   ANIMAL_INVENTORY_DEFAULT_PAGE_SIZE,
   getAnimalInventoryPageView,
@@ -35,18 +36,21 @@ export default async function AnimalsPage({ searchParams }: AnimalsPageProps) {
   const canCreateAnimal = user.role === "admin" || user.role === "colony_manager" || user.role === "animal_staff";
   const canImportGenotypes = user.role !== "read_only";
   const rawQuery = (await searchParams) ?? {};
+  const requestedAction = getRequestedAction(rawQuery, ["add-mouse"] as const);
+  const shouldLoadCreateOptions = canCreateAnimal && requestedAction === "add-mouse";
   const [inventory, options] = await Promise.all([
     getAnimalInventoryPageView(user, rawQuery),
-    canCreateAnimal ? getAnimalPageOptions(user) : Promise.resolve(null),
+    shouldLoadCreateOptions ? getAnimalPageOptions(user) : Promise.resolve(null),
   ]);
   if (inventory.page > inventory.pageCount) {
     redirect(canonicalAnimalsHref(inventory.query, inventory.pageCount));
   }
   const animals = inventory.items;
   const showCreateAnimal = canCreateAnimal && options !== null;
-  const showOperations = showCreateAnimal || canImportGenotypes;
+  const showOperations = canCreateAnimal || canImportGenotypes;
+  const inventoryHref = canonicalAnimalsHref(inventory.query, inventory.page);
   const actions: CompactActionItem[] = [
-    ...(showCreateAnimal
+    ...(canCreateAnimal
       ? [
           {
             id: "add-mouse",
@@ -54,13 +58,17 @@ export default async function AnimalsPage({ searchParams }: AnimalsPageProps) {
             description: "New animal",
             icon: <MousePointer2 size={16} />,
             tone: "primary" as const,
-            panel: (
-              <AnimalCreateForm
-                cageOptions={options.cageOptions}
-                projectOptions={options.projectOptions}
-                strainOptions={options.strainOptions}
-              />
-            ),
+            ...(showCreateAnimal
+              ? {
+                  panel: (
+                    <AnimalCreateForm
+                      cageOptions={options.cageOptions}
+                      projectOptions={options.projectOptions}
+                      strainOptions={options.strainOptions}
+                    />
+                  ),
+                }
+              : { href: withActionQuery(inventoryHref, "add-mouse") }),
           },
         ]
       : []),
@@ -75,7 +83,7 @@ export default async function AnimalsPage({ searchParams }: AnimalsPageProps) {
           },
         ]
       : []),
-    ...(showCreateAnimal
+    ...(canCreateAnimal
       ? [
           {
             id: "receive-mice",
@@ -98,7 +106,10 @@ export default async function AnimalsPage({ searchParams }: AnimalsPageProps) {
         {showOperations ? (
           <CompactActionTray
             actions={actions}
+            closeHref={showCreateAnimal ? inventoryHref : undefined}
+            defaultActionId={showCreateAnimal ? "add-mouse" : undefined}
             eyebrow="Actions"
+            key={requestedAction ?? "inventory"}
             summary={<span>{inventory.totalCount} mice in current filtered view</span>}
             title="Record work"
           />

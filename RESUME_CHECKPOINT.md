@@ -2,6 +2,8 @@
 
 Recorded: 2026-08-13
 
+Last verified: 2026-08-23
+
 ## Workspace
 
 - Repository: `/Volumes/Coding Projects/Active/mouse-colony-manager`
@@ -23,13 +25,15 @@ Recorded: 2026-08-13
 - Samples and Cryostorage use authorization-first database filtering, stable pages of 80 (maximum 100), narrow projections, and canonical out-of-range handling.
 - Animal/cage histories are bounded to 50 records and scan notes to 15, with explicit truncation/fallback behavior.
 - Cage and scan pages load bounded, server-searched/paginated transfer options only after an authorized operational user chooses **Move mouse**. Cage closure uses a same-lab destination-only read, missing-animal recovery is animal-authorized and same-lab scoped, and manual scan lookup stays in the authenticated App Router session.
+- The default Animals and Biosamples inventories defer their large create-form catalogs to explicit URL-backed actions. At the 9,999-animal synthetic boundary, the default Animals response fell from 251,056 to 97,934 bytes and the default Biosamples response from 882,875 to 52,809 bytes; the forms still load their complete authorized options only after the user chooses the action.
 - The one-shot outbox worker has bounded claims/concurrency/runtime, honest leases/retries/dead letters, topic-specific secrets, provider idempotency requirements, and privacy-safe System aggregates.
 - The additive-only M10 load seed and runner enforce a dedicated loopback target and mode-restricted, sanitized artifacts outside the source worktree.
 - The vendor-neutral hosting topology is recorded in `docs/HOSTING_DECISION.md`.
 
 ## Preserved Disposable Evidence
 
-- PostgreSQL 16.14 remains loopback-only at `127.0.0.1:51422`, using the external runtime data directory.
+- The current PostgreSQL 16 listener is loopback-only at `127.0.0.1:51522`, using the external runtime data directory; the earlier `51422` listener is not active.
+- The 2026-08-23 performance follow-up target is database `mcm_test_m10_load_perf_20260823_r1`, schema `mcm_test_m10_load_perf`; it contains only the guarded synthetic maximum-scale fixture and must not be destructively reused.
 - Final role/browser QA target: database `mcm_test_final_20260812_r1`, schema `mcm_test_final`.
 - Load target: database `mcm_test_m10_load_20260812_r1`, schema `mcm_test_m10_load`; exact 9,999 animals, 2,000 cages, and 50 synthetic load identities (55 users including the base seed).
 - Queue target: database `mcm_test_m10_queue_20260812_r1`, schema `mcm_test_m10_queue`; ten delivered synthetic notifications retained for review.
@@ -50,6 +54,7 @@ Recorded: 2026-08-13
 - Desktop/mobile Playwright role and workflow acceptance passed all 96 scenarios, covering every seeded role; background visual checks of the built dashboard and transfer workspace also passed at desktop and 412 x 915 with no horizontal overflow.
 - TypeScript, Prisma validation, scoped/full lint with only five longstanding non-blocking administration warnings, production build, and diff checks passed.
 - Final independent re-review returned CLEAR with no remaining P0/P1/P2 blockers after the cage-alert, bounded-transfer, missing-animal, pinned-destination, and outbox-behavior fixes.
+- The 2026-08-23 lazy-action follow-up passed 111 unit files / 525 tests, TypeScript, full lint with the same five pre-existing warnings, a 51-entry production build, and background desktop/mobile Chromium checks with no console error or horizontal overflow. Five warm authenticated samples measured default Animals p50/p95 at 14.3/21.7 ms (previously 33.3/38.2 ms) and default Biosamples at 7.4/8.8 ms (previously 31.2/34.2 ms). A fix-first independent review caught and verified corrections for two bounded UI regressions; final re-review returned CLEAR with no P0-P3 findings.
 
 ## Safe Resume Order
 
