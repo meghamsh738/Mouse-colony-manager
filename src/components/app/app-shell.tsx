@@ -18,6 +18,7 @@ import {
   Search,
   Settings2,
   ShieldAlert,
+  ShieldCheck,
   Snowflake,
   Table2,
   TestTubeDiagonal,
@@ -67,6 +68,7 @@ const navigationIcons: Record<NavigationItemId, LucideIcon> = {
   rules: Settings2,
   labs: Building2,
   users: Users,
+  duties: ShieldCheck,
   system: Wrench,
 };
 

@@ -2,7 +2,7 @@
 
 Recorded: 2026-08-29
 
-Last verified: 2026-08-29 (M11 documentation reconciliation); M12 implementation started 2026-08-29
+Last verified: 2026-08-29 (M12 independent duties and identity contracts); M13 is next
 
 ## Workspace
 
@@ -14,7 +14,7 @@ Last verified: 2026-08-29 (M11 documentation reconciliation); M12 implementation
 
 ## Practical State
 
-- Milestone 11 is Verified. The completed ChatGPT Pro assessment is archived exactly at [`docs/reviews/2026-08-29-chatgpt-pro-product-review.md`](./docs/reviews/2026-08-29-chatgpt-pro-product-review.md), and its repository-specific synthetic-release boundary and M11–M20 delivery order are recorded in [`docs/PRODUCT_READINESS_REMEDIATION.md`](./docs/PRODUCT_READINESS_REMEDIATION.md). Milestone 12 independent-duty and identity-contract implementation is now active.
+- Milestones 11 and 12 are Verified. The completed ChatGPT Pro assessment is archived exactly at [`docs/reviews/2026-08-29-chatgpt-pro-product-review.md`](./docs/reviews/2026-08-29-chatgpt-pro-product-review.md), and its repository-specific synthetic-release boundary and M11–M20 delivery order are recorded in [`docs/PRODUCT_READINESS_REMEDIATION.md`](./docs/PRODUCT_READINESS_REMEDIATION.md). M12 added independently approved, time-bounded facility duties, durable synthetic MFA evidence, immediate identity/duty revocation, a fail-closed production identity contract, and an empty synthetic QA fixture. M13 protocol authorization and competency gates are next.
 - The Mouse Colony Manager's locally completable product milestones are finished and verified. Role-scoped workflows, the unit-wide privacy-safe Strain Directory, bounded inventories and histories, the scheduler-ready outbox worker, and the synthetic performance harness passed final review and acceptance on clean commit `a032202d09e6ccee0be1386b20aae9b93b7b3b89`.
 - This does **not** mean the app is deployed to production. Hosting region, budget/operator, recovery objectives, institutional identity/domain, email provider, private object storage, and a synthetic staging candidate still require owner decisions.
 - Milestone 9 production-shaped restore/cutover work is Deferred because the user has no real colony database. The guarded synthetic restore rehearsal remains available; do not request or invent production data.
@@ -31,9 +31,19 @@ Last verified: 2026-08-29 (M11 documentation reconciliation); M12 implementation
 - The additive-only M10 load seed and runner enforce a dedicated loopback target and mode-restricted, sanitized artifacts outside the source worktree.
 - The vendor-neutral hosting topology is recorded in `docs/HOSTING_DECISION.md`.
 
+## Completed Milestone 12 Work
+
+- Migration `0037_facility_duty_identity_assurance` adds six independent facility duties, immutable grant/revoke requests, time-bounded assignments, lifecycle history, external identity links, durable requester/decider assurance evidence, and database-enforced maker-checker/overlap rules.
+- Revoking a linked identity or changing a duty increments the affected user's authorization version. Sessions, commands, and outbox reauthorization re-read current database state; stale or revoked authority fails closed.
+- Duties grant only the new governed duty capabilities. They do not grant animal, cage, SOP, billing-operation, audit, or cross-lab membership authority. Existing broad role compatibility will be cut over to duty-gated workflows in the corresponding M13–M18 domains.
+- Guarded synthetic QA distributes Designated Veterinarian, Welfare Officer, Protocol Reviewer, Training Administrator, Billing Administrator, and Data Steward duties across veterinarian, CMU, and two independent administrator profiles while keeping animals and cages empty.
+- Desktop and mobile duty-workspace evidence is retained at `output/playwright/m12-duties-20260829/`.
+
 ## Preserved Disposable Evidence
 
-- The current PostgreSQL 16 listener is loopback-only at `127.0.0.1:51522`, using the external runtime data directory; the earlier `51422` listener is not active.
+- A PostgreSQL 16 listener used for current M12 work is loopback-only at `127.0.0.1:51523`, using the external runtime data directory. The prior retained evidence listener at `51522` and its databases must not be reused destructively.
+- M12 trigger/integration target: database `mcm_test_m12_20260829_r3`, schema `mcm_test_m12`; all 37 migrations and 9 database files / 155 tests passed.
+- M12 empty role-QA target: database `mcm_test_m12_empty_20260829_r1`, schema `mcm_test_m12_empty`; 0 animals, 0 cages, six active duties, and four guarded synthetic identity links. Do not store its local placeholder password in repository documentation.
 - The 2026-08-23 performance follow-up target is database `mcm_test_m10_load_perf_20260823_r1`, schema `mcm_test_m10_load_perf`; it contains only the guarded synthetic maximum-scale fixture and must not be destructively reused.
 - Final role/browser QA target: database `mcm_test_final_20260812_r1`, schema `mcm_test_final`.
 - Load target: database `mcm_test_m10_load_20260812_r1`, schema `mcm_test_m10_load`; exact 9,999 animals, 2,000 cages, and 50 synthetic load identities (55 users including the base seed).
@@ -56,12 +66,13 @@ Last verified: 2026-08-29 (M11 documentation reconciliation); M12 implementation
 - TypeScript, Prisma validation, scoped/full lint with only five longstanding non-blocking administration warnings, production build, and diff checks passed.
 - Final independent re-review returned CLEAR with no remaining P0/P1/P2 blockers after the cage-alert, bounded-transfer, missing-animal, pinned-destination, and outbox-behavior fixes.
 - The 2026-08-23 lazy-action follow-up passed 111 unit files / 525 tests, TypeScript, full lint with the same five pre-existing warnings, a 51-entry production build, and background desktop/mobile Chromium checks with no console error or horizontal overflow. Five warm authenticated samples measured default Animals p50/p95 at 14.3/21.7 ms (previously 33.3/38.2 ms) and default Biosamples at 7.4/8.8 ms (previously 31.2/34.2 ms). A fix-first independent review caught and verified corrections for two bounded UI regressions; final re-review returned CLEAR with no P0-P3 findings.
+- M12 passed 114 database-free files / 556 tests, 10 focused files / 92 tests, 9 guarded database files / 155 tests, all 37 migrations, Prisma validation/generation, TypeScript, ESLint with five pre-existing warnings, the 84-entry authorization manifest, a 52-route production build, and diff checks. Playwright duty QA passed at 1440×1000 and 390×844 with no overflow or console errors, and Lab User direct access was denied. Independent re-review returned `ship` after all P0/P1 findings were corrected.
 
 ## Safe Resume Order
 
 1. Read this file, `IMPLEMENTATION_TRACKER.md`, `docs/HOSTING_DECISION.md`, `docs/M10_LOAD_TEST.md`, and `docs/OUTBOX_WORKER_RUNBOOK.md`.
 2. Confirm the external drive, branch, and loopback PostgreSQL target before running anything. Never point destructive seeds or probes at a retained/shared/remote target.
-3. If continuing local development, create a new uniquely named `mcm_test_*` database/schema instead of overwriting preserved evidence.
+3. If continuing M13 development, create a new uniquely named `mcm_test_m13_*` database/schema instead of overwriting the M12 or earlier preserved evidence.
 4. If preparing deployment, first obtain the owner decisions listed in the hosting record. Externalize attachment storage, configure a provider/scheduler/secret store, and run the identical synthetic snapshot three times in approved staging.
 5. Do not select a hosting vendor/tier or call the app production-ready until object-storage authorization, worker recovery, encrypted backup restore, data residency, cost, and recovery objectives pass the staging gate.
 6. When real colony data eventually exists, resume Milestone 9 through the documented sanitized production-shaped restore rehearsal; until then it remains Deferred.

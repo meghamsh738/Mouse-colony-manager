@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const databaseIntegrationFiles = [
   "identity-governance.test.ts",
+  "facility-duty-governance.integration.test.ts",
   "colony.test.ts",
   "integration-api-routes.test.ts",
   "notification-delivery.test.ts",

@@ -22,6 +22,7 @@ export type NavigationItemId =
   | "rules"
   | "labs"
   | "users"
+  | "duties"
   | "system";
 
 export type NavigationItem = {
@@ -54,6 +55,7 @@ export const navigationRegistry: NavigationItem[] = [
   { id: "rules", href: "/settings", label: "Facility rules", group: "Administration", capability: "rules:manage" },
   { id: "labs", href: "/administration/labs", label: "Labs", group: "Administration", capability: "labs:manage" },
   { id: "users", href: "/administration/users", label: "Users", group: "Administration", capability: "users:manage" },
+  { id: "duties", href: "/administration/duties", label: "Facility duties", group: "Administration", capability: "duties:manage" },
   { id: "system", href: "/system", label: "Technical console", group: "Technical", capability: "system:view", mobilePrimary: true },
 ];
 

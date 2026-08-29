@@ -8,6 +8,7 @@ import {
   authenticateOutboxWorker,
   canonicalJsonHash,
   executeIdempotentCommand,
+  reauthorizeActorForCommand,
   staleConflict,
 } from "@/lib/command-foundation";
 
@@ -121,5 +122,34 @@ describe("command foundation", () => {
     });
 
     expect(result).toMatchObject({ ok: false, code: "invalid_aggregate_type" });
+  });
+
+  it("re-reads duty authority at command time and does not grant lab visibility", async () => {
+    const tx = {
+      user: { findUnique: vi.fn().mockResolvedValue({ active: true, authzVersion: 7, role: "lab_user", labMemberships: [] }) },
+      $queryRaw: vi.fn().mockResolvedValue([{ duty: "billing_administrator" }]),
+    };
+    const actor = { id: "duty-user", authzVersion: 7, activeLabId: null };
+
+    await expect(reauthorizeActorForCommand(tx as never, actor, "billing:govern", null)).resolves.toBe(true);
+    await expect(reauthorizeActorForCommand(tx as never, actor, "billing:govern", "lab-private")).resolves.toBe(false);
+    await expect(reauthorizeActorForCommand(tx as never, actor, "billing:manage", null)).resolves.toBe(false);
+
+    tx.$queryRaw.mockResolvedValue([]);
+    await expect(reauthorizeActorForCommand(tx as never, actor, "billing:govern", null)).resolves.toBe(false);
+  });
+
+  it("fails command and outbox-style reauthorization after version invalidation", async () => {
+    const tx = {
+      user: { findUnique: vi.fn().mockResolvedValue({ active: true, authzVersion: 8, role: "lab_user", labMemberships: [] }) },
+      $queryRaw: vi.fn().mockResolvedValue([{ duty: "billing_administrator" }]),
+    };
+    await expect(reauthorizeActorForCommand(
+      tx as never,
+      { id: "duty-user", authzVersion: 7, activeLabId: null },
+      "billing:govern",
+      null,
+    )).resolves.toBe(false);
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
   });
 });

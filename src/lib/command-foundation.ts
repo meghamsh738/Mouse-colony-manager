@@ -11,6 +11,7 @@ import {
 } from "@prisma/client";
 
 import { getActorCapabilities, normalizeUserRole, type Capability } from "@/lib/capabilities";
+import { getActiveFacilityDutiesAtDatabaseTime } from "@/lib/facility-duty-auth";
 import { prisma } from "@/lib/prisma";
 import { writeSecurityEvent } from "@/lib/security-event";
 import type { ResolvedActor } from "@/lib/session";
@@ -158,7 +159,7 @@ export async function allocateFacilityIdentifiers(
   return rows.map((allocation) => String(Number(allocation.sequence_value)).padStart(Number(allocation.width), "0"));
 }
 
-async function reauthorizeActor(
+export async function reauthorizeActorForCommand(
   tx: Prisma.TransactionClient,
   actor: Pick<ResolvedActor, "id" | "authzVersion" | "activeLabId">,
   requiredCapability?: Capability,
@@ -183,11 +184,14 @@ async function reauthorizeActor(
   if (!user?.active || user.authzVersion !== actor.authzVersion) return false;
 
   const canonicalRole = normalizeUserRole(user.role);
+  const activeDuties = canonicalRole === "it_head"
+    ? []
+    : await getActiveFacilityDutiesAtDatabaseTime(tx, actor.id);
   const requestedLabId = labId ?? actor.activeLabId;
   const membership = canonicalRole === "lab_user"
     ? user.labMemberships.find((candidate) => candidate.labId === requestedLabId)
     : undefined;
-  if (canonicalRole === "lab_user" && !membership) return false;
+  if (canonicalRole === "lab_user" && requestedLabId && !membership) return false;
 
   const capabilities = getActorCapabilities({
     canonicalRole,
@@ -199,6 +203,7 @@ async function reauthorizeActor(
           role: membership.role,
         }
       : null,
+    activeDuties,
   });
   return !requiredCapability || capabilities.has(requiredCapability);
 }
@@ -211,7 +216,7 @@ export async function createWorkflowDraft(input: {
   expiresAt?: Date | null;
 }) {
   return prisma.$transaction(async (tx) => {
-    if (!await reauthorizeActor(tx, input.actor, undefined, input.labId)) {
+    if (!await reauthorizeActorForCommand(tx, input.actor, undefined, input.labId)) {
       return { ok: false as const, code: "forbidden", message: "Your current access no longer permits this workflow." };
     }
     const draft = await tx.workflowDraft.create({
@@ -240,7 +245,7 @@ export async function upsertWorkflowDraft(input: {
 }) {
   return prisma.$transaction(async (tx) => {
     const labId = input.labId ?? (input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null);
-    if (!await reauthorizeActor(tx, input.actor, input.requiredCapability, labId)) {
+    if (!await reauthorizeActorForCommand(tx, input.actor, input.requiredCapability, labId)) {
       return { ok: false as const, code: "forbidden", message: "Your current access no longer permits this workflow." };
     }
     const existing = await tx.workflowDraft.findUnique({ where: { id: input.draftId } });
@@ -305,7 +310,7 @@ export async function getWorkflowDraftForActor(input: {
       || !draft.workflowType.startsWith(input.workflowTypePrefix)
       || !["draft", "review"].includes(draft.status)
       || (draft.expiresAt && draft.expiresAt <= new Date())
-      || !await reauthorizeActor(tx, input.actor, input.requiredCapability, draft.labId)
+      || !await reauthorizeActorForCommand(tx, input.actor, input.requiredCapability, draft.labId)
     ) {
       return { ok: false as const, code: "not_found", message: "Workflow draft not found." };
     }
@@ -324,7 +329,7 @@ export async function saveWorkflowDraft(input: {
     if (!draft || draft.actorId !== input.actor.id) {
       return { ok: false as const, code: "not_found", message: "Workflow draft not found." };
     }
-    if (!await reauthorizeActor(tx, input.actor, undefined, draft.labId)) {
+    if (!await reauthorizeActorForCommand(tx, input.actor, undefined, draft.labId)) {
       return { ok: false as const, code: "forbidden", message: "Your current access no longer permits this workflow." };
     }
     if (draft.expiresAt && draft.expiresAt <= new Date()) {
@@ -355,7 +360,7 @@ export async function createWorkflowReviewSnapshot(input: {
     if (!draft || draft.actorId !== input.actor.id) {
       return { ok: false as const, code: "not_found", message: "Workflow draft not found." };
     }
-    if (!await reauthorizeActor(tx, input.actor, undefined, draft.labId)) {
+    if (!await reauthorizeActorForCommand(tx, input.actor, undefined, draft.labId)) {
       return { ok: false as const, code: "forbidden", message: "Your current access no longer permits this workflow." };
     }
     if (draft.expiresAt && draft.expiresAt <= new Date()) {
@@ -396,7 +401,7 @@ export async function prepareWorkflowReview(input: {
 }) {
   return prisma.$transaction(async (tx) => {
     const labId = input.labId ?? (input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null);
-    if (!await reauthorizeActor(tx, input.actor, input.requiredCapability, labId)) {
+    if (!await reauthorizeActorForCommand(tx, input.actor, input.requiredCapability, labId)) {
       return { ok: false as const, code: "forbidden", message: "Your current access no longer permits this workflow." };
     }
 
@@ -741,7 +746,7 @@ export async function executeIdempotentCommand<T extends Prisma.InputJsonValue>(
           },
         },
       });
-      const authorized = await reauthorizeActor(tx, input.actor, input.requiredCapability, commandLabId);
+      const authorized = await reauthorizeActorForCommand(tx, input.actor, input.requiredCapability, commandLabId);
       if (!authorized) {
         const message = "Your current authorization no longer permits this command.";
         if (inserted.length) {
@@ -1165,7 +1170,7 @@ export async function claimOutboxMessages(input: {
         && message.requiredCapability === requiredCapability
         && message.actorId
         && message.actorAuthzVersion !== null
-        && await reauthorizeActor(
+        && await reauthorizeActorForCommand(
           tx,
           { id: message.actorId, authzVersion: message.actorAuthzVersion, activeLabId: message.labId },
           requiredCapability,
@@ -1250,7 +1255,7 @@ export async function reauthorizeOutboxMessage(message: OutboxMessage) {
   if (isInstitutionalOutboxTopic(message.topic as OutboxTopic)) {
     return prisma.$transaction((tx) => isCurrentOutboxAggregate(tx, message));
   }
-  return prisma.$transaction((tx) => reauthorizeActor(
+  return prisma.$transaction((tx) => reauthorizeActorForCommand(
     tx,
     { id: message.actorId!, authzVersion: message.actorAuthzVersion!, activeLabId: message.labId },
     expectedCapability,
@@ -1664,7 +1669,7 @@ export async function completeOutboxMessage(input: {
     const aggregateValid = evidenceValid && await isCurrentOutboxAggregate(tx, message);
     const actorValid = isInstitutionalOutboxTopic(topic)
       ? aggregateValid
-      : aggregateValid && await reauthorizeActor(
+      : aggregateValid && await reauthorizeActorForCommand(
         tx,
         { id: message.actorId!, authzVersion: message.actorAuthzVersion!, activeLabId: message.labId },
         expectedCapability,
@@ -1845,7 +1850,7 @@ export async function createMigrationRun(input: {
   migrationType: string;
 }) {
   return prisma.$transaction(async (tx) => {
-    if (!await reauthorizeActor(tx, input.actor, "migrations:manage")) {
+    if (!await reauthorizeActorForCommand(tx, input.actor, "migrations:manage")) {
       return { ok: false as const, code: "forbidden", message: "Only current facility administrators can start migration runs." };
     }
     const run = await tx.migrationRun.create({
@@ -1873,7 +1878,7 @@ export async function recordOwnershipException(input: {
   reason: string;
 }) {
   return prisma.$transaction(async (tx) => {
-    if (!await reauthorizeActor(tx, input.actor, "migrations:manage")) {
+    if (!await reauthorizeActorForCommand(tx, input.actor, "migrations:manage")) {
       return { ok: false as const, code: "forbidden", message: "Only current facility administrators can record ownership exceptions." };
     }
     const run = await tx.migrationRun.findFirst({
@@ -1906,7 +1911,7 @@ export async function resolveOwnershipException(input: {
   status?: "resolved" | "rejected";
 }) {
   return prisma.$transaction(async (tx) => {
-    if (!await reauthorizeActor(tx, input.actor, "migrations:manage")) {
+    if (!await reauthorizeActorForCommand(tx, input.actor, "migrations:manage")) {
       return { ok: false as const, code: "forbidden", message: "Only current facility administrators can resolve ownership exceptions." };
     }
     const updated = await tx.ownershipException.updateMany({

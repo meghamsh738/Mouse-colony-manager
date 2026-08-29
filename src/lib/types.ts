@@ -14,6 +14,14 @@ export type CanonicalUserRole = "it_head" | "facility_admin" | "cmu_staff" | "la
 export type LabMembershipRole = "owner" | "manager" | "staff" | "viewer";
 export type InvitationStatus = "pending" | "accepted" | "revoked" | "expired";
 export type PrivilegedRoleChangeStatus = "pending" | "approved" | "rejected" | "expired";
+export type FacilityDuty =
+  | "designated_veterinarian"
+  | "welfare_officer"
+  | "protocol_reviewer"
+  | "training_administrator"
+  | "billing_administrator"
+  | "data_steward";
+export type IdentityAssuranceLevel = "password" | "mfa" | "phishing_resistant" | "synthetic_mfa";
 export type InvoiceStatus = "draft" | "finalized" | "void";
 
 export type Sex = "male" | "female" | "unknown";

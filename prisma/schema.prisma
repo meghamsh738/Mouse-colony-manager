@@ -42,6 +42,55 @@ enum PrivilegedRoleChangeStatus {
   expired
 }
 
+enum FacilityDuty {
+  designated_veterinarian
+  welfare_officer
+  protocol_reviewer
+  training_administrator
+  billing_administrator
+  data_steward
+}
+
+enum FacilityDutyRequestType {
+  grant
+  revoke
+}
+
+enum FacilityDutyRequestStatus {
+  pending
+  approved
+  rejected
+  expired
+}
+
+enum FacilityDutyEventType {
+  requested
+  approved
+  rejected
+  expired
+  activated
+  revoked
+}
+
+enum ExternalIdentityProvider {
+  synthetic
+  oidc
+  saml
+}
+
+enum IdentityAssuranceLevel {
+  password
+  mfa
+  phishing_resistant
+  synthetic_mfa
+}
+
+enum ExternalIdentityEventType {
+  linked
+  assurance_changed
+  revoked
+}
+
 enum InvoiceStatus {
   draft
   finalized
@@ -375,74 +424,83 @@ enum ProcedureOccurrenceStatus {
 }
 
 model User {
-  id                           String                        @id
+  id                           String                           @id
   name                         String
-  email                        String                        @unique
+  email                        String                           @unique
   passwordHash                 String
   role                         UserRole
-  active                       Boolean                       @default(true)
-  authzVersion                 Int                           @default(1)
+  active                       Boolean                          @default(true)
+  authzVersion                 Int                              @default(1)
   labMemberships               LabMembership[]
-  projectsOwned                Project[]                     @relation("ProjectOwner")
-  experimentsOwned             Experiment[]                  @relation("ExperimentOwner")
-  healthNotesCreated           HealthNote[]                  @relation("HealthNoteCreator")
-  auditLogs                    AuditLog[]                    @relation("AuditActor")
-  securityEvents               SecurityEvent[]               @relation("SecurityEventActor")
-  cageMoves                    CageMovement[]                @relation("CageMoveActor")
-  animalMoves                  AnimalMovement[]              @relation("AnimalMoveActor")
-  cageLabTransfers             CageLabTransfer[]             @relation("CageLabTransferActor")
-  animalLabTransfers           AnimalLabTransfer[]           @relation("AnimalLabTransferActor")
-  finalizedInvoices            Invoice[]                     @relation("InvoiceFinalizer")
-  voidedInvoices               Invoice[]                     @relation("InvoiceVoider")
-  invoiceAdjustmentsCreated    InvoiceAdjustment[]           @relation("InvoiceAdjustmentCreator")
-  statusEvents                 AnimalStatusEvent[]           @relation("StatusEventActor")
-  genotypesPerformed           GenotypingRecord[]            @relation("GenotypeOperator")
-  genotypesVerified            GenotypingRecord[]            @relation("GenotypeVerifier")
-  sampleRecordsCreated         SampleRecord[]                @relation("SampleRecordCreator")
-  cryostorageRecordsCreated    CryostorageRecord[]           @relation("CryostorageRecordCreator")
-  cryostorageRequestsCreated   CryostorageRequest[]          @relation("CryostorageRequestCreator")
-  cryostorageRequestsDecided   CryostorageRequest[]          @relation("CryostorageRequestDecisionActor")
-  cryostorageRequestEvents     CryostorageRequestEvent[]     @relation("CryostorageRequestEventActor")
-  cryostorageOperations        CryostorageOperation[]        @relation("CryostorageOperationActor")
-  animalIntakeBatchesCreated   AnimalIntakeBatch[]           @relation("AnimalIntakeBatchCreator")
-  invitationsSent              UserInvitation[]              @relation("InvitationSender")
-  privilegedChangesTarget      PrivilegedRoleChangeRequest[] @relation("PrivilegedChangeTarget")
-  privilegedChangesRequested   PrivilegedRoleChangeRequest[] @relation("PrivilegedChangeRequester")
-  privilegedChangesApproved    PrivilegedRoleChangeRequest[] @relation("PrivilegedChangeApprover")
-  workflowDrafts               WorkflowDraft[]               @relation("WorkflowDraftActor")
-  workflowReviewSnapshots      WorkflowReviewSnapshot[]      @relation("WorkflowSnapshotActor")
-  commandReceipts              CommandReceipt[]              @relation("CommandReceiptActor")
-  outboxMessages               OutboxMessage[]               @relation("OutboxActor")
-  migrationRuns                MigrationRun[]                @relation("MigrationRunActor")
-  ownershipExceptionsResolved  OwnershipException[]          @relation("OwnershipExceptionResolver")
-  quarantineCasesAdmitted      QuarantineCase[]              @relation("QuarantineAdmissionActor")
-  quarantineReleasesRequested  QuarantineCase[]              @relation("QuarantineReleaseRequester")
-  quarantineCasesReleased      QuarantineCase[]              @relation("QuarantineReleaseActor")
-  quarantineObservations       QuarantineObservation[]       @relation("QuarantineObservationActor")
-  cageClosures                 CageClosure[]                 @relation("CageClosureActor")
-  labTransferRequestsCreated   LabTransferRequest[]          @relation("LabTransferRequester")
-  labTransferDecisions         LabTransferRequest[]          @relation("LabTransferDestinationDecision")
-  labTransferFinalizations     LabTransferRequest[]          @relation("LabTransferFinalizer")
-  labTransferOverrides         LabTransferRequest[]          @relation("LabTransferOverrideApprover")
-  labTransferPacketsCreated    LabTransferPacket[]           @relation("LabTransferPacketCreator")
-  labTransferEvents            LabTransferEvent[]            @relation("LabTransferEventActor")
-  sopDocumentsCreated          SopDocument[]                 @relation("SopDocumentCreator")
-  sopVersionsCreated           SopVersion[]                  @relation("SopVersionCreator")
-  sopVersionApprovals          SopVersionApproval[]          @relation("SopVersionApprovalActor")
-  sopAssignmentsAssigned       SopAssignment[]               @relation("SopAssignmentActor")
-  sopAssignmentsRevoked        SopAssignment[]               @relation("SopAssignmentRevoker")
-  sopAcknowledgements          SopAcknowledgement[]          @relation("SopAcknowledgementUser")
-  procedurePlansCreated        ProcedurePlan[]               @relation("ProcedurePlanCreator")
-  procedureOccurrencesExecuted ProcedureOccurrence[]         @relation("ProcedureOccurrenceExecutor")
-  cageResponsibilities         CageUserAssignment[]          @relation("CageResponsibleUser")
-  cageResponsibilityChanges    CageUserAssignment[]          @relation("CageResponsibilityActor")
-  cageResponsibilitiesEnded    CageUserAssignment[]          @relation("CageResponsibilityEndActor")
-  notificationAudienceTargets  NotificationAudience[]        @relation("NotificationAudienceUser")
-  notificationRecipients       NotificationRecipient[]       @relation("NotificationRecipientUser")
+  projectsOwned                Project[]                        @relation("ProjectOwner")
+  experimentsOwned             Experiment[]                     @relation("ExperimentOwner")
+  healthNotesCreated           HealthNote[]                     @relation("HealthNoteCreator")
+  auditLogs                    AuditLog[]                       @relation("AuditActor")
+  securityEvents               SecurityEvent[]                  @relation("SecurityEventActor")
+  cageMoves                    CageMovement[]                   @relation("CageMoveActor")
+  animalMoves                  AnimalMovement[]                 @relation("AnimalMoveActor")
+  cageLabTransfers             CageLabTransfer[]                @relation("CageLabTransferActor")
+  animalLabTransfers           AnimalLabTransfer[]              @relation("AnimalLabTransferActor")
+  finalizedInvoices            Invoice[]                        @relation("InvoiceFinalizer")
+  voidedInvoices               Invoice[]                        @relation("InvoiceVoider")
+  invoiceAdjustmentsCreated    InvoiceAdjustment[]              @relation("InvoiceAdjustmentCreator")
+  statusEvents                 AnimalStatusEvent[]              @relation("StatusEventActor")
+  genotypesPerformed           GenotypingRecord[]               @relation("GenotypeOperator")
+  genotypesVerified            GenotypingRecord[]               @relation("GenotypeVerifier")
+  sampleRecordsCreated         SampleRecord[]                   @relation("SampleRecordCreator")
+  cryostorageRecordsCreated    CryostorageRecord[]              @relation("CryostorageRecordCreator")
+  cryostorageRequestsCreated   CryostorageRequest[]             @relation("CryostorageRequestCreator")
+  cryostorageRequestsDecided   CryostorageRequest[]             @relation("CryostorageRequestDecisionActor")
+  cryostorageRequestEvents     CryostorageRequestEvent[]        @relation("CryostorageRequestEventActor")
+  cryostorageOperations        CryostorageOperation[]           @relation("CryostorageOperationActor")
+  animalIntakeBatchesCreated   AnimalIntakeBatch[]              @relation("AnimalIntakeBatchCreator")
+  invitationsSent              UserInvitation[]                 @relation("InvitationSender")
+  privilegedChangesTarget      PrivilegedRoleChangeRequest[]    @relation("PrivilegedChangeTarget")
+  privilegedChangesRequested   PrivilegedRoleChangeRequest[]    @relation("PrivilegedChangeRequester")
+  privilegedChangesApproved    PrivilegedRoleChangeRequest[]    @relation("PrivilegedChangeApprover")
+  dutyAssignments              FacilityDutyAssignment[]         @relation("FacilityDutyTarget")
+  dutyRequestsTargeted         FacilityDutyRequest[]            @relation("FacilityDutyRequestTarget")
+  dutyRequestsCreated          FacilityDutyRequest[]            @relation("FacilityDutyRequester")
+  dutyRequestsDecided          FacilityDutyRequest[]            @relation("FacilityDutyDecisionActor")
+  dutyEventsTargeted           FacilityDutyLifecycleEvent[]     @relation("FacilityDutyEventTarget")
+  dutyLifecycleEvents          FacilityDutyLifecycleEvent[]     @relation("FacilityDutyEventActor")
+  externalIdentityLinks        ExternalIdentityLink[]           @relation("ExternalIdentityUser")
+  externalIdentityLinksCreated ExternalIdentityLink[]           @relation("ExternalIdentityLinkActor")
+  externalIdentityEvents       ExternalIdentityLifecycleEvent[] @relation("ExternalIdentityEventActor")
+  workflowDrafts               WorkflowDraft[]                  @relation("WorkflowDraftActor")
+  workflowReviewSnapshots      WorkflowReviewSnapshot[]         @relation("WorkflowSnapshotActor")
+  commandReceipts              CommandReceipt[]                 @relation("CommandReceiptActor")
+  outboxMessages               OutboxMessage[]                  @relation("OutboxActor")
+  migrationRuns                MigrationRun[]                   @relation("MigrationRunActor")
+  ownershipExceptionsResolved  OwnershipException[]             @relation("OwnershipExceptionResolver")
+  quarantineCasesAdmitted      QuarantineCase[]                 @relation("QuarantineAdmissionActor")
+  quarantineReleasesRequested  QuarantineCase[]                 @relation("QuarantineReleaseRequester")
+  quarantineCasesReleased      QuarantineCase[]                 @relation("QuarantineReleaseActor")
+  quarantineObservations       QuarantineObservation[]          @relation("QuarantineObservationActor")
+  cageClosures                 CageClosure[]                    @relation("CageClosureActor")
+  labTransferRequestsCreated   LabTransferRequest[]             @relation("LabTransferRequester")
+  labTransferDecisions         LabTransferRequest[]             @relation("LabTransferDestinationDecision")
+  labTransferFinalizations     LabTransferRequest[]             @relation("LabTransferFinalizer")
+  labTransferOverrides         LabTransferRequest[]             @relation("LabTransferOverrideApprover")
+  labTransferPacketsCreated    LabTransferPacket[]              @relation("LabTransferPacketCreator")
+  labTransferEvents            LabTransferEvent[]               @relation("LabTransferEventActor")
+  sopDocumentsCreated          SopDocument[]                    @relation("SopDocumentCreator")
+  sopVersionsCreated           SopVersion[]                     @relation("SopVersionCreator")
+  sopVersionApprovals          SopVersionApproval[]             @relation("SopVersionApprovalActor")
+  sopAssignmentsAssigned       SopAssignment[]                  @relation("SopAssignmentActor")
+  sopAssignmentsRevoked        SopAssignment[]                  @relation("SopAssignmentRevoker")
+  sopAcknowledgements          SopAcknowledgement[]             @relation("SopAcknowledgementUser")
+  procedurePlansCreated        ProcedurePlan[]                  @relation("ProcedurePlanCreator")
+  procedureOccurrencesExecuted ProcedureOccurrence[]            @relation("ProcedureOccurrenceExecutor")
+  cageResponsibilities         CageUserAssignment[]             @relation("CageResponsibleUser")
+  cageResponsibilityChanges    CageUserAssignment[]             @relation("CageResponsibilityActor")
+  cageResponsibilitiesEnded    CageUserAssignment[]             @relation("CageResponsibilityEndActor")
+  notificationAudienceTargets  NotificationAudience[]           @relation("NotificationAudienceUser")
+  notificationRecipients       NotificationRecipient[]          @relation("NotificationRecipientUser")
   notificationPreferences      NotificationPreference[]
-  strainDirectoryRequests      StrainDirectoryRequest[]      @relation("StrainDirectoryRequester")
-  strainDirectoryDecisions     StrainDirectoryRequest[]      @relation("StrainDirectoryDecisionActor")
-  strainDirectoryEvents        StrainDirectoryRequestEvent[] @relation("StrainDirectoryRequestEventActor")
+  strainDirectoryRequests      StrainDirectoryRequest[]         @relation("StrainDirectoryRequester")
+  strainDirectoryDecisions     StrainDirectoryRequest[]         @relation("StrainDirectoryDecisionActor")
+  strainDirectoryEvents        StrainDirectoryRequestEvent[]    @relation("StrainDirectoryRequestEventActor")
 }
 
 model Lab {
@@ -666,6 +724,128 @@ model PrivilegedRoleChangeRequest {
   @@index([targetUserId, status])
   @@index([requestedById, status])
   @@index([expiresAt, status])
+}
+
+model FacilityDutyRequest {
+  id                       String                       @id
+  requestType              FacilityDutyRequestType
+  duty                     FacilityDuty
+  targetUserId             String
+  targetAuthzVersion       Int
+  assignmentId             String?
+  assignmentVersion        Int?
+  requestedValidFrom       DateTime?
+  requestedValidUntil      DateTime?
+  status                   FacilityDutyRequestStatus    @default(pending)
+  reason                   String
+  requestedById            String
+  requestedByAuthzVersion  Int
+  requestedAssurance       IdentityAssuranceLevel
+  requestedIdentityLinkId  String
+  requestedAuthenticatedAt DateTime
+  decidedById              String?
+  decidedByAuthzVersion    Int?
+  decidedAssurance         IdentityAssuranceLevel?
+  decidedIdentityLinkId    String?
+  decidedAuthenticatedAt   DateTime?
+  decisionReason           String?
+  expiresAt                DateTime
+  decidedAt                DateTime?
+  createdAt                DateTime                     @default(now())
+  version                  Int                          @default(1)
+  targetUser               User                         @relation("FacilityDutyRequestTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  requestedBy              User                         @relation("FacilityDutyRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy                User?                        @relation("FacilityDutyDecisionActor", fields: [decidedById], references: [id], onDelete: Restrict)
+  requestedIdentityLink    ExternalIdentityLink         @relation("FacilityDutyRequesterAssurance", fields: [requestedIdentityLinkId], references: [id], onDelete: Restrict)
+  decidedIdentityLink      ExternalIdentityLink?        @relation("FacilityDutyDeciderAssurance", fields: [decidedIdentityLinkId], references: [id], onDelete: Restrict)
+  assignment               FacilityDutyAssignment?      @relation("FacilityDutyRevokeTarget", fields: [assignmentId], references: [id], onDelete: Restrict)
+  grantedAssignment        FacilityDutyAssignment?      @relation("FacilityDutyGrantRequest")
+  revokedAssignment        FacilityDutyAssignment?      @relation("FacilityDutyRevokeRequest")
+  events                   FacilityDutyLifecycleEvent[]
+
+  @@index([status, expiresAt])
+  @@index([targetUserId, duty, status])
+  @@index([requestedById, status])
+  @@index([requestedIdentityLinkId])
+  @@index([decidedIdentityLinkId])
+  @@index([assignmentId, assignmentVersion])
+}
+
+model FacilityDutyAssignment {
+  id                 String                       @id
+  userId             String
+  duty               FacilityDuty
+  validFrom          DateTime
+  validUntil         DateTime
+  grantRequestId     String                       @unique
+  revokeRequestId    String?                      @unique
+  revokedAt          DateTime?
+  version            Int                          @default(1)
+  createdAt          DateTime                     @default(now())
+  user               User                         @relation("FacilityDutyTarget", fields: [userId], references: [id], onDelete: Restrict)
+  grantRequest       FacilityDutyRequest          @relation("FacilityDutyGrantRequest", fields: [grantRequestId], references: [id], onDelete: Restrict)
+  revokeRequest      FacilityDutyRequest?         @relation("FacilityDutyRevokeRequest", fields: [revokeRequestId], references: [id], onDelete: Restrict)
+  revocationRequests FacilityDutyRequest[]        @relation("FacilityDutyRevokeTarget")
+  events             FacilityDutyLifecycleEvent[]
+
+  @@unique([id, version])
+  @@index([userId, duty, validFrom, validUntil])
+  @@index([validUntil, revokedAt])
+}
+
+model FacilityDutyLifecycleEvent {
+  id           String                  @id
+  requestId    String
+  assignmentId String?
+  targetUserId String
+  actorId      String
+  eventType    FacilityDutyEventType
+  detail       Json?
+  occurredAt   DateTime                @default(now())
+  request      FacilityDutyRequest     @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  assignment   FacilityDutyAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+  targetUser   User                    @relation("FacilityDutyEventTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+  actor        User                    @relation("FacilityDutyEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, occurredAt])
+  @@index([assignmentId, occurredAt])
+  @@index([targetUserId, occurredAt])
+}
+
+model ExternalIdentityLink {
+  id                    String                           @id
+  userId                String
+  provider              ExternalIdentityProvider
+  providerSubject       String
+  assurance             IdentityAssuranceLevel
+  linkedById            String
+  active                Boolean                          @default(true)
+  createdAt             DateTime                         @default(now())
+  revokedAt             DateTime?
+  version               Int                              @default(1)
+  user                  User                             @relation("ExternalIdentityUser", fields: [userId], references: [id], onDelete: Restrict)
+  linkedBy              User                             @relation("ExternalIdentityLinkActor", fields: [linkedById], references: [id], onDelete: Restrict)
+  events                ExternalIdentityLifecycleEvent[]
+  dutyRequestsRequested FacilityDutyRequest[]            @relation("FacilityDutyRequesterAssurance")
+  dutyRequestsDecided   FacilityDutyRequest[]            @relation("FacilityDutyDeciderAssurance")
+
+  @@unique([provider, providerSubject])
+  @@unique([userId, provider])
+  @@index([userId, active])
+}
+
+model ExternalIdentityLifecycleEvent {
+  id             String                    @id
+  identityLinkId String
+  actorId        String
+  eventType      ExternalIdentityEventType
+  assurance      IdentityAssuranceLevel
+  detail         Json?
+  occurredAt     DateTime                  @default(now())
+  identityLink   ExternalIdentityLink      @relation(fields: [identityLinkId], references: [id], onDelete: Restrict)
+  actor          User                      @relation("ExternalIdentityEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([identityLinkId, occurredAt])
 }
 
 model LabMembership {

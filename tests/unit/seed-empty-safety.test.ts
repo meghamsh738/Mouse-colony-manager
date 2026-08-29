@@ -29,6 +29,11 @@ describe("empty bootstrap retained-state safety", () => {
     "sopVersionApproval",
     "sopVersion",
     "sopDocument",
+    "facilityDutyRequest",
+    "facilityDutyAssignment",
+    "facilityDutyLifecycleEvent",
+    "externalIdentityLink",
+    "externalIdentityLifecycleEvent",
   ])("checks %s inside the bootstrap transaction", (delegate) => {
     const transactionBody = seedSource.slice(
       seedSource.indexOf("await prisma.$transaction"),
@@ -89,5 +94,20 @@ describe("empty bootstrap retained-state safety", () => {
 
     expect(positions.every((position) => position > 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((left, right) => left - right));
+  });
+
+  it("clears circular duty and identity ledgers only inside the guarded disposable transaction", () => {
+    expect(destructiveSeedSource).toContain("assertDestructiveSeedAllowed()");
+    expect(destructiveSeedSource).toContain("SET LOCAL mcm.allow_destructive_seed = 'true'");
+    expect(destructiveSeedSource).toContain("SET LOCAL session_replication_role = 'replica'");
+    for (const table of [
+      "FacilityDutyLifecycleEvent",
+      "ExternalIdentityLifecycleEvent",
+      "FacilityDutyAssignment",
+      "FacilityDutyRequest",
+      "ExternalIdentityLink",
+    ]) {
+      expect(destructiveSeedSource).toContain(`DELETE FROM \"${table}\"`);
+    }
   });
 });

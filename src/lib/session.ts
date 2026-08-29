@@ -12,7 +12,9 @@ import {
   type Capability,
 } from "@/lib/capabilities";
 import { prisma } from "@/lib/prisma";
-import type { CanonicalUserRole, UserRole } from "@/lib/types";
+import { getActiveFacilityDutiesAtDatabaseTime } from "@/lib/facility-duty-auth";
+import { isElevatedAssurance, isElevatedIdentityContextCurrent, type AuthenticationMethod } from "@/lib/identity-assurance";
+import type { CanonicalUserRole, FacilityDuty, IdentityAssuranceLevel, UserRole } from "@/lib/types";
 
 export const ACTIVE_LAB_COOKIE = "mcm_active_lab";
 
@@ -24,6 +26,11 @@ export type ResolvedActor = {
   databaseRole: UserRole;
   canonicalRole: CanonicalUserRole;
   authzVersion: number;
+  authMethod?: AuthenticationMethod;
+  assurance?: IdentityAssuranceLevel;
+  authenticatedAt?: string;
+  identityLinkId?: string | null;
+  activeDuties?: FacilityDuty[];
   activeLabId: string | null;
   activeMembership: ActorMembership | null;
   memberships: ActorMembership[];
@@ -75,7 +82,21 @@ const resolveActorRequest = cache(async (): Promise<ActorResolution> => {
     return { hasSessionUser: true, actor: null };
   }
 
+  if (isElevatedAssurance(session.user.assurance) && !await isElevatedIdentityContextCurrent(prisma, {
+    userId: user.id,
+    identity: user.email,
+    identityLinkId: session.user.identityLinkId,
+    authenticationMethod: session.user.authMethod,
+    assurance: session.user.assurance,
+    authenticatedAt: session.user.authenticatedAt,
+  })) {
+    return { hasSessionUser: true, actor: null };
+  }
+
   const canonicalRole = normalizeUserRole(user.role as UserRole);
+  const activeDuties = canonicalRole === "it_head"
+    ? []
+    : await getActiveFacilityDutiesAtDatabaseTime(prisma, user.id);
   const memberships: ActorMembership[] = user.labMemberships.map((membership) => ({
     labId: membership.labId,
     labName: membership.lab.name,
@@ -87,7 +108,7 @@ const resolveActorRequest = cache(async (): Promise<ActorResolution> => {
   const activeMembership = canonicalRole === "lab_user"
     ? memberships.find((membership) => membership.labId === requestedLabId) ?? memberships[0] ?? null
     : null;
-  const capabilityActor = { canonicalRole, activeMembership };
+  const capabilityActor = { canonicalRole, activeMembership, activeDuties };
 
   return {
     hasSessionUser: true,
@@ -99,6 +120,11 @@ const resolveActorRequest = cache(async (): Promise<ActorResolution> => {
       databaseRole: user.role as UserRole,
       canonicalRole,
       authzVersion: user.authzVersion,
+      authMethod: session.user.authMethod ?? "password",
+      assurance: session.user.assurance ?? "password",
+      authenticatedAt: session.user.authenticatedAt ?? "",
+      identityLinkId: session.user.identityLinkId ?? null,
+      activeDuties,
       activeLabId: activeMembership?.labId ?? null,
       activeMembership,
       memberships,

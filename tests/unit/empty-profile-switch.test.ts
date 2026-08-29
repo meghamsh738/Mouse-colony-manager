@@ -28,9 +28,11 @@ describe("empty profile switching", () => {
     expect(EMPTY_PROFILES.map(({ id, role, scope }) => ({ id, role, scope }))).toEqual([
       { id: "user-it-head", role: "it_head", scope: "Technical console only" },
       { id: "user-admin", role: "facility_admin", scope: "Facility administration" },
+      { id: "user-admin-2", role: "facility_admin", scope: "Independent facility approval" },
       { id: "user-cmu-staff", role: "cmu_staff", scope: "Facility-wide operations" },
       { id: "user-lab-1", role: "lab_user", scope: "Lab 1 only" },
       { id: "user-lab-2", role: "lab_user", scope: "Lab 2 only" },
+      { id: "user-veterinarian", role: "lab_user", scope: "Time-bounded facility duties only" },
     ]);
   });
 

@@ -1,7 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { seedRoleQaDatabase } from "../../prisma/seed-role-qa";
-import { SEEDED_DEV_PASSWORD, SEEDED_ROLE_QA_EMAILS } from "../../src/lib/seed-metadata";
+import { SEEDED_ROLE_QA_EMAILS } from "../../src/lib/seed-metadata";
+
+function requireRoleQaPassword() {
+  const password = process.env.ROLE_QA_PASSWORD;
+  if (!password || password.length < 12) {
+    throw new Error("ROLE_QA_PASSWORD must be supplied by the operator and contain at least 12 characters.");
+  }
+  return password;
+}
 
 test.describe.configure({ timeout: 60_000 });
 
@@ -13,7 +21,7 @@ async function signIn(page: Page, email: string) {
   await page.context().clearCookies();
   await page.goto("/login");
   await page.getByTestId("login-email").fill(email);
-  await page.getByTestId("login-password").fill(SEEDED_DEV_PASSWORD);
+  await page.getByTestId("login-password").fill(requireRoleQaPassword());
   await page.getByTestId("login-submit").click();
   await page.waitForURL((url) => url.pathname !== "/login", { timeout: 30_000 });
 }

@@ -17,12 +17,12 @@ This is the source of truth for the role-scoped redesign in the `codex/empty-col
 
 | Item | State | Evidence / note |
 | --- | --- | --- |
-| Active Codex goal | In progress | M11 documentation and Pro-review reconciliation is Verified; M12 independent-duty and identity-contract implementation is active, while real-data M9 and production rollout remain explicitly Deferred |
+| Active Codex goal | In progress | M11 documentation reconciliation and M12 independent-duty/identity contracts are Verified; M13 protocol authorization and competency gates are next, while real-data M9 and production rollout remain explicitly Deferred |
 | Target worktree | Verified | `.runtime-data/worktrees/empty-colony`, branch `codex/empty-colony` |
 | Existing dirty work preserved | Verified | No reset, checkout, or unrelated reversion performed |
 | Architecture reviews 1-4 | Verified | Roles/privacy, workflows, data/migration, role-specific UI |
 | Canonical role foundation | Verified | `it_head`, `facility_admin`, `cmu_staff`, `lab_user` plus migration compatibility values; role/access suites pass |
-| Capability navigation | Verified | Central capability/navigation registries and all 82 protected entry points pass final manifest and role QA |
+| Capability navigation | Verified | Central capability/navigation registries and all 84 protected entry points pass final manifest and role QA |
 | Empty profiles | Verified | IT, Facility Admin, CMU, Lab 1, and Lab 2 onboarding profiles; production switch remains blocked |
 | Foundation checks | Verified | Prisma validate, TypeScript, lint, 17 focused tests, build, diff check |
 | Independent foundation review | Verified | Milestone 0 independent re-review returned with no blockers |
@@ -236,9 +236,31 @@ M10-07 evidence: `docs/HOSTING_DECISION.md` records the vendor-neutral productio
 
 The exact review archive is [`docs/reviews/2026-08-29-chatgpt-pro-product-review.md`](./docs/reviews/2026-08-29-chatgpt-pro-product-review.md). The repository-specific maturity ledger, approved synthetic-only completion boundary, and M11–M20 delivery order are in [`docs/PRODUCT_READINESS_REMEDIATION.md`](./docs/PRODUCT_READINESS_REMEDIATION.md). M11 passed `git diff --check`, local-link verification, the 21-item ledger coverage check, and independent review. Review findings were resolved by adding a guard-compatible empty database URL to the setup instructions, correcting milestone terminology, and clarifying the M11 gate. No code, migration, data, or service changed.
 
+## Milestone 12: Independent Duties And Identity Contracts
+
+**Milestone status: Verified**
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| M12-01 | Add independent, time-bounded facility duties without broadening lab access | Verified |
+| M12-02 | Require two-person maker-checker approval and fresh MFA-level evidence | Verified |
+| M12-03 | Persist immutable requester/decider assurance and identity-link evidence | Verified |
+| M12-04 | Invalidate sessions and command authority immediately after identity or duty revocation | Verified |
+| M12-05 | Keep production identity providers fail-closed while supporting guarded synthetic QA | Verified |
+| M12-06 | Seed the six approved duty personas without animal, cage, or real colony data | Verified |
+| M12-07 | Pass migration, database, role, responsive UI, and independent security review gates | Verified |
+
+Migration `0037_facility_duty_identity_assurance` adds six institutional duties, time-bounded assignments, immutable requests and lifecycle events, external identity links, durable assurance evidence, database-enforced maker-checker independence, overlap serialization, append-only history, and immediate `authzVersion` invalidation. Its SHA-256 checksum is `ca5bfd5cc17d99f851bf34ba958470d5b479fab374aeeae93ecd79bb60869330`.
+
+Duties grant only their new governed capability vocabulary (`welfare:*`, `protocols:*`, `competencies:*`, `billing:govern`, and `corrections:*`) plus dashboard/duty visibility. They do not grant existing animal, cage, billing-operation, SOP, audit, or lab-membership capabilities. Existing legacy Facility Admin/CMU operational powers remain compatible until M13–M18 replace the corresponding approvals with duty-gated workflows; M12 does not present those older powers as duty-derived.
+
+Fresh PostgreSQL 16 target `mcm_test_m12_20260829_r3`, schema `mcm_test_m12`, replayed all 37 migrations. The focused live duty suite passed 1 file / 5 tests and the complete guarded database project passed 9 files / 155 tests, including grant/revoke, self-request with independent approval, stale snapshots, malformed assurance, direct-write rejection, overlap serialization, command-time duty loss, cross-lab denial, and identity-link revocation. Fresh empty target `mcm_test_m12_empty_20260829_r1`, schema `mcm_test_m12_empty`, retained 0 animals, 0 cages, six correctly distributed duty assignments, and four guarded synthetic identity links.
+
+The code gate passed 114 database-free files / 556 tests, 10 focused M12 files / 92 tests, Prisma format/generate/validate, TypeScript, ESLint with the same five pre-existing administration warnings, all 84 authorization-manifest entries, a 52-route production build, and `git diff --check`. Background Playwright QA passed at 1440×1000 and 390×844 with no document overflow or console errors; Facility Admin saw the complete duty workspace and a Lab User direct request was denied. Evidence is under `output/playwright/m12-duties-20260829/`. Independent high-risk re-review returned `ship` after the original session-revocation, durable-assurance, capability-scope, and live-trigger-test blockers were corrected. Real OIDC/SAML adapters, institutional MFA/provisioning, access-review policy, and break-glass remain external deployment decisions and fail closed locally.
+
 ## Required Gate For Every Milestone
 
-The checked list below records the latest full application gate inherited from M10. Documentation-only M11 used the focused evidence recorded above; subsequent milestones must record their own applicable checks before they can be marked Verified.
+The checked list below records the latest full application gate through M12. Documentation-only M11 used its focused evidence; M12 records its complete code, database, browser, and independent-review evidence above. Subsequent milestones must record their own applicable checks before they can be marked Verified.
 
 - [x] Focused unit and integration tests pass.
 - [x] `npm run prisma:validate` passes when schema is affected.

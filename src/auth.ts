@@ -5,6 +5,9 @@ import { z } from "zod";
 import { verifyPassword } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 import { recordSecurityEventBestEffort, securityEventTimeBucket } from "@/lib/security-event";
+import { resolveCredentialAuthenticationContext } from "@/lib/identity-assurance";
+import type { AuthenticationMethod } from "@/lib/identity-assurance";
+import type { IdentityAssuranceLevel } from "@/lib/types";
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -118,12 +121,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           summary: "Credentials sign-in succeeded.",
         });
 
+        const authentication = await resolveCredentialAuthenticationContext(user.id, user.email);
         return {
           id: user.id,
           email: user.email,
           name: user.name,
           role: user.role,
           authzVersion: user.authzVersion,
+          authMethod: authentication.authenticationMethod,
+          assurance: authentication.assurance,
+          authenticatedAt: authentication.authenticatedAt,
+          identityLinkId: authentication.identityLinkId,
         };
       },
     }),
@@ -133,6 +141,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.role = user.role;
         token.authzVersion = user.authzVersion;
+        token.authMethod = user.authMethod;
+        token.assurance = user.assurance;
+        token.authenticatedAt = user.authenticatedAt;
+        token.identityLinkId = user.identityLinkId;
       }
 
       return token;
@@ -142,6 +154,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.id = token.sub ?? "";
         session.user.role = (token.role as typeof session.user.role) ?? "lab_user";
         session.user.authzVersion = Number(token.authzVersion ?? 0);
+        session.user.authMethod = (token.authMethod as AuthenticationMethod | undefined) ?? "password";
+        session.user.assurance = (token.assurance as IdentityAssuranceLevel | undefined) ?? "password";
+        session.user.authenticatedAt = typeof token.authenticatedAt === "string" ? token.authenticatedAt : "";
+        session.user.identityLinkId = typeof token.identityLinkId === "string" ? token.identityLinkId : null;
       }
 
       return session;

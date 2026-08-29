@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import { hashPassword } from "../src/lib/password";
 import { assertEmptyBootstrapAllowed } from "../src/lib/destructive-seed-guard";
 import { EMPTY_LABS, EMPTY_PROFILES } from "../src/lib/empty-profile-config";
+import { seedDutyQaFixture } from "./seed-duty-qa";
 
 const prisma = new PrismaClient();
 
@@ -163,6 +164,11 @@ async function seedEmptyDatabase() {
       labMemberships: await tx.labMembership.count(),
       invitations: await tx.userInvitation.count(),
       privilegedRoleChanges: await tx.privilegedRoleChangeRequest.count(),
+      dutyRequests: await tx.facilityDutyRequest.count(),
+      dutyAssignments: await tx.facilityDutyAssignment.count(),
+      dutyLifecycleEvents: await tx.facilityDutyLifecycleEvent.count(),
+      externalIdentityLinks: await tx.externalIdentityLink.count(),
+      externalIdentityLifecycleEvents: await tx.externalIdentityLifecycleEvent.count(),
       facilities: await tx.facility.count(),
       rooms: await tx.room.count(),
       racks: await tx.rack.count(),
@@ -246,6 +252,24 @@ async function seedEmptyDatabase() {
       });
     }
 
+    await seedDutyQaFixture(tx, {
+      fixturePrefix: "empty",
+      requesterId: "user-admin",
+      approverId: "user-admin-2",
+      grants: [
+        { targetUserId: "user-veterinarian", duties: ["designated_veterinarian"] },
+        { targetUserId: "user-cmu-staff", duties: ["welfare_officer"] },
+        { targetUserId: "user-admin", duties: ["protocol_reviewer", "billing_administrator"] },
+        { targetUserId: "user-admin-2", duties: ["training_administrator", "data_steward"] },
+      ],
+      syntheticIdentities: [
+        { userId: "user-admin", subject: "admin@colony.local" },
+        { userId: "user-admin-2", subject: "admin.approver@colony.local" },
+        { userId: "user-veterinarian", subject: "veterinarian@colony.local" },
+        { userId: "user-cmu-staff", subject: "cmu@colony.local" },
+      ],
+    });
+
     for (const lab of EMPTY_LABS) {
       await tx.lab.upsert({
         where: { id: lab.id },
@@ -266,7 +290,7 @@ async function seedEmptyDatabase() {
     });
 
     await tx.labMembership.deleteMany({
-      where: { userId: { in: ["user-it-head", "user-admin", "user-cmu-staff"] } },
+      where: { userId: { in: ["user-it-head", "user-admin", "user-admin-2", "user-cmu-staff", "user-veterinarian"] } },
     });
 
     const memberships = [
@@ -365,7 +389,7 @@ async function seedEmptyDatabase() {
     timeout: 30_000,
   });
 
-  console.log("Empty colony ready: configuration created, operational tables left empty.");
+  console.log("Empty colony ready: configuration and guarded duty-QA identities created; colony tables left empty.");
 }
 
 seedEmptyDatabase()

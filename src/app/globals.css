@@ -1879,6 +1879,7 @@ textarea {
 }
 
 .mobile-worksheet-label {
+  display: block;
   color: var(--muted);
   font-size: 0.75rem;
   font-weight: 650;
@@ -1887,6 +1888,7 @@ textarea {
 }
 
 .mobile-worksheet-value {
+  display: block;
   margin-top: 0.15rem;
   color: var(--ink);
   font-size: 0.875rem;

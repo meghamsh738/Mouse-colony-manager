@@ -90,6 +90,37 @@ export function assertEmptyBootstrapAllowed() {
   }
 }
 
+export function roleQaSeedTargetErrors(rawUrl: string) {
+  const errors: string[] = [];
+  try {
+    const url = new URL(rawUrl);
+    if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname)) {
+      errors.push("database must use a loopback host");
+    }
+    const databaseName = url.pathname.replace(/^\//, "");
+    const schemaName = url.searchParams.get("schema") ?? "";
+    if (![databaseName, schemaName].some((target) => /^mcm_test_[a-z0-9_-]+$/i.test(target))) {
+      errors.push("database name or schema must start with mcm_test_");
+    }
+  } catch {
+    errors.push("a valid database URL is required");
+  }
+  return errors;
+}
+
+export function assertRoleQaSeedAllowed() {
+  const databaseUrl = process.env.DATABASE_URL ?? "";
+  const directUrl = process.env.DIRECT_DATABASE_URL;
+  const errors = roleQaSeedTargetErrors(databaseUrl);
+  if (process.env.NODE_ENV === "production") errors.push("NODE_ENV must not be production");
+  if (directUrl) {
+    errors.push(...roleQaSeedTargetErrors(directUrl));
+    if (!sameDatabaseTarget(databaseUrl, directUrl)) errors.push("DATABASE_URL and DIRECT_DATABASE_URL must target the same database and schema");
+  }
+  const uniqueErrors = [...new Set(errors)];
+  if (uniqueErrors.length > 0) throw new Error(`Role QA seed refused: ${uniqueErrors.join("; ")}.`);
+}
+
 export function sameDatabaseTarget(leftRawUrl: string, rightRawUrl: string) {
   try {
     const left = new URL(leftRawUrl);

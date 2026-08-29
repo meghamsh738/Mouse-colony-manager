@@ -1,4 +1,4 @@
-import type { CanonicalUserRole, LabMembershipRole, UserRole } from "@/lib/types";
+import type { CanonicalUserRole, FacilityDuty, LabMembershipRole, UserRole } from "@/lib/types";
 
 export type Capability =
   | "dashboard:view"
@@ -42,6 +42,18 @@ export type Capability =
   | "approvals:read"
   | "workbook:read"
   | "users:manage"
+  | "duties:read"
+  | "duties:manage"
+  | "welfare:read"
+  | "welfare:manage"
+  | "welfare:close"
+  | "protocols:read"
+  | "protocols:approve"
+  | "competencies:read"
+  | "competencies:manage"
+  | "billing:govern"
+  | "corrections:read"
+  | "corrections:approve"
   | "labs:manage"
   | "rules:manage"
   | "audit:domain"
@@ -59,6 +71,7 @@ export type ActorMembership = {
 export type CapabilityActor = {
   canonicalRole: CanonicalUserRole;
   activeMembership: ActorMembership | null;
+  activeDuties?: readonly FacilityDuty[];
 };
 
 const facilityAdminCapabilities = new Set<Capability>([
@@ -70,7 +83,7 @@ const facilityAdminCapabilities = new Set<Capability>([
   "strains:discover", "strains:request", "strains:manage",
   "forecast:read", "sops:read", "sops:manage", "sops:approve", "billing:read", "billing:generate",
   "billing:finalize", "billing:manage", "notifications:read", "approvals:read", "workbook:read", "users:manage",
-  "labs:manage", "rules:manage", "audit:domain", "notifications:deliver",
+  "duties:read", "duties:manage", "labs:manage", "rules:manage", "audit:domain", "notifications:deliver",
   "migrations:manage",
 ]);
 
@@ -144,7 +157,18 @@ function capabilitiesForLabRole(role: LabMembershipRole | undefined) {
   }
 }
 
-export function getActorCapabilities(actor: CapabilityActor) {
+export const DUTY_CAPABILITIES: Readonly<Record<FacilityDuty, readonly Capability[]>> = {
+  designated_veterinarian: ["dashboard:view", "duties:read", "welfare:read", "welfare:manage", "welfare:close"],
+  welfare_officer: ["dashboard:view", "duties:read", "welfare:read", "welfare:manage"],
+  protocol_reviewer: ["dashboard:view", "duties:read", "protocols:read", "protocols:approve"],
+  training_administrator: ["dashboard:view", "duties:read", "competencies:read", "competencies:manage"],
+  billing_administrator: ["dashboard:view", "duties:read", "billing:govern"],
+  data_steward: ["dashboard:view", "duties:read", "corrections:read", "corrections:approve"],
+};
+
+export const FACILITY_DUTIES = Object.freeze(Object.keys(DUTY_CAPABILITIES) as FacilityDuty[]);
+
+function getBaseActorCapabilities(actor: CapabilityActor) {
   switch (actor.canonicalRole) {
     case "it_head":
       return new Set<Capability>(["system:view", "audit:security"]);
@@ -155,6 +179,30 @@ export function getActorCapabilities(actor: CapabilityActor) {
     case "lab_user":
       return capabilitiesForLabRole(actor.activeMembership?.role);
   }
+}
+
+export function getActorCapabilities(actor: CapabilityActor) {
+  const capabilities = new Set(getBaseActorCapabilities(actor));
+
+  // IT Head is deliberately technical-only. A malformed or stale duty row
+  // must never broaden that global account's authority.
+  if (actor.canonicalRole === "it_head") return capabilities;
+
+  for (const duty of actor.activeDuties ?? []) {
+    for (const capability of DUTY_CAPABILITIES[duty] ?? []) capabilities.add(capability);
+  }
+  return capabilities;
+}
+
+export function facilityDutyLabel(duty: FacilityDuty) {
+  return {
+    designated_veterinarian: "Designated Veterinarian",
+    welfare_officer: "Welfare Officer",
+    protocol_reviewer: "Protocol Reviewer",
+    training_administrator: "Training Administrator",
+    billing_administrator: "Billing Administrator",
+    data_steward: "Data Steward",
+  }[duty];
 }
 
 export function actorHasCapability(actor: CapabilityActor, capability: Capability) {

@@ -29,6 +29,7 @@ Every entry point must resolve a current database actor, check an explicit capab
 | `/system` | `system:view` plus `audit:security` | Guarded; IT-only security events and technical status never select scientific payloads |
 | `/administration/users` | `users:manage` plus Facility Admin governance checks | Guarded; invitations and global account roles only, with privileged decisions consolidated under `/approvals` |
 | `/administration/labs` | `labs:manage`; Facility Admin for creation/status/membership, active-lab owner for profile edits | Guarded; reads are facility-wide only for Facility Admin and otherwise restricted to the current owned lab |
+| `/administration/duties` | `duties:manage`; current Facility Admin plus fresh MFA-level assurance and maker-checker independence | Guarded; duties are time-bounded, database-time resolved, version-bound, and never stored in JWTs |
 | `/activate` | Public, hashed single-use invitation token | Guarded and database tested |
 | `/login`, `/access-denied` | Public/safe session handling | Database-revalidated session, generic-denial security events, and sign-out recovery implemented; production provider/MFA pending |
 
@@ -53,6 +54,7 @@ Every entry point must resolve a current database actor, check an explicit capab
 | `notifications/actions.ts` | `notifications:read` + exact current user recipient/preference | Idempotent read/acknowledge/resolve and personal delivery-preference commands reauthorize the current database actor |
 | `administration/users/actions.ts` | `users:manage` plus Facility Admin and two-person rules | Guarded and database tested |
 | `administration/labs/actions.ts` | `labs:manage`; current database Facility Admin for membership/status, exact active-lab owner for profile edits | Guarded; membership changes revoke sessions and deactivation blocks active operational work |
+| `administration/duties/actions.ts` | `duties:manage`; current Facility Admin, fresh MFA-level assurance, target/requester/decider separation | Guarded; grant/revoke requests expire after 24 hours and apply only from an independent, current authorization snapshot |
 | `activate/actions.ts` | public invitation-token boundary | Guarded and database tested |
 | `lab-context-actions.ts` | active membership only | Guarded; integration test pending |
 | `profile-actions.ts` | local instance and development only | Guarded and unit tested |

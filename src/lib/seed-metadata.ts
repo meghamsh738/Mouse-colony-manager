@@ -12,6 +12,8 @@ export const SEEDED_DEV_EMAILS = {
 export const SEEDED_ROLE_QA_EMAILS = {
   itHead: "qa-it-head@colony.local",
   facilityAdmin: "qa-facility-admin@colony.local",
+  facilityAdminApprover: "qa-facility-admin-approver@colony.local",
+  veterinarian: "qa-veterinarian@colony.local",
   cmuStaff: "qa-cmu-staff@colony.local",
   labOwner: "qa-lab-owner@colony.local",
   labManager: "qa-lab-manager@colony.local",

@@ -147,6 +147,14 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     await tx.$executeRawUnsafe("SET LOCAL mcm.allow_destructive_seed = 'true'");
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
     await tx.sopDocument.updateMany({ data: { currentVersionId: null } });
+    // Duty requests and assignments intentionally bind each other in both
+    // directions. Clear the guarded disposable fixture atomically while FK
+    // triggers are disabled, after assertDestructiveSeedAllowed has passed.
+    await tx.$executeRawUnsafe('DELETE FROM "FacilityDutyLifecycleEvent"');
+    await tx.$executeRawUnsafe('DELETE FROM "ExternalIdentityLifecycleEvent"');
+    await tx.$executeRawUnsafe('DELETE FROM "FacilityDutyAssignment"');
+    await tx.$executeRawUnsafe('DELETE FROM "FacilityDutyRequest"');
+    await tx.$executeRawUnsafe('DELETE FROM "ExternalIdentityLink"');
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
   });
 

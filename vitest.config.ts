@@ -14,6 +14,7 @@ export default defineConfig({
           environment: "node",
           include: [
             "tests/unit/identity-governance.test.ts",
+            "tests/unit/facility-duty-governance.integration.test.ts",
             "tests/unit/colony.test.ts",
             "tests/unit/integration-api-routes.test.ts",
             "tests/unit/notification-delivery.test.ts",
@@ -37,6 +38,7 @@ export default defineConfig({
           exclude: [
             "tests/unit/**/*.test.tsx",
             "tests/unit/identity-governance.test.ts",
+            "tests/unit/facility-duty-governance.integration.test.ts",
             "tests/unit/colony.test.ts",
             "tests/unit/integration-api-routes.test.ts",
             "tests/unit/notification-delivery.test.ts",

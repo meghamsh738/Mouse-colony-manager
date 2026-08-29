@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   actorHasCapability,
+  DUTY_CAPABILITIES,
   legacyCompatibilityRole,
   normalizeUserRole,
   type ActorMembership,
@@ -23,13 +24,39 @@ describe("role capability foundation", () => {
   });
 
   it("keeps IT technical-only even if a membership is present", () => {
-    const actor = { canonicalRole: "it_head" as const, activeMembership: labManager };
+    const actor = { canonicalRole: "it_head" as const, activeMembership: labManager, activeDuties: ["billing_administrator" as const] };
 
     expect(actorHasCapability(actor, "system:view")).toBe(true);
     expect(actorHasCapability(actor, "audit:security")).toBe(true);
     expect(actorHasCapability(actor, "audit:domain")).toBe(false);
     expect(actorHasCapability(actor, "animals:read")).toBe(false);
     expect(getNavigationForActor(actor).map((item) => item.id)).toEqual(["system"]);
+  });
+
+  it("unions duty capabilities without inventing a lab membership", () => {
+    const dutyOnly = {
+      canonicalRole: "lab_user" as const,
+      activeMembership: null,
+      activeDuties: ["billing_administrator" as const, "protocol_reviewer" as const],
+    };
+
+    expect(actorHasCapability(dutyOnly, "billing:govern")).toBe(true);
+    expect(actorHasCapability(dutyOnly, "protocols:approve")).toBe(true);
+    expect(actorHasCapability(dutyOnly, "billing:manage")).toBe(false);
+    expect(actorHasCapability(dutyOnly, "sops:approve")).toBe(false);
+    expect(actorHasCapability(dutyOnly, "animals:read")).toBe(false);
+    expect(getNavigationForActor(dutyOnly).map((item) => item.id)).toEqual(["dashboard"]);
+  });
+
+  it("keeps every duty mapping inside the duty-only vocabulary", () => {
+    const allowed = new Set([
+      "dashboard:view", "duties:read", "welfare:read", "welfare:manage", "welfare:close",
+      "protocols:read", "protocols:approve", "competencies:read", "competencies:manage",
+      "billing:govern", "corrections:read", "corrections:approve",
+    ]);
+    for (const capabilities of Object.values(DUTY_CAPABILITIES)) {
+      expect(capabilities.every((capability) => allowed.has(capability))).toBe(true);
+    }
   });
 
   it("gives CMU the operational experiment workspace but not private experiment fields", () => {

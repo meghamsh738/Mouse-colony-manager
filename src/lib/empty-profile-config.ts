@@ -21,6 +21,13 @@ export const EMPTY_PROFILES = [
     scope: "Facility administration",
   },
   {
+    id: "user-admin-2",
+    name: "Independent approver",
+    email: "admin.approver@colony.local",
+    role: "facility_admin" satisfies UserRole,
+    scope: "Independent facility approval",
+  },
+  {
     id: "user-cmu-staff",
     name: "CMU staff",
     email: "cmu.staff@colony.local",
@@ -40,6 +47,13 @@ export const EMPTY_PROFILES = [
     email: "lab2.user@colony.local",
     role: "lab_user" satisfies UserRole,
     scope: "Lab 2 only",
+  },
+  {
+    id: "user-veterinarian",
+    name: "Designated veterinarian",
+    email: "veterinarian@colony.local",
+    role: "lab_user" satisfies UserRole,
+    scope: "Time-bounded facility duties only",
   },
 ] as const;
 
