@@ -8,14 +8,38 @@ import {
   getBreedingSetupOptionsView,
   getBreedingSuggestionSummaryView,
 } from "@/lib/breeding-read";
+import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 
 export default async function BreedingPage() {
   const user = await requireUser({ capability: "breeding:read" });
-  const [breedings, suggestions, options] = await Promise.all([
+  const [breedings, suggestions, options, protocolOptions] = await Promise.all([
     getBreedingOverviewView(user),
     getBreedingSuggestionSummaryView(user),
     getBreedingSetupOptionsView(user),
+    prisma.protocolAuthorization.findMany({
+      where: {
+        status: "active",
+        ...(user.activeLabId ? { labId: user.activeLabId } : {}),
+        currentVersion: {
+          validFrom: { lte: new Date() },
+          validUntil: { gt: new Date() },
+          procedureBindings: { some: { procedureCode: "breeding" } },
+          personnelBindings: {
+            some: { userId: user.id, roleLabel: "breeding_operator" },
+          },
+        },
+      },
+      orderBy: [{ lab: { code: "asc" } }, { protocolCode: "asc" }],
+      select: {
+        id: true,
+        protocolCode: true,
+        title: true,
+        lab: { select: { code: true } },
+        currentVersion: { select: { validUntil: true } },
+      },
+      take: 100,
+    }),
   ]);
   const canCreateBreeding = user.role !== "read_only";
   const canOverride = user.role === "admin";
@@ -32,6 +56,11 @@ export default async function BreedingPage() {
             <BreedingSetupForm
               allowOverride={canOverride}
               damOptions={options.damOptions}
+              protocolOptions={protocolOptions.map((protocol) => ({
+                id: protocol.id,
+                label: `${protocol.lab.code} · ${protocol.protocolCode} — ${protocol.title}`,
+                validUntil: protocol.currentVersion!.validUntil.toISOString(),
+              }))}
               sireOptions={options.sireOptions}
             />
           ),

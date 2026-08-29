@@ -423,141 +423,213 @@ enum ProcedureOccurrenceStatus {
   aborted
 }
 
+enum ProtocolAuthorizationStatus {
+  draft
+  active
+  suspended
+  expired
+  revoked
+  legacy_unverified
+}
+
+enum ProtocolPersonnelRole {
+  principal_investigator
+  named_researcher
+  procedure_operator
+  breeding_operator
+  intake_operator
+  transfer_coordinator
+}
+
+enum ProtocolCountAllocationType {
+  reserve
+  release
+  consume
+}
+
+enum ProtocolCountAllocationStatus {
+  open
+  partially_settled
+  consumed
+  released
+  mixed
+}
+
+enum ComplianceCountOperation {
+  none
+  reserve
+  release
+  consume
+}
+
+enum CompetencyEvidenceStatus {
+  current
+  expired
+  revoked
+}
+
+enum CompetencyEventType {
+  created
+  renewed
+  expired
+  revoked
+}
+
 model User {
-  id                           String                           @id
-  name                         String
-  email                        String                           @unique
-  passwordHash                 String
-  role                         UserRole
-  active                       Boolean                          @default(true)
-  authzVersion                 Int                              @default(1)
-  labMemberships               LabMembership[]
-  projectsOwned                Project[]                        @relation("ProjectOwner")
-  experimentsOwned             Experiment[]                     @relation("ExperimentOwner")
-  healthNotesCreated           HealthNote[]                     @relation("HealthNoteCreator")
-  auditLogs                    AuditLog[]                       @relation("AuditActor")
-  securityEvents               SecurityEvent[]                  @relation("SecurityEventActor")
-  cageMoves                    CageMovement[]                   @relation("CageMoveActor")
-  animalMoves                  AnimalMovement[]                 @relation("AnimalMoveActor")
-  cageLabTransfers             CageLabTransfer[]                @relation("CageLabTransferActor")
-  animalLabTransfers           AnimalLabTransfer[]              @relation("AnimalLabTransferActor")
-  finalizedInvoices            Invoice[]                        @relation("InvoiceFinalizer")
-  voidedInvoices               Invoice[]                        @relation("InvoiceVoider")
-  invoiceAdjustmentsCreated    InvoiceAdjustment[]              @relation("InvoiceAdjustmentCreator")
-  statusEvents                 AnimalStatusEvent[]              @relation("StatusEventActor")
-  genotypesPerformed           GenotypingRecord[]               @relation("GenotypeOperator")
-  genotypesVerified            GenotypingRecord[]               @relation("GenotypeVerifier")
-  sampleRecordsCreated         SampleRecord[]                   @relation("SampleRecordCreator")
-  cryostorageRecordsCreated    CryostorageRecord[]              @relation("CryostorageRecordCreator")
-  cryostorageRequestsCreated   CryostorageRequest[]             @relation("CryostorageRequestCreator")
-  cryostorageRequestsDecided   CryostorageRequest[]             @relation("CryostorageRequestDecisionActor")
-  cryostorageRequestEvents     CryostorageRequestEvent[]        @relation("CryostorageRequestEventActor")
-  cryostorageOperations        CryostorageOperation[]           @relation("CryostorageOperationActor")
-  animalIntakeBatchesCreated   AnimalIntakeBatch[]              @relation("AnimalIntakeBatchCreator")
-  invitationsSent              UserInvitation[]                 @relation("InvitationSender")
-  privilegedChangesTarget      PrivilegedRoleChangeRequest[]    @relation("PrivilegedChangeTarget")
-  privilegedChangesRequested   PrivilegedRoleChangeRequest[]    @relation("PrivilegedChangeRequester")
-  privilegedChangesApproved    PrivilegedRoleChangeRequest[]    @relation("PrivilegedChangeApprover")
-  dutyAssignments              FacilityDutyAssignment[]         @relation("FacilityDutyTarget")
-  dutyRequestsTargeted         FacilityDutyRequest[]            @relation("FacilityDutyRequestTarget")
-  dutyRequestsCreated          FacilityDutyRequest[]            @relation("FacilityDutyRequester")
-  dutyRequestsDecided          FacilityDutyRequest[]            @relation("FacilityDutyDecisionActor")
-  dutyEventsTargeted           FacilityDutyLifecycleEvent[]     @relation("FacilityDutyEventTarget")
-  dutyLifecycleEvents          FacilityDutyLifecycleEvent[]     @relation("FacilityDutyEventActor")
-  externalIdentityLinks        ExternalIdentityLink[]           @relation("ExternalIdentityUser")
-  externalIdentityLinksCreated ExternalIdentityLink[]           @relation("ExternalIdentityLinkActor")
-  externalIdentityEvents       ExternalIdentityLifecycleEvent[] @relation("ExternalIdentityEventActor")
-  workflowDrafts               WorkflowDraft[]                  @relation("WorkflowDraftActor")
-  workflowReviewSnapshots      WorkflowReviewSnapshot[]         @relation("WorkflowSnapshotActor")
-  commandReceipts              CommandReceipt[]                 @relation("CommandReceiptActor")
-  outboxMessages               OutboxMessage[]                  @relation("OutboxActor")
-  migrationRuns                MigrationRun[]                   @relation("MigrationRunActor")
-  ownershipExceptionsResolved  OwnershipException[]             @relation("OwnershipExceptionResolver")
-  quarantineCasesAdmitted      QuarantineCase[]                 @relation("QuarantineAdmissionActor")
-  quarantineReleasesRequested  QuarantineCase[]                 @relation("QuarantineReleaseRequester")
-  quarantineCasesReleased      QuarantineCase[]                 @relation("QuarantineReleaseActor")
-  quarantineObservations       QuarantineObservation[]          @relation("QuarantineObservationActor")
-  cageClosures                 CageClosure[]                    @relation("CageClosureActor")
-  labTransferRequestsCreated   LabTransferRequest[]             @relation("LabTransferRequester")
-  labTransferDecisions         LabTransferRequest[]             @relation("LabTransferDestinationDecision")
-  labTransferFinalizations     LabTransferRequest[]             @relation("LabTransferFinalizer")
-  labTransferOverrides         LabTransferRequest[]             @relation("LabTransferOverrideApprover")
-  labTransferPacketsCreated    LabTransferPacket[]              @relation("LabTransferPacketCreator")
-  labTransferEvents            LabTransferEvent[]               @relation("LabTransferEventActor")
-  sopDocumentsCreated          SopDocument[]                    @relation("SopDocumentCreator")
-  sopVersionsCreated           SopVersion[]                     @relation("SopVersionCreator")
-  sopVersionApprovals          SopVersionApproval[]             @relation("SopVersionApprovalActor")
-  sopAssignmentsAssigned       SopAssignment[]                  @relation("SopAssignmentActor")
-  sopAssignmentsRevoked        SopAssignment[]                  @relation("SopAssignmentRevoker")
-  sopAcknowledgements          SopAcknowledgement[]             @relation("SopAcknowledgementUser")
-  procedurePlansCreated        ProcedurePlan[]                  @relation("ProcedurePlanCreator")
-  procedureOccurrencesExecuted ProcedureOccurrence[]            @relation("ProcedureOccurrenceExecutor")
-  cageResponsibilities         CageUserAssignment[]             @relation("CageResponsibleUser")
-  cageResponsibilityChanges    CageUserAssignment[]             @relation("CageResponsibilityActor")
-  cageResponsibilitiesEnded    CageUserAssignment[]             @relation("CageResponsibilityEndActor")
-  notificationAudienceTargets  NotificationAudience[]           @relation("NotificationAudienceUser")
-  notificationRecipients       NotificationRecipient[]          @relation("NotificationRecipientUser")
-  notificationPreferences      NotificationPreference[]
-  strainDirectoryRequests      StrainDirectoryRequest[]         @relation("StrainDirectoryRequester")
-  strainDirectoryDecisions     StrainDirectoryRequest[]         @relation("StrainDirectoryDecisionActor")
-  strainDirectoryEvents        StrainDirectoryRequestEvent[]    @relation("StrainDirectoryRequestEventActor")
+  id                             String                                @id
+  name                           String
+  email                          String                                @unique
+  passwordHash                   String
+  role                           UserRole
+  active                         Boolean                               @default(true)
+  authzVersion                   Int                                   @default(1)
+  labMemberships                 LabMembership[]
+  projectsOwned                  Project[]                             @relation("ProjectOwner")
+  experimentsOwned               Experiment[]                          @relation("ExperimentOwner")
+  healthNotesCreated             HealthNote[]                          @relation("HealthNoteCreator")
+  auditLogs                      AuditLog[]                            @relation("AuditActor")
+  securityEvents                 SecurityEvent[]                       @relation("SecurityEventActor")
+  cageMoves                      CageMovement[]                        @relation("CageMoveActor")
+  animalMoves                    AnimalMovement[]                      @relation("AnimalMoveActor")
+  cageLabTransfers               CageLabTransfer[]                     @relation("CageLabTransferActor")
+  animalLabTransfers             AnimalLabTransfer[]                   @relation("AnimalLabTransferActor")
+  finalizedInvoices              Invoice[]                             @relation("InvoiceFinalizer")
+  voidedInvoices                 Invoice[]                             @relation("InvoiceVoider")
+  invoiceAdjustmentsCreated      InvoiceAdjustment[]                   @relation("InvoiceAdjustmentCreator")
+  statusEvents                   AnimalStatusEvent[]                   @relation("StatusEventActor")
+  genotypesPerformed             GenotypingRecord[]                    @relation("GenotypeOperator")
+  genotypesVerified              GenotypingRecord[]                    @relation("GenotypeVerifier")
+  sampleRecordsCreated           SampleRecord[]                        @relation("SampleRecordCreator")
+  cryostorageRecordsCreated      CryostorageRecord[]                   @relation("CryostorageRecordCreator")
+  cryostorageRequestsCreated     CryostorageRequest[]                  @relation("CryostorageRequestCreator")
+  cryostorageRequestsDecided     CryostorageRequest[]                  @relation("CryostorageRequestDecisionActor")
+  cryostorageRequestEvents       CryostorageRequestEvent[]             @relation("CryostorageRequestEventActor")
+  cryostorageOperations          CryostorageOperation[]                @relation("CryostorageOperationActor")
+  animalIntakeBatchesCreated     AnimalIntakeBatch[]                   @relation("AnimalIntakeBatchCreator")
+  invitationsSent                UserInvitation[]                      @relation("InvitationSender")
+  privilegedChangesTarget        PrivilegedRoleChangeRequest[]         @relation("PrivilegedChangeTarget")
+  privilegedChangesRequested     PrivilegedRoleChangeRequest[]         @relation("PrivilegedChangeRequester")
+  privilegedChangesApproved      PrivilegedRoleChangeRequest[]         @relation("PrivilegedChangeApprover")
+  dutyAssignments                FacilityDutyAssignment[]              @relation("FacilityDutyTarget")
+  dutyRequestsTargeted           FacilityDutyRequest[]                 @relation("FacilityDutyRequestTarget")
+  dutyRequestsCreated            FacilityDutyRequest[]                 @relation("FacilityDutyRequester")
+  dutyRequestsDecided            FacilityDutyRequest[]                 @relation("FacilityDutyDecisionActor")
+  dutyEventsTargeted             FacilityDutyLifecycleEvent[]          @relation("FacilityDutyEventTarget")
+  dutyLifecycleEvents            FacilityDutyLifecycleEvent[]          @relation("FacilityDutyEventActor")
+  externalIdentityLinks          ExternalIdentityLink[]                @relation("ExternalIdentityUser")
+  externalIdentityLinksCreated   ExternalIdentityLink[]                @relation("ExternalIdentityLinkActor")
+  externalIdentityEvents         ExternalIdentityLifecycleEvent[]      @relation("ExternalIdentityEventActor")
+  workflowDrafts                 WorkflowDraft[]                       @relation("WorkflowDraftActor")
+  workflowReviewSnapshots        WorkflowReviewSnapshot[]              @relation("WorkflowSnapshotActor")
+  commandReceipts                CommandReceipt[]                      @relation("CommandReceiptActor")
+  protocolAllocationsCreated     ProtocolCountAllocation[]             @relation("ProtocolCountAllocationCreator")
+  outboxMessages                 OutboxMessage[]                       @relation("OutboxActor")
+  migrationRuns                  MigrationRun[]                        @relation("MigrationRunActor")
+  ownershipExceptionsResolved    OwnershipException[]                  @relation("OwnershipExceptionResolver")
+  quarantineCasesAdmitted        QuarantineCase[]                      @relation("QuarantineAdmissionActor")
+  quarantineReleasesRequested    QuarantineCase[]                      @relation("QuarantineReleaseRequester")
+  quarantineCasesReleased        QuarantineCase[]                      @relation("QuarantineReleaseActor")
+  quarantineObservations         QuarantineObservation[]               @relation("QuarantineObservationActor")
+  cageClosures                   CageClosure[]                         @relation("CageClosureActor")
+  labTransferRequestsCreated     LabTransferRequest[]                  @relation("LabTransferRequester")
+  labTransferDecisions           LabTransferRequest[]                  @relation("LabTransferDestinationDecision")
+  labTransferFinalizations       LabTransferRequest[]                  @relation("LabTransferFinalizer")
+  labTransferOverrides           LabTransferRequest[]                  @relation("LabTransferOverrideApprover")
+  labTransferPacketsCreated      LabTransferPacket[]                   @relation("LabTransferPacketCreator")
+  labTransferEvents              LabTransferEvent[]                    @relation("LabTransferEventActor")
+  sopDocumentsCreated            SopDocument[]                         @relation("SopDocumentCreator")
+  sopVersionsCreated             SopVersion[]                          @relation("SopVersionCreator")
+  sopVersionApprovals            SopVersionApproval[]                  @relation("SopVersionApprovalActor")
+  sopAssignmentsAssigned         SopAssignment[]                       @relation("SopAssignmentActor")
+  sopAssignmentsRevoked          SopAssignment[]                       @relation("SopAssignmentRevoker")
+  sopAcknowledgements            SopAcknowledgement[]                  @relation("SopAcknowledgementUser")
+  procedurePlansCreated          ProcedurePlan[]                       @relation("ProcedurePlanCreator")
+  procedureOccurrencesExecuted   ProcedureOccurrence[]                 @relation("ProcedureOccurrenceExecutor")
+  protocolAuthorizationsCreated  ProtocolAuthorization[]               @relation("ProtocolAuthorizationCreator")
+  protocolAuthorizationsReviewed ProtocolAuthorization[]               @relation("ProtocolAuthorizationReviewer")
+  protocolAuthorizationEvents    ProtocolAuthorizationLifecycleEvent[] @relation("ProtocolAuthorizationEventActor")
+  protocolVersionsCreated        ProtocolAuthorizationVersion[]        @relation("ProtocolVersionCreator")
+  protocolPersonnelBindings      ProtocolPersonnelBinding[]            @relation("ProtocolNamedPersonnel")
+  competencyEvidence             CompetencyEvidence[]                  @relation("CompetencySubject")
+  competencyVersionsIssued       CompetencyEvidenceVersion[]           @relation("CompetencyIssuer")
+  competencyEvents               CompetencyLifecycleEvent[]            @relation("CompetencyEventActor")
+  competencyEvidenceGoverned     CompetencyEvidence[]                  @relation("CompetencyGovernanceActor")
+  protocolCountAllocations       ProtocolCountAllocationHistory[]      @relation("ProtocolAllocationActor")
+  complianceEvidence             ComplianceEvidenceSnapshot[]          @relation("ComplianceEvidenceActor")
+  cageResponsibilities           CageUserAssignment[]                  @relation("CageResponsibleUser")
+  cageResponsibilityChanges      CageUserAssignment[]                  @relation("CageResponsibilityActor")
+  cageResponsibilitiesEnded      CageUserAssignment[]                  @relation("CageResponsibilityEndActor")
+  notificationAudienceTargets    NotificationAudience[]                @relation("NotificationAudienceUser")
+  notificationRecipients         NotificationRecipient[]               @relation("NotificationRecipientUser")
+  notificationPreferences        NotificationPreference[]
+  strainDirectoryRequests        StrainDirectoryRequest[]              @relation("StrainDirectoryRequester")
+  strainDirectoryDecisions       StrainDirectoryRequest[]              @relation("StrainDirectoryDecisionActor")
+  strainDirectoryEvents          StrainDirectoryRequestEvent[]         @relation("StrainDirectoryRequestEventActor")
 }
 
 model Lab {
-  id                      String                        @id
-  name                    String
-  code                    String                        @unique
-  billingContact          String?
-  notes                   String?
-  active                  Boolean                       @default(true)
-  createdAt               DateTime                      @default(now())
-  updatedAt               DateTime                      @updatedAt
-  memberships             LabMembership[]
-  cages                   Cage[]
-  animals                 Animal[]
-  chargePeriods           CageChargePeriod[]
-  invoices                Invoice[]
-  invoiceAdjustments      InvoiceAdjustment[]
-  cageTransfersFrom       CageLabTransfer[]             @relation("CageTransferFromLab")
-  cageTransfersTo         CageLabTransfer[]             @relation("CageTransferToLab")
-  animalTransfersFrom     AnimalLabTransfer[]           @relation("AnimalTransferFromLab")
-  animalTransfersTo       AnimalLabTransfer[]           @relation("AnimalTransferToLab")
-  animalIntakeBatches     AnimalIntakeBatch[]
-  invitations             UserInvitation[]
-  projects                Project[]
-  experiments             Experiment[]
-  breedingSetups          BreedingSetup[]
-  sampleRecords           SampleRecord[]
-  cryostorageRecords      CryostorageRecord[]
-  cryostorageRequests     CryostorageRequest[]
-  cryostorageEvents       CryostorageRequestEvent[]
-  cryostorageOperations   CryostorageOperation[]
-  healthNotes             HealthNote[]
-  genotypingRecords       GenotypingRecord[]
-  attachments             Attachment[]
-  alerts                  Alert[]
-  workflowDrafts          WorkflowDraft[]
-  commandReceipts         CommandReceipt[]
-  outboxMessages          OutboxMessage[]
-  quarantineCases         QuarantineCase[]
-  quarantineObservations  QuarantineObservation[]
-  cageClosures            CageClosure[]
-  transferRequestsFrom    LabTransferRequest[]          @relation("LabTransferSourceLab")
-  transferRequestsTo      LabTransferRequest[]          @relation("LabTransferDestinationLab")
-  transferEvents          LabTransferEvent[]
-  sopDocuments            SopDocument[]
-  sopAssignments          SopAssignment[]
-  sopAcknowledgements     SopAcknowledgement[]
-  procedurePlans          ProcedurePlan[]
-  procedureOccurrences    ProcedureOccurrence[]
-  notificationEvents      NotificationEvent[]
-  notificationAudiences   NotificationAudience[]
-  notificationRecipients  NotificationRecipient[]
-  auditLogs               AuditLog[]
-  scopedSecurityEvents    SecurityEvent[]
-  strainDirectoryListings StrainDirectoryListing[]
-  strainDirectoryRequests StrainDirectoryRequest[]
-  strainDirectoryEvents   StrainDirectoryRequestEvent[]
+  id                         String                        @id
+  name                       String
+  code                       String                        @unique
+  billingContact             String?
+  notes                      String?
+  active                     Boolean                       @default(true)
+  createdAt                  DateTime                      @default(now())
+  updatedAt                  DateTime                      @updatedAt
+  memberships                LabMembership[]
+  cages                      Cage[]
+  animals                    Animal[]
+  chargePeriods              CageChargePeriod[]
+  invoices                   Invoice[]
+  invoiceAdjustments         InvoiceAdjustment[]
+  cageTransfersFrom          CageLabTransfer[]             @relation("CageTransferFromLab")
+  cageTransfersTo            CageLabTransfer[]             @relation("CageTransferToLab")
+  animalTransfersFrom        AnimalLabTransfer[]           @relation("AnimalTransferFromLab")
+  animalTransfersTo          AnimalLabTransfer[]           @relation("AnimalTransferToLab")
+  animalIntakeBatches        AnimalIntakeBatch[]
+  invitations                UserInvitation[]
+  projects                   Project[]
+  experiments                Experiment[]
+  breedingSetups             BreedingSetup[]
+  sampleRecords              SampleRecord[]
+  cryostorageRecords         CryostorageRecord[]
+  cryostorageRequests        CryostorageRequest[]
+  cryostorageEvents          CryostorageRequestEvent[]
+  cryostorageOperations      CryostorageOperation[]
+  healthNotes                HealthNote[]
+  genotypingRecords          GenotypingRecord[]
+  attachments                Attachment[]
+  alerts                     Alert[]
+  workflowDrafts             WorkflowDraft[]
+  commandReceipts            CommandReceipt[]
+  outboxMessages             OutboxMessage[]
+  quarantineCases            QuarantineCase[]
+  quarantineObservations     QuarantineObservation[]
+  cageClosures               CageClosure[]
+  transferRequestsFrom       LabTransferRequest[]          @relation("LabTransferSourceLab")
+  transferRequestsTo         LabTransferRequest[]          @relation("LabTransferDestinationLab")
+  transferEvents             LabTransferEvent[]
+  sopDocuments               SopDocument[]
+  sopAssignments             SopAssignment[]
+  sopAcknowledgements        SopAcknowledgement[]
+  procedurePlans             ProcedurePlan[]
+  procedureOccurrences       ProcedureOccurrence[]
+  protocolAuthorizations     ProtocolAuthorization[]
+  protocolProjectBindings    ProtocolProjectBinding[]
+  protocolExperimentBindings ProtocolExperimentBinding[]
+  protocolStrainBindings     ProtocolStrainBinding[]
+  protocolProcedureBindings  ProtocolProcedureBinding[]
+  protocolPersonnelBindings  ProtocolPersonnelBinding[]
+  protocolCompetencies       CompetencyEvidence[]
+  complianceEvidence         ComplianceEvidenceSnapshot[]
+  notificationEvents         NotificationEvent[]
+  notificationAudiences      NotificationAudience[]
+  notificationRecipients     NotificationRecipient[]
+  auditLogs                  AuditLog[]
+  scopedSecurityEvents       SecurityEvent[]
+  strainDirectoryListings    StrainDirectoryListing[]
+  strainDirectoryRequests    StrainDirectoryRequest[]
+  strainDirectoryEvents      StrainDirectoryRequestEvent[]
 }
 
 model SopDocument {
@@ -734,24 +806,24 @@ model FacilityDutyRequest {
   targetAuthzVersion       Int
   assignmentId             String?
   assignmentVersion        Int?
-  requestedValidFrom       DateTime?
-  requestedValidUntil      DateTime?
+  requestedValidFrom       DateTime?                    @db.Timestamptz(6)
+  requestedValidUntil      DateTime?                    @db.Timestamptz(6)
   status                   FacilityDutyRequestStatus    @default(pending)
   reason                   String
   requestedById            String
   requestedByAuthzVersion  Int
   requestedAssurance       IdentityAssuranceLevel
   requestedIdentityLinkId  String
-  requestedAuthenticatedAt DateTime
+  requestedAuthenticatedAt DateTime                     @db.Timestamptz(6)
   decidedById              String?
   decidedByAuthzVersion    Int?
   decidedAssurance         IdentityAssuranceLevel?
   decidedIdentityLinkId    String?
-  decidedAuthenticatedAt   DateTime?
+  decidedAuthenticatedAt   DateTime?                    @db.Timestamptz(6)
   decisionReason           String?
-  expiresAt                DateTime
-  decidedAt                DateTime?
-  createdAt                DateTime                     @default(now())
+  expiresAt                DateTime                     @db.Timestamptz(6)
+  decidedAt                DateTime?                    @db.Timestamptz(6)
+  createdAt                DateTime                     @default(now()) @db.Timestamptz(6)
   version                  Int                          @default(1)
   targetUser               User                         @relation("FacilityDutyRequestTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
   requestedBy              User                         @relation("FacilityDutyRequester", fields: [requestedById], references: [id], onDelete: Restrict)
@@ -772,24 +844,29 @@ model FacilityDutyRequest {
 }
 
 model FacilityDutyAssignment {
-  id                 String                       @id
-  userId             String
-  duty               FacilityDuty
-  validFrom          DateTime
-  validUntil         DateTime
-  grantRequestId     String                       @unique
-  revokeRequestId    String?                      @unique
-  revokedAt          DateTime?
-  version            Int                          @default(1)
-  createdAt          DateTime                     @default(now())
-  user               User                         @relation("FacilityDutyTarget", fields: [userId], references: [id], onDelete: Restrict)
-  grantRequest       FacilityDutyRequest          @relation("FacilityDutyGrantRequest", fields: [grantRequestId], references: [id], onDelete: Restrict)
-  revokeRequest      FacilityDutyRequest?         @relation("FacilityDutyRevokeRequest", fields: [revokeRequestId], references: [id], onDelete: Restrict)
-  revocationRequests FacilityDutyRequest[]        @relation("FacilityDutyRevokeTarget")
-  events             FacilityDutyLifecycleEvent[]
+  id                         String                                @id
+  userId                     String
+  duty                       FacilityDuty
+  validFrom                  DateTime                              @db.Timestamptz(6)
+  validUntil                 DateTime                              @db.Timestamptz(6)
+  grantRequestId             String                                @unique
+  revokeRequestId            String?                               @unique
+  revokedAt                  DateTime?                             @db.Timestamptz(6)
+  version                    Int                                   @default(1)
+  createdAt                  DateTime                              @default(now()) @db.Timestamptz(6)
+  user                       User                                  @relation("FacilityDutyTarget", fields: [userId], references: [id], onDelete: Restrict)
+  grantRequest               FacilityDutyRequest                   @relation("FacilityDutyGrantRequest", fields: [grantRequestId], references: [id], onDelete: Restrict)
+  revokeRequest              FacilityDutyRequest?                  @relation("FacilityDutyRevokeRequest", fields: [revokeRequestId], references: [id], onDelete: Restrict)
+  revocationRequests         FacilityDutyRequest[]                 @relation("FacilityDutyRevokeTarget")
+  events                     FacilityDutyLifecycleEvent[]
+  complianceEvidence         ComplianceEvidenceSnapshot[]
+  protocolGovernanceEvents   ProtocolAuthorizationLifecycleEvent[]
+  competencyGovernanceEvents CompetencyLifecycleEvent[]
+  protocolGovernanceStates   ProtocolAuthorization[]               @relation("ProtocolAuthorizationDutyEvidence")
+  competencyGovernanceStates CompetencyEvidence[]                  @relation("CompetencyDutyEvidence")
 
   @@unique([id, version])
-  @@index([userId, duty, validFrom, validUntil])
+  @@index([userId, duty, validFrom, validUntil], map: "FacilityDutyAssignment_userId_duty_validity_idx")
   @@index([validUntil, revokedAt])
 }
 
@@ -801,7 +878,7 @@ model FacilityDutyLifecycleEvent {
   actorId      String
   eventType    FacilityDutyEventType
   detail       Json?
-  occurredAt   DateTime                @default(now())
+  occurredAt   DateTime                @default(now()) @db.Timestamptz(6)
   request      FacilityDutyRequest     @relation(fields: [requestId], references: [id], onDelete: Restrict)
   assignment   FacilityDutyAssignment? @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
   targetUser   User                    @relation("FacilityDutyEventTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
@@ -813,24 +890,29 @@ model FacilityDutyLifecycleEvent {
 }
 
 model ExternalIdentityLink {
-  id                    String                           @id
-  userId                String
-  provider              ExternalIdentityProvider
-  providerSubject       String
-  assurance             IdentityAssuranceLevel
-  linkedById            String
-  active                Boolean                          @default(true)
-  createdAt             DateTime                         @default(now())
-  revokedAt             DateTime?
-  version               Int                              @default(1)
-  user                  User                             @relation("ExternalIdentityUser", fields: [userId], references: [id], onDelete: Restrict)
-  linkedBy              User                             @relation("ExternalIdentityLinkActor", fields: [linkedById], references: [id], onDelete: Restrict)
-  events                ExternalIdentityLifecycleEvent[]
-  dutyRequestsRequested FacilityDutyRequest[]            @relation("FacilityDutyRequesterAssurance")
-  dutyRequestsDecided   FacilityDutyRequest[]            @relation("FacilityDutyDeciderAssurance")
+  id                         String                                @id
+  userId                     String
+  provider                   ExternalIdentityProvider
+  providerSubject            String
+  assurance                  IdentityAssuranceLevel
+  linkedById                 String
+  active                     Boolean                               @default(true)
+  createdAt                  DateTime                              @default(now()) @db.Timestamptz(6)
+  revokedAt                  DateTime?                             @db.Timestamptz(6)
+  version                    Int                                   @default(1)
+  user                       User                                  @relation("ExternalIdentityUser", fields: [userId], references: [id], onDelete: Restrict)
+  linkedBy                   User                                  @relation("ExternalIdentityLinkActor", fields: [linkedById], references: [id], onDelete: Restrict)
+  events                     ExternalIdentityLifecycleEvent[]
+  dutyRequestsRequested      FacilityDutyRequest[]                 @relation("FacilityDutyRequesterAssurance")
+  dutyRequestsDecided        FacilityDutyRequest[]                 @relation("FacilityDutyDeciderAssurance")
+  complianceEvidence         ComplianceEvidenceSnapshot[]
+  protocolGovernanceEvents   ProtocolAuthorizationLifecycleEvent[]
+  competencyGovernanceEvents CompetencyLifecycleEvent[]
+  protocolGovernanceStates   ProtocolAuthorization[]               @relation("ProtocolAuthorizationIdentityEvidence")
+  competencyGovernanceStates CompetencyEvidence[]                  @relation("CompetencyIdentityEvidence")
 
-  @@unique([provider, providerSubject])
-  @@unique([userId, provider])
+  @@unique([provider, providerSubject], map: "ExternalIdentityLink_provider_subject_key")
+  @@unique([userId, provider], map: "ExternalIdentityLink_user_provider_key")
   @@index([userId, active])
 }
 
@@ -841,11 +923,420 @@ model ExternalIdentityLifecycleEvent {
   eventType      ExternalIdentityEventType
   assurance      IdentityAssuranceLevel
   detail         Json?
-  occurredAt     DateTime                  @default(now())
+  occurredAt     DateTime                  @default(now()) @db.Timestamptz(6)
   identityLink   ExternalIdentityLink      @relation(fields: [identityLinkId], references: [id], onDelete: Restrict)
   actor          User                      @relation("ExternalIdentityEventActor", fields: [actorId], references: [id], onDelete: Restrict)
 
   @@index([identityLinkId, occurredAt])
+}
+
+model ProtocolAuthorization {
+  id                            String                                @id
+  labId                         String
+  protocolCode                  String
+  title                         String
+  status                        ProtocolAuthorizationStatus           @default(legacy_unverified)
+  currentVersionId              String?                               @unique
+  createdById                   String
+  reviewedById                  String?
+  reviewedByAuthzVersion        Int?
+  reviewedAssurance             IdentityAssuranceLevel?
+  reviewedIdentityLinkId        String?
+  reviewedAuthenticatedAt       DateTime?                             @db.Timestamptz(3)
+  reviewedDutyAssignmentId      String?
+  reviewedDutyAssignmentVersion Int?
+  reviewedAt                    DateTime?                             @db.Timestamptz(3)
+  activatedAt                   DateTime?                             @db.Timestamptz(3)
+  suspendedAt                   DateTime?                             @db.Timestamptz(3)
+  revokedAt                     DateTime?                             @db.Timestamptz(3)
+  statusReason                  String?
+  version                       Int                                   @default(1)
+  createdAt                     DateTime                              @default(now()) @db.Timestamptz(3)
+  updatedAt                     DateTime                              @default(now()) @updatedAt @db.Timestamptz(3)
+  lab                           Lab                                   @relation(fields: [labId], references: [id], onDelete: Restrict)
+  createdBy                     User                                  @relation("ProtocolAuthorizationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewedBy                    User?                                 @relation("ProtocolAuthorizationReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewedIdentityLink          ExternalIdentityLink?                 @relation("ProtocolAuthorizationIdentityEvidence", fields: [reviewedIdentityLinkId], references: [id], onDelete: Restrict)
+  reviewedDutyAssignment        FacilityDutyAssignment?               @relation("ProtocolAuthorizationDutyEvidence", fields: [reviewedDutyAssignmentId, reviewedDutyAssignmentVersion], references: [id, version], onDelete: Restrict, onUpdate: NoAction, map: "ProtocolAuthorization_reviewedDutyAssignment_fkey")
+  currentVersion                ProtocolAuthorizationVersion?         @relation("ProtocolCurrentVersion", fields: [currentVersionId, id], references: [id, authorizationId], onDelete: Restrict, onUpdate: NoAction)
+  versions                      ProtocolAuthorizationVersion[]        @relation("ProtocolVersions")
+  experiments                   Experiment[]
+  breedingSetups                BreedingSetup[]
+  intakeBatches                 AnimalIntakeBatch[]
+  sourceTransferRequests        LabTransferRequest[]                  @relation("LabTransferSourceProtocol")
+  destinationTransferRequests   LabTransferRequest[]                  @relation("LabTransferDestinationProtocol")
+  procedurePlans                ProcedurePlan[]
+  procedureOccurrences          ProcedureOccurrence[]
+  evidenceSnapshots             ComplianceEvidenceSnapshot[]
+  lifecycleEvents               ProtocolAuthorizationLifecycleEvent[]
+
+  @@unique([labId, protocolCode])
+  @@unique([id, labId])
+  @@unique([currentVersionId, id])
+  @@index([labId, status], map: "ProtocolAuthorization_lab_status_idx")
+}
+
+model ProtocolAuthorizationLifecycleEvent {
+  id                    String                       @id
+  authorizationId       String
+  fromStatus            ProtocolAuthorizationStatus?
+  toStatus              ProtocolAuthorizationStatus
+  actorId               String
+  actorAuthzVersion     Int
+  assurance             IdentityAssuranceLevel
+  identityLinkId        String
+  authenticatedAt       DateTime                     @db.Timestamptz(3)
+  dutyAssignmentId      String
+  dutyAssignmentVersion Int
+  commandReceiptId      String                       @unique
+  reason                String
+  occurredAt            DateTime                     @default(now()) @db.Timestamptz(3)
+  authorization         ProtocolAuthorization        @relation(fields: [authorizationId], references: [id], onDelete: Restrict, map: "ProtocolAuthorizationLifecycleEvent_authorization_fkey")
+  actor                 User                         @relation("ProtocolAuthorizationEventActor", fields: [actorId], references: [id], onDelete: Restrict, map: "ProtocolAuthorizationLifecycleEvent_actor_fkey")
+  identityLink          ExternalIdentityLink         @relation(fields: [identityLinkId], references: [id], onDelete: Restrict, map: "ProtocolAuthorizationLifecycleEvent_identity_fkey")
+  dutyAssignment        FacilityDutyAssignment       @relation(fields: [dutyAssignmentId, dutyAssignmentVersion], references: [id, version], onDelete: Restrict, onUpdate: NoAction, map: "ProtocolAuthorizationLifecycleEvent_duty_fkey")
+  commandReceipt        CommandReceipt               @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict, map: "ProtocolAuthorizationLifecycleEvent_receipt_fkey")
+
+  @@index([authorizationId, occurredAt], map: "ProtocolAuthorizationLifecycleEvent_authorization_time_idx")
+}
+
+model ProtocolAuthorizationVersion {
+  id                       String                           @id
+  authorizationId          String
+  versionNumber            Int
+  contentHash              String
+  contentPayload           String
+  policyVersion            String                           @default("synthetic-fail-closed-v1")
+  validFrom                DateTime                         @db.Timestamptz(3)
+  validUntil               DateTime                         @db.Timestamptz(3)
+  approvedAnimalCount      Int
+  summary                  String
+  createdById              String
+  creationCommandReceiptId String                           @unique
+  scopeSealedAt            DateTime?                        @db.Timestamptz(3)
+  createdAt                DateTime                         @default(now()) @db.Timestamptz(3)
+  authorization            ProtocolAuthorization            @relation("ProtocolVersions", fields: [authorizationId], references: [id], onDelete: Restrict)
+  currentForAuthorization  ProtocolAuthorization?           @relation("ProtocolCurrentVersion")
+  createdBy                User                             @relation("ProtocolVersionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  creationCommandReceipt   CommandReceipt                   @relation("ProtocolVersionCreationReceipt", fields: [creationCommandReceiptId], references: [id], onDelete: Restrict, map: "ProtocolAuthorizationVersion_creationReceipt_fkey")
+  projectBindings          ProtocolProjectBinding[]
+  experimentBindings       ProtocolExperimentBinding[]
+  strainBindings           ProtocolStrainBinding[]
+  procedureBindings        ProtocolProcedureBinding[]
+  personnelBindings        ProtocolPersonnelBinding[]
+  countLedger              ProtocolCountLedger?
+  competencyVersions       CompetencyEvidenceVersion[]
+  evidenceSnapshots        ComplianceEvidenceSnapshot[]
+  allocationHistory        ProtocolCountAllocationHistory[]
+  countAllocations         ProtocolCountAllocation[]
+
+  @@unique([authorizationId, versionNumber])
+  @@unique([id, authorizationId])
+  @@index([validFrom, validUntil], map: "ProtocolAuthorizationVersion_validity_idx")
+}
+
+model ProtocolProjectBinding {
+  id                     String                       @id
+  authorizationVersionId String
+  labId                  String
+  projectId              String
+  authorizationVersion   ProtocolAuthorizationVersion @relation(fields: [authorizationVersionId], references: [id], onDelete: Restrict, map: "ProtocolProjectBinding_version_fkey")
+  lab                    Lab                          @relation(fields: [labId], references: [id], onDelete: Restrict, map: "ProtocolProjectBinding_lab_fkey")
+  project                Project                      @relation(fields: [projectId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction, map: "ProtocolProjectBinding_project_lab_fkey")
+
+  @@unique([authorizationVersionId, projectId], map: "ProtocolProjectBinding_version_project_key")
+  @@index([labId, projectId], map: "ProtocolProjectBinding_lab_project_idx")
+}
+
+model ProtocolExperimentBinding {
+  id                     String                       @id
+  authorizationVersionId String
+  labId                  String
+  experimentId           String
+  authorizationVersion   ProtocolAuthorizationVersion @relation(fields: [authorizationVersionId], references: [id], onDelete: Restrict, map: "ProtocolExperimentBinding_version_fkey")
+  lab                    Lab                          @relation(fields: [labId], references: [id], onDelete: Restrict, map: "ProtocolExperimentBinding_lab_fkey")
+  experiment             Experiment                   @relation(fields: [experimentId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction, map: "ProtocolExperimentBinding_experiment_lab_fkey")
+
+  @@unique([authorizationVersionId, experimentId], map: "ProtocolExperimentBinding_version_experiment_key")
+  @@index([labId, experimentId], map: "ProtocolExperimentBinding_lab_experiment_idx")
+}
+
+model ProtocolStrainBinding {
+  id                     String                       @id
+  authorizationVersionId String
+  labId                  String
+  strainId               String
+  authorizationVersion   ProtocolAuthorizationVersion @relation(fields: [authorizationVersionId], references: [id], onDelete: Restrict, map: "ProtocolStrainBinding_version_fkey")
+  strain                 Strain                       @relation(fields: [strainId], references: [id], onDelete: Restrict, map: "ProtocolStrainBinding_strain_fkey")
+  lab                    Lab                          @relation(fields: [labId], references: [id], onDelete: Restrict, map: "ProtocolStrainBinding_lab_fkey")
+
+  @@unique([authorizationVersionId, strainId], map: "ProtocolStrainBinding_version_strain_key")
+  @@index([labId, strainId], map: "ProtocolStrainBinding_lab_strain_idx")
+}
+
+model ProtocolProcedureBinding {
+  id                     String                       @id
+  authorizationVersionId String
+  labId                  String
+  procedureCode          String
+  authorizationVersion   ProtocolAuthorizationVersion @relation(fields: [authorizationVersionId], references: [id], onDelete: Restrict, map: "ProtocolProcedureBinding_version_fkey")
+  lab                    Lab                          @relation(fields: [labId], references: [id], onDelete: Restrict, map: "ProtocolProcedureBinding_lab_fkey")
+
+  @@unique([authorizationVersionId, procedureCode], map: "ProtocolProcedureBinding_version_procedure_key")
+  @@index([labId, procedureCode], map: "ProtocolProcedureBinding_lab_code_idx")
+}
+
+model ProtocolPersonnelBinding {
+  id                     String                       @id
+  authorizationVersionId String
+  labId                  String
+  userId                 String
+  roleLabel              ProtocolPersonnelRole
+  authorizationVersion   ProtocolAuthorizationVersion @relation(fields: [authorizationVersionId], references: [id], onDelete: Restrict, map: "ProtocolPersonnelBinding_version_fkey")
+  user                   User                         @relation("ProtocolNamedPersonnel", fields: [userId], references: [id], onDelete: Restrict, map: "ProtocolPersonnelBinding_user_fkey")
+  lab                    Lab                          @relation(fields: [labId], references: [id], onDelete: Restrict, map: "ProtocolPersonnelBinding_lab_fkey")
+  evidenceSnapshots      ComplianceEvidenceSnapshot[]
+
+  @@unique([authorizationVersionId, userId, roleLabel], map: "ProtocolPersonnelBinding_version_user_role_key")
+  @@index([labId, userId], map: "ProtocolPersonnelBinding_lab_user_idx")
+}
+
+model ProtocolCountLedger {
+  id                     String                           @id
+  authorizationVersionId String                           @unique
+  approvedCount          Int
+  reservedCount          Int                              @default(0)
+  consumedCount          Int                              @default(0)
+  version                Int                              @default(1)
+  updatedAt              DateTime                         @default(now()) @updatedAt @db.Timestamptz(3)
+  authorizationVersion   ProtocolAuthorizationVersion     @relation(fields: [authorizationVersionId], references: [id], onDelete: Restrict, map: "ProtocolCountLedger_version_fkey")
+  allocationHistory      ProtocolCountAllocationHistory[]
+  allocations            ProtocolCountAllocation[]
+  evidenceSnapshots      ComplianceEvidenceSnapshot[]
+
+  @@index([authorizationVersionId, version], map: "ProtocolCountLedger_version_state_idx")
+}
+
+model ProtocolCountAllocation {
+  id                          String                           @id
+  ledgerId                    String
+  authorizationVersionId      String
+  allocationKey               String                           @unique
+  aggregateType               String
+  aggregateId                 String
+  reservedQuantity            Int
+  consumedQuantity            Int                              @default(0)
+  releasedQuantity            Int                              @default(0)
+  status                      ProtocolCountAllocationStatus    @default(open)
+  version                     Int                              @default(1)
+  createdById                 String
+  createdCommandReceiptId     String
+  createdAt                   DateTime                         @default(now()) @db.Timestamptz(3)
+  updatedAt                   DateTime                         @default(now()) @updatedAt @db.Timestamptz(3)
+  ledger                      ProtocolCountLedger              @relation(fields: [ledgerId], references: [id], onDelete: Restrict, map: "ProtocolCountAllocation_ledger_fkey")
+  authorizationVersion        ProtocolAuthorizationVersion     @relation(fields: [authorizationVersionId], references: [id], onDelete: Restrict, map: "ProtocolCountAllocation_version_fkey")
+  createdBy                   User                             @relation("ProtocolCountAllocationCreator", fields: [createdById], references: [id], onDelete: Restrict, map: "ProtocolCountAllocation_creator_fkey")
+  createdCommandReceipt       CommandReceipt                   @relation("ProtocolCountAllocationCreationReceipt", fields: [createdCommandReceiptId], references: [id], onDelete: Restrict, map: "ProtocolCountAllocation_receipt_fkey")
+  history                     ProtocolCountAllocationHistory[]
+  experimentAssignments       ExperimentAssignment[]
+  litters                     Litter[]
+  intakeBatches               AnimalIntakeBatch[]
+  procedureOccurrences        ProcedureOccurrence[]
+  destinationTransferRequests LabTransferRequest[]
+
+  @@unique([id, authorizationVersionId], map: "ProtocolCountAllocation_id_version_key")
+  @@index([ledgerId, status], map: "ProtocolCountAllocation_ledger_status_idx")
+  @@index([aggregateType, aggregateId], map: "ProtocolCountAllocation_aggregate_idx")
+}
+
+model ProtocolCountAllocationHistory {
+  id                       String                       @id
+  allocationId             String
+  ledgerId                 String
+  authorizationVersionId   String
+  commandReceiptId         String
+  allocationKey            String
+  allocationType           ProtocolCountAllocationType
+  quantity                 Int
+  allocationReservedBefore Int
+  allocationReservedAfter  Int
+  allocationConsumedBefore Int
+  allocationConsumedAfter  Int
+  allocationReleasedBefore Int
+  allocationReleasedAfter  Int
+  allocationVersionBefore  Int
+  allocationVersionAfter   Int
+  reservedBefore           Int
+  reservedAfter            Int
+  consumedBefore           Int
+  consumedAfter            Int
+  aggregateType            String
+  aggregateId              String
+  commandAggregateType     String
+  commandAggregateId       String
+  actorId                  String
+  occurredAt               DateTime                     @default(now()) @db.Timestamptz(3)
+  allocation               ProtocolCountAllocation      @relation(fields: [allocationId, authorizationVersionId], references: [id, authorizationVersionId], onDelete: Restrict, onUpdate: NoAction, map: "ProtocolCountAllocationHistory_allocation_fkey")
+  ledger                   ProtocolCountLedger          @relation(fields: [ledgerId], references: [id], onDelete: Restrict, map: "ProtocolCountAllocationHistory_ledger_fkey")
+  authorizationVersion     ProtocolAuthorizationVersion @relation(fields: [authorizationVersionId], references: [id], onDelete: Restrict, map: "ProtocolCountAllocationHistory_version_fkey")
+  commandReceipt           CommandReceipt               @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict, map: "ProtocolCountAllocationHistory_receipt_fkey")
+  actor                    User                         @relation("ProtocolAllocationActor", fields: [actorId], references: [id], onDelete: Restrict, map: "ProtocolCountAllocationHistory_actor_fkey")
+
+  @@unique([commandReceiptId, allocationKey], map: "ProtocolCountAllocationHistory_receipt_key")
+  @@index([allocationId, occurredAt], map: "ProtocolCountAllocationHistory_allocation_time_idx")
+  @@index([ledgerId, occurredAt], map: "ProtocolCountAllocationHistory_ledger_time_idx")
+  @@index([aggregateType, aggregateId], map: "ProtocolCountAllocationHistory_aggregate_idx")
+}
+
+model CompetencyEvidence {
+  id                            String                       @id
+  userId                        String
+  labId                         String
+  procedureCode                 String
+  status                        CompetencyEvidenceStatus     @default(current)
+  currentVersionId              String?                      @unique
+  revokedAt                     DateTime?                    @db.Timestamptz(3)
+  governedById                  String
+  governedByAuthzVersion        Int
+  governedAssurance             IdentityAssuranceLevel
+  governedIdentityLinkId        String
+  governedAuthenticatedAt       DateTime                     @db.Timestamptz(3)
+  governedDutyAssignmentId      String
+  governedDutyAssignmentVersion Int
+  governedAt                    DateTime                     @db.Timestamptz(3)
+  version                       Int                          @default(1)
+  createdAt                     DateTime                     @default(now()) @db.Timestamptz(3)
+  updatedAt                     DateTime                     @default(now()) @updatedAt @db.Timestamptz(3)
+  user                          User                         @relation("CompetencySubject", fields: [userId], references: [id], onDelete: Restrict, map: "CompetencyEvidence_user_fkey")
+  governedBy                    User                         @relation("CompetencyGovernanceActor", fields: [governedById], references: [id], onDelete: Restrict, map: "CompetencyEvidence_governedBy_fkey")
+  governedIdentityLink          ExternalIdentityLink         @relation("CompetencyIdentityEvidence", fields: [governedIdentityLinkId], references: [id], onDelete: Restrict, map: "CompetencyEvidence_governedIdentity_fkey")
+  governedDutyAssignment        FacilityDutyAssignment       @relation("CompetencyDutyEvidence", fields: [governedDutyAssignmentId, governedDutyAssignmentVersion], references: [id, version], onDelete: Restrict, onUpdate: NoAction, map: "CompetencyEvidence_governedDuty_fkey")
+  lab                           Lab                          @relation(fields: [labId], references: [id], onDelete: Restrict, map: "CompetencyEvidence_lab_fkey")
+  currentVersion                CompetencyEvidenceVersion?   @relation("CompetencyCurrentVersion", fields: [currentVersionId, id], references: [id, evidenceId], onDelete: Restrict, onUpdate: NoAction)
+  versions                      CompetencyEvidenceVersion[]  @relation("CompetencyVersions")
+  events                        CompetencyLifecycleEvent[]
+  evidenceSnapshots             ComplianceEvidenceSnapshot[]
+
+  @@unique([userId, labId, procedureCode], map: "CompetencyEvidence_user_lab_procedure_key")
+  @@unique([id, labId], map: "CompetencyEvidence_id_lab_key")
+  @@unique([currentVersionId, id])
+  @@index([labId, procedureCode, status], map: "CompetencyEvidence_lab_procedure_status_idx")
+}
+
+model CompetencyEvidenceVersion {
+  id                 String                        @id
+  evidenceId         String
+  versionNumber      Int
+  evidenceType       String
+  contentHash        String
+  contentPayload     String
+  validFrom          DateTime                      @db.Timestamptz(3)
+  validUntil         DateTime                      @db.Timestamptz(3)
+  issuedById         String
+  commandReceiptId   String                        @unique
+  protocolVersionId  String?
+  note               String?
+  createdAt          DateTime                      @default(now()) @db.Timestamptz(3)
+  evidence           CompetencyEvidence            @relation("CompetencyVersions", fields: [evidenceId], references: [id], onDelete: Restrict, map: "CompetencyEvidenceVersion_evidence_fkey")
+  currentForEvidence CompetencyEvidence?           @relation("CompetencyCurrentVersion")
+  issuedBy           User                          @relation("CompetencyIssuer", fields: [issuedById], references: [id], onDelete: Restrict, map: "CompetencyEvidenceVersion_issuer_fkey")
+  commandReceipt     CommandReceipt                @relation("CompetencyVersionReceipt", fields: [commandReceiptId], references: [id], onDelete: Restrict, map: "CompetencyEvidenceVersion_receipt_fkey")
+  protocolVersion    ProtocolAuthorizationVersion? @relation(fields: [protocolVersionId], references: [id], onDelete: Restrict, map: "CompetencyEvidenceVersion_protocol_fkey")
+  snapshots          ComplianceEvidenceSnapshot[]
+
+  @@unique([evidenceId, versionNumber], map: "CompetencyEvidenceVersion_evidence_version_key")
+  @@unique([id, evidenceId], map: "CompetencyEvidenceVersion_id_evidence_key")
+  @@index([validFrom, validUntil], map: "CompetencyEvidenceVersion_validity_idx")
+}
+
+model CompetencyLifecycleEvent {
+  id                    String                 @id
+  evidenceId            String
+  actorId               String
+  actorAuthzVersion     Int
+  assurance             IdentityAssuranceLevel
+  identityLinkId        String
+  authenticatedAt       DateTime               @db.Timestamptz(3)
+  dutyAssignmentId      String
+  dutyAssignmentVersion Int
+  commandReceiptId      String                 @unique
+  eventType             CompetencyEventType
+  evidenceVersion       Int
+  detail                Json?
+  occurredAt            DateTime               @default(now()) @db.Timestamptz(3)
+  evidence              CompetencyEvidence     @relation(fields: [evidenceId], references: [id], onDelete: Restrict, map: "CompetencyLifecycleEvent_evidence_fkey")
+  actor                 User                   @relation("CompetencyEventActor", fields: [actorId], references: [id], onDelete: Restrict, map: "CompetencyLifecycleEvent_actor_fkey")
+  identityLink          ExternalIdentityLink   @relation(fields: [identityLinkId], references: [id], onDelete: Restrict, map: "CompetencyLifecycleEvent_identity_fkey")
+  dutyAssignment        FacilityDutyAssignment @relation(fields: [dutyAssignmentId, dutyAssignmentVersion], references: [id, version], onDelete: Restrict, onUpdate: NoAction, map: "CompetencyLifecycleEvent_duty_fkey")
+  commandReceipt        CommandReceipt         @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict, map: "CompetencyLifecycleEvent_receipt_fkey")
+
+  @@index([evidenceId, occurredAt], map: "CompetencyLifecycleEvent_evidence_time_idx")
+}
+
+model ComplianceEvidenceSnapshot {
+  id                          String                       @id
+  policyVersion               String                       @default("synthetic-fail-closed-v1")
+  protocolAuthorizationId     String
+  protocolVersionId           String
+  protocolContentHash         String
+  procedureCode               String
+  scopeHash                   String
+  scopePayload                String
+  scopeSnapshot               Json
+  requiredPersonnelRole       ProtocolPersonnelRole
+  personnelBindingId          String
+  competencyEvidenceId        String
+  competencyVersionId         String
+  competencyContentHash       String
+  assurance                   IdentityAssuranceLevel
+  identityLinkId              String
+  authenticatedAt             DateTime                     @db.Timestamptz(3)
+  dutyAssignmentId            String?
+  dutyAssignmentVersion       Int?
+  ledgerId                    String
+  reservedBefore              Int
+  reservedAfter               Int
+  consumedBefore              Int
+  consumedAfter               Int
+  countOperation              ComplianceCountOperation
+  countQuantity               Int
+  countAllocationSnapshot     Json
+  actorId                     String
+  actorAuthzVersion           Int
+  labId                       String
+  commandReceiptId            String
+  evidenceKey                 String                       @default("primary")
+  commandType                 String
+  aggregateType               String
+  aggregateId                 String
+  evidenceHash                String
+  evidencePayload             String
+  evaluatedAt                 DateTime                     @default(now()) @db.Timestamptz(3)
+  protocolAuthorization       ProtocolAuthorization        @relation(fields: [protocolAuthorizationId], references: [id], onDelete: Restrict, map: "ComplianceEvidenceSnapshot_protocol_fkey")
+  protocolVersion             ProtocolAuthorizationVersion @relation(fields: [protocolVersionId, protocolAuthorizationId], references: [id, authorizationId], onDelete: Restrict, onUpdate: NoAction, map: "ComplianceEvidenceSnapshot_protocol_version_fkey")
+  personnelBinding            ProtocolPersonnelBinding     @relation(fields: [personnelBindingId], references: [id], onDelete: Restrict, map: "ComplianceEvidenceSnapshot_personnel_fkey")
+  competencyEvidence          CompetencyEvidence           @relation(fields: [competencyEvidenceId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction, map: "ComplianceEvidenceSnapshot_competency_fkey")
+  competencyVersion           CompetencyEvidenceVersion    @relation(fields: [competencyVersionId, competencyEvidenceId], references: [id, evidenceId], onDelete: Restrict, onUpdate: NoAction, map: "ComplianceEvidenceSnapshot_competency_version_fkey")
+  identityLink                ExternalIdentityLink         @relation(fields: [identityLinkId], references: [id], onDelete: Restrict, map: "ComplianceEvidenceSnapshot_identity_fkey")
+  dutyAssignment              FacilityDutyAssignment?      @relation(fields: [dutyAssignmentId, dutyAssignmentVersion], references: [id, version], onDelete: Restrict, onUpdate: NoAction, map: "ComplianceEvidenceSnapshot_duty_fkey")
+  ledger                      ProtocolCountLedger          @relation(fields: [ledgerId], references: [id], onDelete: Restrict, map: "ComplianceEvidenceSnapshot_ledger_fkey")
+  actor                       User                         @relation("ComplianceEvidenceActor", fields: [actorId], references: [id], onDelete: Restrict, map: "ComplianceEvidenceSnapshot_actor_fkey")
+  lab                         Lab                          @relation(fields: [labId], references: [id], onDelete: Restrict, map: "ComplianceEvidenceSnapshot_lab_fkey")
+  commandReceipt              CommandReceipt               @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict, map: "ComplianceEvidenceSnapshot_receipt_fkey")
+  experiments                 Experiment[]
+  breedingSetups              BreedingSetup[]
+  intakeBatches               AnimalIntakeBatch[]
+  sourceTransferRequests      LabTransferRequest[]         @relation("LabTransferSourceEvidence")
+  destinationTransferRequests LabTransferRequest[]         @relation("LabTransferDestinationEvidence")
+  procedurePlans              ProcedurePlan[]
+  procedureOccurrences        ProcedureOccurrence[]
+  experimentAssignments       ExperimentAssignment[]
+  litters                     Litter[]
+
+  @@unique([commandReceiptId, evidenceKey], map: "ComplianceEvidenceSnapshot_receipt_evidence_key")
+  @@index([protocolAuthorizationId, protocolVersionId], map: "ComplianceEvidenceSnapshot_protocol_idx")
+  @@index([actorId, evaluatedAt], map: "ComplianceEvidenceSnapshot_actor_time_idx")
+  @@index([aggregateType, aggregateId], map: "ComplianceEvidenceSnapshot_aggregate_idx")
 }
 
 model LabMembership {
@@ -970,6 +1461,7 @@ model Strain {
   cryostorageRecords  CryostorageRecord[]
   cryostorageRequests CryostorageRequest[]
   directoryListings   StrainDirectoryListing[]
+  protocolBindings    ProtocolStrainBinding[]
 }
 
 model StrainDirectoryListing {
@@ -1106,20 +1598,26 @@ model Animal {
 }
 
 model AnimalIntakeBatch {
-  id              String                  @id
-  labId           String
-  vendor          String
-  orderReference  String
-  arrivalDate     DateTime
-  disposition     AnimalIntakeDisposition
-  notes           String?
-  createdById     String
-  createdAt       DateTime                @default(now())
-  version         Int                     @default(1)
-  lab             Lab                     @relation(fields: [labId], references: [id], onDelete: Restrict)
-  createdBy       User                    @relation("AnimalIntakeBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  animals         Animal[]
-  quarantineCases QuarantineCase[]
+  id                           String                      @id
+  labId                        String
+  vendor                       String
+  orderReference               String
+  arrivalDate                  DateTime
+  disposition                  AnimalIntakeDisposition
+  notes                        String?
+  createdById                  String
+  createdAt                    DateTime                    @default(now())
+  version                      Int                         @default(1)
+  protocolAuthorizationId      String?
+  complianceEvidenceSnapshotId String?
+  protocolCountAllocationId    String?
+  lab                          Lab                         @relation(fields: [labId], references: [id], onDelete: Restrict)
+  createdBy                    User                        @relation("AnimalIntakeBatchCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  animals                      Animal[]
+  quarantineCases              QuarantineCase[]
+  protocolAuthorization        ProtocolAuthorization?      @relation(fields: [protocolAuthorizationId], references: [id], onDelete: Restrict)
+  complianceEvidence           ComplianceEvidenceSnapshot? @relation(fields: [complianceEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  protocolCountAllocation      ProtocolCountAllocation?    @relation(fields: [protocolCountAllocationId], references: [id], onDelete: Restrict)
 
   @@unique([id, labId])
   @@index([labId])
@@ -1222,18 +1720,22 @@ model GenotypingRecord {
 }
 
 model BreedingSetup {
-  id             String          @id
-  labId          String
-  startDate      DateTime
-  endDate        DateTime?
-  status         BreedingStatus
-  targetGenotype String
-  targetSex      Sex?
-  notes          String?
-  version        Int             @default(1)
-  adults         BreedingAdult[]
-  litters        Litter[]
-  lab            Lab             @relation(fields: [labId], references: [id], onDelete: Restrict)
+  id                           String                      @id
+  labId                        String
+  startDate                    DateTime
+  endDate                      DateTime?
+  status                       BreedingStatus
+  targetGenotype               String
+  targetSex                    Sex?
+  notes                        String?
+  version                      Int                         @default(1)
+  protocolAuthorizationId      String?
+  complianceEvidenceSnapshotId String?
+  adults                       BreedingAdult[]
+  litters                      Litter[]
+  lab                          Lab                         @relation(fields: [labId], references: [id], onDelete: Restrict)
+  protocolAuthorization        ProtocolAuthorization?      @relation(fields: [protocolAuthorizationId], references: [id], onDelete: Restrict)
+  complianceEvidence           ComplianceEvidenceSnapshot? @relation(fields: [complianceEvidenceSnapshotId], references: [id], onDelete: Restrict)
 
   @@index([labId])
 }
@@ -1251,15 +1753,19 @@ model BreedingAdult {
 }
 
 model Litter {
-  id              String         @id
-  breedingSetupId String
-  birthDate       DateTime
-  litterSizeBirth Int
-  litterSizeWean  Int?
-  notes           String?
-  version         Int            @default(1)
-  breedingSetup   BreedingSetup  @relation(fields: [breedingSetupId], references: [id], onDelete: Cascade)
-  litterAnimals   LitterAnimal[]
+  id                           String                      @id
+  breedingSetupId              String
+  birthDate                    DateTime
+  litterSizeBirth              Int
+  litterSizeWean               Int?
+  notes                        String?
+  version                      Int                         @default(1)
+  complianceEvidenceSnapshotId String?
+  protocolCountAllocationId    String?
+  breedingSetup                BreedingSetup               @relation(fields: [breedingSetupId], references: [id], onDelete: Cascade)
+  complianceEvidence           ComplianceEvidenceSnapshot? @relation(fields: [complianceEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  protocolCountAllocation      ProtocolCountAllocation?    @relation(fields: [protocolCountAllocationId], references: [id], onDelete: Restrict)
+  litterAnimals                LitterAnimal[]
 }
 
 model LitterAnimal {
@@ -1283,6 +1789,7 @@ model Project {
   lab                 Lab                       @relation(fields: [labId], references: [id], onDelete: Restrict)
   animalAllocations   AnimalProjectAllocation[]
   experiments         Experiment[]
+  protocolBindings    ProtocolProjectBinding[]
   sampleRecords       SampleRecord[]
   cryostorageRecords  CryostorageRecord[]
   cryostorageRequests CryostorageRequest[]
@@ -1307,51 +1814,60 @@ model AnimalProjectAllocation {
 }
 
 model Experiment {
-  id                   String                 @id
-  labId                String
-  experimentCode       String                 @unique
-  projectId            String
-  title                String
-  ownerId              String
-  status               ExperimentStatus
-  plannedStartAt       DateTime?
-  plannedEndAt         DateTime?
-  operationalContact   String?
-  procedureSummary     String?
-  treatmentSummary     String?
-  welfareRisks         String?
-  scheduleNotes        String?
-  operationalNotes     String?
-  notes                String?
-  resultSummary        String?
-  version              Int                    @default(1)
-  owner                User                   @relation("ExperimentOwner", fields: [ownerId], references: [id], onDelete: Restrict)
-  lab                  Lab                    @relation(fields: [labId], references: [id], onDelete: Restrict)
-  project              Project                @relation(fields: [projectId, labId], references: [id, labId], onDelete: NoAction, onUpdate: NoAction)
-  assignments          ExperimentAssignment[]
-  sampleRecords        SampleRecord[]
-  procedurePlans       ProcedurePlan[]
-  procedureOccurrences ProcedureOccurrence[]
+  id                           String                      @id
+  labId                        String
+  experimentCode               String                      @unique
+  projectId                    String
+  title                        String
+  ownerId                      String
+  status                       ExperimentStatus
+  plannedStartAt               DateTime?
+  plannedEndAt                 DateTime?
+  operationalContact           String?
+  procedureSummary             String?
+  treatmentSummary             String?
+  welfareRisks                 String?
+  scheduleNotes                String?
+  operationalNotes             String?
+  notes                        String?
+  resultSummary                String?
+  version                      Int                         @default(1)
+  protocolAuthorizationId      String?
+  complianceEvidenceSnapshotId String?
+  owner                        User                        @relation("ExperimentOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  lab                          Lab                         @relation(fields: [labId], references: [id], onDelete: Restrict)
+  project                      Project                     @relation(fields: [projectId, labId], references: [id, labId], onDelete: NoAction, onUpdate: NoAction)
+  assignments                  ExperimentAssignment[]
+  sampleRecords                SampleRecord[]
+  procedurePlans               ProcedurePlan[]
+  procedureOccurrences         ProcedureOccurrence[]
+  protocolAuthorization        ProtocolAuthorization?      @relation(fields: [protocolAuthorizationId], references: [id], onDelete: Restrict)
+  complianceEvidence           ComplianceEvidenceSnapshot? @relation(fields: [complianceEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  protocolBindings             ProtocolExperimentBinding[]
 
   @@unique([id, labId])
   @@index([labId])
 }
 
 model ExperimentAssignment {
-  id                   String                @id
-  animalId             String
-  experimentId         String
-  status               AssignmentStatus
-  startDate            DateTime
-  endDate              DateTime?
-  treatmentGroup       String?
-  notes                String?
-  isPrimary            Boolean               @default(false)
-  version              Int                   @default(1)
-  animal               Animal                @relation(fields: [animalId], references: [id], onDelete: Cascade)
-  experiment           Experiment            @relation(fields: [experimentId], references: [id], onDelete: Cascade)
-  procedurePlans       ProcedurePlan[]
-  procedureOccurrences ProcedureOccurrence[]
+  id                           String                      @id
+  animalId                     String
+  experimentId                 String
+  status                       AssignmentStatus
+  startDate                    DateTime
+  endDate                      DateTime?
+  treatmentGroup               String?
+  notes                        String?
+  isPrimary                    Boolean                     @default(false)
+  version                      Int                         @default(1)
+  complianceEvidenceSnapshotId String?
+  protocolCountAllocationId    String?
+  animal                       Animal                      @relation(fields: [animalId], references: [id], onDelete: Cascade)
+  experiment                   Experiment                  @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  complianceEvidence           ComplianceEvidenceSnapshot? @relation(fields: [complianceEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  protocolCountAllocation      ProtocolCountAllocation?    @relation(fields: [protocolCountAllocationId], references: [id], onDelete: Restrict)
+  procedurePlans               ProcedurePlan[]
+  procedureOccurrences         ProcedureOccurrence[]
 
   @@unique([experimentId, animalId])
   @@unique([id, experimentId])
@@ -1360,33 +1876,37 @@ model ExperimentAssignment {
 }
 
 model ProcedurePlan {
-  id                        String                @id
-  labId                     String
-  experimentId              String
-  assignmentId              String
-  procedureCode             String
-  title                     String
-  scheduledAt               DateTime
-  status                    ProcedurePlanStatus   @default(planned)
-  sopId                     String
-  sopVersionId              String
-  sopVersionNumber          Int
-  sopContentHash            String
-  sopAssignmentId           String
-  assignmentContextSnapshot Json
-  experimentContextSnapshot Json
-  createdById               String
-  createdAt                 DateTime              @default(now())
-  updatedAt                 DateTime              @updatedAt
-  version                   Int                   @default(1)
-  lab                       Lab                   @relation(fields: [labId], references: [id], onDelete: Restrict)
-  experiment                Experiment            @relation(fields: [experimentId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
-  assignment                ExperimentAssignment  @relation(fields: [assignmentId, experimentId], references: [id, experimentId], onDelete: Restrict, onUpdate: NoAction)
-  sop                       SopDocument           @relation("ProcedurePlanSop", fields: [sopId], references: [id], onDelete: Restrict)
-  sopVersion                SopVersion            @relation("ProcedurePlanSopVersion", fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
-  sopAssignment             SopAssignment         @relation("ProcedurePlanSopAssignment", fields: [sopAssignmentId, sopId, sopVersionId, labId], references: [id, sopId, sopVersionId, labId], onDelete: Restrict, onUpdate: NoAction)
-  createdBy                 User                  @relation("ProcedurePlanCreator", fields: [createdById], references: [id], onDelete: Restrict)
-  occurrences               ProcedureOccurrence[]
+  id                           String                      @id
+  labId                        String
+  experimentId                 String
+  assignmentId                 String
+  procedureCode                String
+  title                        String
+  scheduledAt                  DateTime
+  status                       ProcedurePlanStatus         @default(planned)
+  sopId                        String
+  sopVersionId                 String
+  sopVersionNumber             Int
+  sopContentHash               String
+  sopAssignmentId              String
+  assignmentContextSnapshot    Json
+  experimentContextSnapshot    Json
+  createdById                  String
+  createdAt                    DateTime                    @default(now())
+  updatedAt                    DateTime                    @updatedAt
+  version                      Int                         @default(1)
+  protocolAuthorizationId      String?
+  complianceEvidenceSnapshotId String?
+  lab                          Lab                         @relation(fields: [labId], references: [id], onDelete: Restrict)
+  experiment                   Experiment                  @relation(fields: [experimentId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  assignment                   ExperimentAssignment        @relation(fields: [assignmentId, experimentId], references: [id, experimentId], onDelete: Restrict, onUpdate: NoAction)
+  sop                          SopDocument                 @relation("ProcedurePlanSop", fields: [sopId], references: [id], onDelete: Restrict)
+  sopVersion                   SopVersion                  @relation("ProcedurePlanSopVersion", fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
+  sopAssignment                SopAssignment               @relation("ProcedurePlanSopAssignment", fields: [sopAssignmentId, sopId, sopVersionId, labId], references: [id, sopId, sopVersionId, labId], onDelete: Restrict, onUpdate: NoAction)
+  createdBy                    User                        @relation("ProcedurePlanCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  occurrences                  ProcedureOccurrence[]
+  protocolAuthorization        ProtocolAuthorization?      @relation(fields: [protocolAuthorizationId], references: [id], onDelete: Restrict)
+  complianceEvidence           ComplianceEvidenceSnapshot? @relation(fields: [complianceEvidenceSnapshotId], references: [id], onDelete: Restrict)
 
   @@unique([id, labId])
   @@index([labId, status, scheduledAt])
@@ -1397,44 +1917,50 @@ model ProcedurePlan {
 }
 
 model ProcedureOccurrence {
-  id                        String                    @id
-  planId                    String
-  occurrenceKey             String
-  labId                     String
-  experimentId              String
-  assignmentId              String
-  animalId                  String
-  experimentCodeSnapshot    String
-  animalFacilityIdSnapshot  String
-  cageBarcodeSnapshot       String?
-  roomNumberSnapshot        String?
-  rackNumberSnapshot        String?
-  cageNumberSnapshot        String?
-  procedureCode             String
-  title                     String
-  plannedAt                 DateTime
-  occurredAt                DateTime
-  status                    ProcedureOccurrenceStatus
-  outcomeNote               String?
-  planVersion               Int
-  sopId                     String
-  sopVersionId              String
-  sopVersionNumber          Int
-  sopContentHash            String
-  sopAssignmentId           String
-  assignmentContextSnapshot Json
-  experimentContextSnapshot Json
-  executedById              String
-  recordedAt                DateTime                  @default(now())
-  plan                      ProcedurePlan             @relation(fields: [planId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
-  lab                       Lab                       @relation(fields: [labId], references: [id], onDelete: Restrict)
-  experiment                Experiment                @relation(fields: [experimentId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
-  assignment                ExperimentAssignment      @relation(fields: [assignmentId, experimentId], references: [id, experimentId], onDelete: Restrict, onUpdate: NoAction)
-  animal                    Animal                    @relation(fields: [animalId], references: [id], onDelete: Restrict)
-  sop                       SopDocument               @relation("ProcedureOccurrenceSop", fields: [sopId], references: [id], onDelete: Restrict)
-  sopVersion                SopVersion                @relation("ProcedureOccurrenceSopVersion", fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
-  sopAssignment             SopAssignment             @relation("ProcedureOccurrenceSopAssignment", fields: [sopAssignmentId, sopId, sopVersionId, labId], references: [id, sopId, sopVersionId, labId], onDelete: Restrict, onUpdate: NoAction, map: "ProcedureOccurrence_sopAssignmentId_sopId_sopVersionId_labId_fk")
-  executedBy                User                      @relation("ProcedureOccurrenceExecutor", fields: [executedById], references: [id], onDelete: Restrict)
+  id                           String                      @id
+  planId                       String
+  occurrenceKey                String
+  labId                        String
+  experimentId                 String
+  assignmentId                 String
+  animalId                     String
+  experimentCodeSnapshot       String
+  animalFacilityIdSnapshot     String
+  cageBarcodeSnapshot          String?
+  roomNumberSnapshot           String?
+  rackNumberSnapshot           String?
+  cageNumberSnapshot           String?
+  procedureCode                String
+  title                        String
+  plannedAt                    DateTime
+  occurredAt                   DateTime
+  status                       ProcedureOccurrenceStatus
+  outcomeNote                  String?
+  planVersion                  Int
+  sopId                        String
+  sopVersionId                 String
+  sopVersionNumber             Int
+  sopContentHash               String
+  sopAssignmentId              String
+  assignmentContextSnapshot    Json
+  experimentContextSnapshot    Json
+  executedById                 String
+  recordedAt                   DateTime                    @default(now())
+  protocolAuthorizationId      String?
+  complianceEvidenceSnapshotId String?
+  protocolCountAllocationId    String?
+  plan                         ProcedurePlan               @relation(fields: [planId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab                          Lab                         @relation(fields: [labId], references: [id], onDelete: Restrict)
+  experiment                   Experiment                  @relation(fields: [experimentId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  assignment                   ExperimentAssignment        @relation(fields: [assignmentId, experimentId], references: [id, experimentId], onDelete: Restrict, onUpdate: NoAction)
+  animal                       Animal                      @relation(fields: [animalId], references: [id], onDelete: Restrict)
+  sop                          SopDocument                 @relation("ProcedureOccurrenceSop", fields: [sopId], references: [id], onDelete: Restrict)
+  sopVersion                   SopVersion                  @relation("ProcedureOccurrenceSopVersion", fields: [sopVersionId, sopId], references: [id, sopId], onDelete: Restrict, onUpdate: NoAction)
+  sopAssignment                SopAssignment               @relation("ProcedureOccurrenceSopAssignment", fields: [sopAssignmentId, sopId, sopVersionId, labId], references: [id, sopId, sopVersionId, labId], onDelete: Restrict, onUpdate: NoAction, map: "ProcedureOccurrence_sopAssignmentId_sopId_sopVersionId_labId_fk")
+  executedBy                   User                        @relation("ProcedureOccurrenceExecutor", fields: [executedById], references: [id], onDelete: Restrict)
+  protocolAuthorization        ProtocolAuthorization?      @relation(fields: [protocolAuthorizationId], references: [id], onDelete: Restrict)
+  complianceEvidence           ComplianceEvidenceSnapshot? @relation(fields: [complianceEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  protocolCountAllocation      ProtocolCountAllocation?    @relation(fields: [protocolCountAllocationId], references: [id], onDelete: Restrict)
 
   @@unique([planId, occurrenceKey])
   @@index([labId, occurredAt])
@@ -1788,46 +2314,56 @@ model AnimalLabTransfer {
 }
 
 model LabTransferRequest {
-  id                      String                   @id
-  subjectType             LabTransferSubjectType
-  sourceLabId             String
-  destinationLabId        String
-  sourceCageId            String?
-  destinationCageId       String?
-  reason                  String
-  sourcePrivateNote       String?
-  requestedEffectiveAt    DateTime
-  status                  LabTransferRequestStatus @default(requested)
-  packetVersion           Int                      @default(1)
-  acceptedPacketVersion   Int?
-  acceptedPacketHash      String?
-  requestedById           String
-  requestedAt             DateTime                 @default(now())
-  destinationDecisionById String?
-  destinationDecisionAt   DateTime?
-  destinationDecisionNote String?
-  finalizedById           String?
-  finalizedAt             DateTime?
-  overrideApprovedById    String?
-  overrideApprovedAt      DateTime?
-  overrideReason          String?
-  version                 Int                      @default(1)
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
-  sourceLab               Lab                      @relation("LabTransferSourceLab", fields: [sourceLabId], references: [id], onDelete: Restrict)
-  destinationLab          Lab                      @relation("LabTransferDestinationLab", fields: [destinationLabId], references: [id], onDelete: Restrict)
-  sourceCage              Cage?                    @relation("LabTransferSourceCage", fields: [sourceCageId], references: [id], onDelete: Restrict)
-  destinationCage         Cage?                    @relation("LabTransferDestinationCage", fields: [destinationCageId], references: [id], onDelete: Restrict)
-  requestedBy             User                     @relation("LabTransferRequester", fields: [requestedById], references: [id], onDelete: Restrict)
-  destinationDecisionBy   User?                    @relation("LabTransferDestinationDecision", fields: [destinationDecisionById], references: [id], onDelete: Restrict)
-  finalizedBy             User?                    @relation("LabTransferFinalizer", fields: [finalizedById], references: [id], onDelete: Restrict)
-  overrideApprovedBy      User?                    @relation("LabTransferOverrideApprover", fields: [overrideApprovedById], references: [id], onDelete: Restrict)
-  items                   LabTransferItem[]
-  packets                 LabTransferPacket[]
-  events                  LabTransferEvent[]
-  cageTransfers           CageLabTransfer[]
-  animalTransfers         AnimalLabTransfer[]
-  animalMovements         AnimalMovement[]
+  id                                      String                      @id
+  subjectType                             LabTransferSubjectType
+  sourceLabId                             String
+  destinationLabId                        String
+  sourceCageId                            String?
+  destinationCageId                       String?
+  reason                                  String
+  sourcePrivateNote                       String?
+  requestedEffectiveAt                    DateTime
+  status                                  LabTransferRequestStatus    @default(requested)
+  packetVersion                           Int                         @default(1)
+  acceptedPacketVersion                   Int?
+  acceptedPacketHash                      String?
+  requestedById                           String
+  requestedAt                             DateTime                    @default(now())
+  destinationDecisionById                 String?
+  destinationDecisionAt                   DateTime?
+  destinationDecisionNote                 String?
+  finalizedById                           String?
+  finalizedAt                             DateTime?
+  overrideApprovedById                    String?
+  overrideApprovedAt                      DateTime?
+  overrideReason                          String?
+  version                                 Int                         @default(1)
+  createdAt                               DateTime                    @default(now())
+  updatedAt                               DateTime                    @updatedAt
+  sourceProtocolAuthorizationId           String?
+  sourceComplianceEvidenceSnapshotId      String?
+  destinationProtocolAuthorizationId      String?
+  destinationComplianceEvidenceSnapshotId String?
+  destinationProtocolCountAllocationId    String?
+  sourceLab                               Lab                         @relation("LabTransferSourceLab", fields: [sourceLabId], references: [id], onDelete: Restrict)
+  destinationLab                          Lab                         @relation("LabTransferDestinationLab", fields: [destinationLabId], references: [id], onDelete: Restrict)
+  sourceCage                              Cage?                       @relation("LabTransferSourceCage", fields: [sourceCageId], references: [id], onDelete: Restrict)
+  destinationCage                         Cage?                       @relation("LabTransferDestinationCage", fields: [destinationCageId], references: [id], onDelete: Restrict)
+  requestedBy                             User                        @relation("LabTransferRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  destinationDecisionBy                   User?                       @relation("LabTransferDestinationDecision", fields: [destinationDecisionById], references: [id], onDelete: Restrict)
+  finalizedBy                             User?                       @relation("LabTransferFinalizer", fields: [finalizedById], references: [id], onDelete: Restrict)
+  overrideApprovedBy                      User?                       @relation("LabTransferOverrideApprover", fields: [overrideApprovedById], references: [id], onDelete: Restrict)
+  items                                   LabTransferItem[]
+  packets                                 LabTransferPacket[]
+  events                                  LabTransferEvent[]
+  cageTransfers                           CageLabTransfer[]
+  animalTransfers                         AnimalLabTransfer[]
+  animalMovements                         AnimalMovement[]
+  sourceProtocolAuthorization             ProtocolAuthorization?      @relation("LabTransferSourceProtocol", fields: [sourceProtocolAuthorizationId], references: [id], onDelete: Restrict)
+  sourceComplianceEvidence                ComplianceEvidenceSnapshot? @relation("LabTransferSourceEvidence", fields: [sourceComplianceEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  destinationProtocolAuthorization        ProtocolAuthorization?      @relation("LabTransferDestinationProtocol", fields: [destinationProtocolAuthorizationId], references: [id], onDelete: Restrict)
+  destinationComplianceEvidence           ComplianceEvidenceSnapshot? @relation("LabTransferDestinationEvidence", fields: [destinationComplianceEvidenceSnapshotId], references: [id], onDelete: Restrict)
+  destinationProtocolCountAllocation      ProtocolCountAllocation?    @relation(fields: [destinationProtocolCountAllocationId], references: [id], onDelete: Restrict)
 
   @@index([sourceLabId, status])
   @@index([destinationLabId, status])
@@ -2226,31 +2762,38 @@ model WorkflowReviewSnapshot {
 }
 
 model CommandReceipt {
-  id                String               @id
-  actorId           String
-  actorAuthzVersion Int                  @default(0)
-  databasePrincipal String               @default(dbgenerated("SESSION_USER"))
-  labId             String?
-  workflowDraftId   String?
-  commandType       String
-  idempotencyKey    String
-  requestHash       String
-  requestId         String
-  transactionId     BigInt               @default(dbgenerated("txid_current()"))
-  status            CommandReceiptStatus @default(processing)
-  aggregateType     String?
-  aggregateId       String?
-  expectedVersion   Int?
-  resultingVersion  Int?
-  result            Json?
-  errorCode         String?
-  errorMessage      String?
-  startedAt         DateTime             @default(now())
-  completedAt       DateTime?
-  actor             User                 @relation("CommandReceiptActor", fields: [actorId], references: [id], onDelete: Restrict)
-  lab               Lab?                 @relation(fields: [labId], references: [id], onDelete: Restrict)
-  workflowDraft     WorkflowDraft?       @relation(fields: [workflowDraftId], references: [id], onDelete: SetNull)
-  auditLogs         AuditLog[]
+  id                         String                               @id
+  actorId                    String
+  actorAuthzVersion          Int                                  @default(0)
+  databasePrincipal          String                               @default(dbgenerated("SESSION_USER"))
+  labId                      String?
+  workflowDraftId            String?
+  commandType                String
+  idempotencyKey             String
+  requestHash                String
+  requestId                  String
+  transactionId              BigInt                               @default(dbgenerated("txid_current()"))
+  status                     CommandReceiptStatus                 @default(processing)
+  aggregateType              String?
+  aggregateId                String?
+  expectedVersion            Int?
+  resultingVersion           Int?
+  result                     Json?
+  errorCode                  String?
+  errorMessage               String?
+  startedAt                  DateTime                             @default(now())
+  completedAt                DateTime?
+  actor                      User                                 @relation("CommandReceiptActor", fields: [actorId], references: [id], onDelete: Restrict)
+  lab                        Lab?                                 @relation(fields: [labId], references: [id], onDelete: Restrict)
+  workflowDraft              WorkflowDraft?                       @relation(fields: [workflowDraftId], references: [id], onDelete: SetNull)
+  auditLogs                  AuditLog[]
+  protocolAllocationHistory  ProtocolCountAllocationHistory[]
+  protocolAllocationReceipts ProtocolCountAllocation[]            @relation("ProtocolCountAllocationCreationReceipt")
+  complianceEvidence         ComplianceEvidenceSnapshot[]
+  protocolGovernanceEvent    ProtocolAuthorizationLifecycleEvent?
+  competencyGovernanceEvent  CompetencyLifecycleEvent?
+  protocolVersionCreated     ProtocolAuthorizationVersion?        @relation("ProtocolVersionCreationReceipt")
+  competencyVersionIssued    CompetencyEvidenceVersion?           @relation("CompetencyVersionReceipt")
 
   @@unique([actorId, commandType, idempotencyKey])
   @@index([requestId])

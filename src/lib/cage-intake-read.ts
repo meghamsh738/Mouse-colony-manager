@@ -50,7 +50,7 @@ export async function getCageIntakeOptionsView(
         }),
   };
 
-  const [labs, facilities, rooms, racks, strains, chargeCategories, cages, animals] =
+  const [labs, facilities, rooms, racks, strains, chargeCategories, cages, animals, protocols] =
     await prisma.$transaction([
       prisma.lab.findMany({
         where: labWhere,
@@ -122,6 +122,32 @@ export async function getCageIntakeOptionsView(
           currentCage: { select: { id: true, barcode: true, labId: true } },
         },
       }),
+      prisma.protocolAuthorization.findMany({
+        where: {
+          status: "active",
+          ...(access.canViewAll ? {} : { labId: { in: access.manageableLabIds } }),
+          currentVersion: {
+            validFrom: { lte: new Date() },
+            validUntil: { gt: new Date() },
+            procedureBindings: { some: { procedureCode: "intake" } },
+            personnelBindings: { some: { userId: actor.id, roleLabel: "intake_operator" } },
+          },
+        },
+        orderBy: [{ labId: "asc" }, { protocolCode: "asc" }],
+        select: {
+          id: true,
+          labId: true,
+          protocolCode: true,
+          title: true,
+          currentVersion: {
+            select: {
+              validUntil: true,
+              strainBindings: { select: { strainId: true } },
+            },
+          },
+        },
+        take: 500,
+      }),
     ]);
   const [litter, weaningRule] = await prisma.$transaction([
       prisma.litter.findFirst({
@@ -146,6 +172,13 @@ export async function getCageIntakeOptionsView(
 
   return {
     labs,
+    protocols: protocols.map((protocol) => ({
+      id: protocol.id,
+      labId: protocol.labId,
+      label: `${protocol.protocolCode} — ${protocol.title}`,
+      validUntil: protocol.currentVersion!.validUntil.toISOString(),
+      strainIds: protocol.currentVersion!.strainBindings.map((binding) => binding.strainId),
+    })),
     facilities: facilities.map((facility) => ({
       id: facility.id,
       name: facility.name,

@@ -26,6 +26,7 @@ type ExperimentRegistryProps = {
   experiments: ExperimentOverviewItem[];
   labOptions: Option[];
   projectOptions: ProjectOption[];
+  protocolOptions: ProjectOption[];
   canManage: boolean;
 };
 
@@ -85,13 +86,16 @@ function ExperimentDetailsFields({
   experiment,
   labOptions,
   projectOptions,
+  protocolOptions,
 }: {
   experiment?: ExperimentOverviewItem;
   labOptions: Option[];
   projectOptions: ProjectOption[];
+  protocolOptions: ProjectOption[];
 }) {
   const [selectedLabId, setSelectedLabId] = useState(experiment?.labId ?? labOptions[0]?.id ?? "");
   const availableProjects = projectOptions.filter((project) => project.labId === selectedLabId);
+  const availableProtocols = protocolOptions.filter((protocol) => protocol.labId === selectedLabId);
   return (
     <>
       {experiment ? (
@@ -114,6 +118,12 @@ function ExperimentDetailsFields({
           <select className={controlClassName} defaultValue={experiment?.projectId ?? ""} name="projectId" required>
             <option disabled value="">Choose project</option>
             {availableProjects.map((project) => <option key={project.id} value={project.id}>{project.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Protocol authorization">
+          <select className={controlClassName} defaultValue={experiment?.protocolAuthorizationId ?? ""} name="protocolAuthorizationId">
+            <option value="">Not yet verified</option>
+            {availableProtocols.map((protocol) => <option key={protocol.id} value={protocol.id}>{protocol.label}</option>)}
           </select>
         </Field>
         <Field label="Title" wide>
@@ -154,21 +164,21 @@ function ExperimentDetailsFields({
   );
 }
 
-function CreateExperimentForm({ labOptions, projectOptions }: Pick<ExperimentRegistryProps, "labOptions" | "projectOptions">) {
+function CreateExperimentForm({ labOptions, projectOptions, protocolOptions }: Pick<ExperimentRegistryProps, "labOptions" | "projectOptions" | "protocolOptions">) {
   if (!labOptions.length) return <p className="text-sm text-[var(--muted)]">No active lab is available for experiment creation.</p>;
   return (
     <CommandForm action={createExperimentAction} pendingLabel="Creating experiment..." submitLabel="Create planned experiment" testId="create-experiment-form">
-      <ExperimentDetailsFields labOptions={labOptions} projectOptions={projectOptions} />
+      <ExperimentDetailsFields labOptions={labOptions} projectOptions={projectOptions} protocolOptions={protocolOptions} />
     </CommandForm>
   );
 }
 
-function UpdateExperimentForm({ experiment, projectOptions }: { experiment: ExperimentOverviewItem; projectOptions: ProjectOption[] }) {
+function UpdateExperimentForm({ experiment, projectOptions, protocolOptions }: { experiment: ExperimentOverviewItem; projectOptions: ProjectOption[]; protocolOptions: ProjectOption[] }) {
   return (
     <CommandForm action={updateExperimentAction} pendingLabel="Saving worksheet..." submitLabel="Save worksheet" testId={`update-experiment-${experiment.id}`}>
       <input name="experimentId" type="hidden" value={experiment.id} />
       <input name="expectedVersion" type="hidden" value={experiment.version} />
-      <ExperimentDetailsFields experiment={experiment} labOptions={[]} projectOptions={projectOptions} />
+      <ExperimentDetailsFields experiment={experiment} labOptions={[]} projectOptions={projectOptions} protocolOptions={protocolOptions} />
     </CommandForm>
   );
 }
@@ -190,14 +200,14 @@ function LifecycleForm({ experiment }: { experiment: ExperimentOverviewItem }) {
   );
 }
 
-function ExperimentActions({ experiment, projectOptions }: { experiment: ExperimentOverviewItem; projectOptions: ProjectOption[] }) {
+function ExperimentActions({ experiment, projectOptions, protocolOptions }: { experiment: ExperimentOverviewItem; projectOptions: ProjectOption[]; protocolOptions: ProjectOption[] }) {
   const terminal = experiment.status === "completed" || experiment.status === "cancelled";
   if (terminal) return <span className="text-xs text-[var(--muted)]">Locked</span>;
   return (
     <RowActionMenu label="Manage">
       <details>
         <summary className="table-action min-h-11 w-full cursor-pointer justify-start">Edit worksheet</summary>
-        <div className="mt-3 border-l-2 border-[var(--line)] pl-3"><UpdateExperimentForm experiment={experiment} projectOptions={projectOptions} /></div>
+        <div className="mt-3 border-l-2 border-[var(--line)] pl-3"><UpdateExperimentForm experiment={experiment} projectOptions={projectOptions} protocolOptions={protocolOptions} /></div>
       </details>
       <details>
         <summary className="table-action min-h-11 w-full cursor-pointer justify-start">Change lifecycle</summary>
@@ -214,13 +224,13 @@ function statusVariant(status: string) {
   return "neutral" as const;
 }
 
-export function ExperimentRegistry({ experiments, labOptions, projectOptions, canManage }: ExperimentRegistryProps) {
+export function ExperimentRegistry({ experiments, labOptions, projectOptions, protocolOptions, canManage }: ExperimentRegistryProps) {
   const actions: CompactActionItem[] = canManage ? [{
     id: "create-experiment",
     label: "New experiment",
     description: "Create a planned experiment with operational and private worksheet fields.",
     icon: <FlaskConical aria-hidden size={17} />,
-    panel: <CreateExperimentForm labOptions={labOptions} projectOptions={projectOptions} />,
+    panel: <CreateExperimentForm labOptions={labOptions} projectOptions={projectOptions} protocolOptions={protocolOptions} />,
     tone: "primary",
   }] : [];
   return (
@@ -240,14 +250,14 @@ export function ExperimentRegistry({ experiments, labOptions, projectOptions, ca
                     <td>{experiment.plannedStartAt ? formatDate(experiment.plannedStartAt) : "Not set"} → {experiment.plannedEndAt ? formatDate(experiment.plannedEndAt) : "Open"}</td>
                     <td>{experiment.operationalContact ?? experiment.ownerContact}</td>
                     <td>{experiment.version}</td>
-                    <td>{canManage ? <ExperimentActions experiment={experiment} projectOptions={projectOptions} /> : <span className="text-xs text-[var(--muted)]">View only</span>}</td>
+                    <td>{canManage ? <ExperimentActions experiment={experiment} projectOptions={projectOptions} protocolOptions={protocolOptions} /> : <span className="text-xs text-[var(--muted)]">View only</span>}</td>
                   </tr>
                 ))}</tbody>
               </table>
             </div>
             <div className="worksheet-mobile-list md:hidden">{experiments.map((experiment) => (
               <MobileWorksheetCard
-                actions={canManage ? <ExperimentActions experiment={experiment} projectOptions={projectOptions} /> : undefined}
+                actions={canManage ? <ExperimentActions experiment={experiment} projectOptions={projectOptions} protocolOptions={protocolOptions} /> : undefined}
                 key={experiment.id}
                 meta={<><span>{experiment.labCode}</span><Badge variant={statusVariant(experiment.status)}>{titleCase(experiment.status)}</Badge></>}
                 title={<span className="inline-flex items-center gap-2"><PencilLine aria-hidden size={15} />{experiment.experimentCode} · {experiment.title}</span>}

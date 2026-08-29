@@ -13,10 +13,11 @@ import { initialFormActionState } from "@/lib/form-state";
 type BreedingSetupFormProps = {
   sireOptions: Array<{ id: string; label: string }>;
   damOptions: Array<{ id: string; label: string }>;
+  protocolOptions: Array<{ id: string; label: string; validUntil: string }>;
   allowOverride: boolean;
 };
 
-export function BreedingSetupForm({ sireOptions, damOptions, allowOverride }: BreedingSetupFormProps) {
+export function BreedingSetupForm({ sireOptions, damOptions, protocolOptions, allowOverride }: BreedingSetupFormProps) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement | null>(null);
   const [state, formAction, pending] = useActionState(createBreedingAction, initialFormActionState);
@@ -34,7 +35,25 @@ export function BreedingSetupForm({ sireOptions, damOptions, allowOverride }: Br
     <form ref={formRef} action={formAction} className="space-y-4" data-testid="breeding-create-form" onSubmit={handleSubmit}>
       <input name="idempotencyKey" type="hidden" value={commandKey} />
       <input name="requestId" type="hidden" value={commandKey} />
+      <div className={protocolOptions.length ? "rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950" : "rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"}>
+        {protocolOptions.length
+          ? "Choose the active authorization that covers both parents and names you as a breeding operator. The server verifies the exact scope again before saving."
+          : "No active breeding authorization names you for this lab. A breeding setup cannot be created until an independent reviewer activates a matching protocol and your competency is current."}
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
+        <label className="space-y-2 text-sm md:col-span-2">
+          <span className="text-[var(--muted)]">Breeding protocol</span>
+          <select
+            className="h-11 w-full rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 text-base text-[var(--ink)] md:text-sm"
+            defaultValue=""
+            name="protocolAuthorizationId"
+            required
+            data-testid="breeding-create-protocol"
+          >
+            <option value="">Choose active protocol</option>
+            {protocolOptions.map((option) => <option key={option.id} value={option.id}>{option.label} · expires {option.validUntil.slice(0, 10)}</option>)}
+          </select>
+        </label>
         <label className="space-y-2 text-sm">
           <span className="text-[var(--muted)]">Sire</span>
           <select
@@ -121,7 +140,7 @@ export function BreedingSetupForm({ sireOptions, damOptions, allowOverride }: Br
       ) : null}
       <FormFeedback state={state} />
       <div className="border-t border-[var(--line)] pt-4">
-        <Button className="w-full sm:w-auto" disabled={pending} type="submit" data-testid="breeding-create-submit">
+        <Button className="w-full sm:w-auto" disabled={pending || protocolOptions.length === 0} type="submit" data-testid="breeding-create-submit">
           {pending ? "Creating setup..." : "Start breeding"}
         </Button>
       </div>

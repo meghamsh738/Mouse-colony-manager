@@ -42,21 +42,72 @@ function mayReadDestinationOperationalDetails(actor: ResolvedActor, destinationL
     || (actor.canonicalRole === "lab_user" && actor.activeLabId === destinationLabId);
 }
 
+function activeTransferProtocolWhere(actor: ResolvedActor, labIds: string[]): Prisma.ProtocolAuthorizationWhereInput {
+  const now = new Date();
+  return {
+    labId: { in: labIds },
+    status: "active",
+    currentVersion: {
+      validFrom: { lte: now },
+      validUntil: { gt: now },
+      procedureBindings: { some: { procedureCode: "transfer" } },
+      personnelBindings: {
+        some: { userId: actor.id, roleLabel: "transfer_coordinator" },
+      },
+    },
+  };
+}
+
+const transferProtocolSelect = {
+  id: true,
+  labId: true,
+  protocolCode: true,
+  title: true,
+  currentVersion: {
+    select: {
+      validUntil: true,
+      strainBindings: { select: { strainId: true } },
+    },
+  },
+} satisfies Prisma.ProtocolAuthorizationSelect;
+
+function protocolOption(protocol: {
+  id: string;
+  labId: string;
+  protocolCode: string;
+  title: string;
+  currentVersion: { validUntil: Date; strainBindings: Array<{ strainId: string }> } | null;
+}) {
+  return {
+    id: protocol.id,
+    labId: protocol.labId,
+    label: `${protocol.protocolCode} — ${protocol.title}`,
+    validUntil: protocol.currentVersion!.validUntil.toISOString(),
+    strainIds: protocol.currentVersion!.strainBindings.map((binding) => binding.strainId),
+  };
+}
+
 export async function getLabTransferRequestOptions(actor: ResolvedActor) {
   const sourceLabId = actor.activeLabId;
   if (!sourceLabId || !canRequestLabTransfer(actor, sourceLabId)) {
-    return { canRequest: false as const, sourceLab: null, destinationLabs: [] };
+    return { canRequest: false as const, sourceLab: null, destinationLabs: [], sourceProtocols: [] };
   }
-  const [sourceLab, destinationLabs] = await Promise.all([
+  const [sourceLab, destinationLabs, sourceProtocols] = await Promise.all([
     prisma.lab.findUnique({ where: { id: sourceLabId }, select: { id: true, name: true, code: true, active: true } }),
     prisma.lab.findMany({
       where: { active: true, id: { not: sourceLabId } },
       orderBy: [{ name: "asc" }, { id: "asc" }],
       select: { id: true, name: true, code: true },
     }),
+    prisma.protocolAuthorization.findMany({
+      where: activeTransferProtocolWhere(actor, [sourceLabId]),
+      orderBy: { protocolCode: "asc" },
+      select: transferProtocolSelect,
+      take: 100,
+    }),
   ]);
-  if (!sourceLab?.active) return { canRequest: false as const, sourceLab: null, destinationLabs: [] };
-  return { canRequest: true as const, sourceLab, destinationLabs };
+  if (!sourceLab?.active) return { canRequest: false as const, sourceLab: null, destinationLabs: [], sourceProtocols: [] };
+  return { canRequest: true as const, sourceLab, destinationLabs, sourceProtocols: sourceProtocols.map(protocolOption) };
 }
 
 export async function getLabTransferWorkspace(actor: ResolvedActor) {
@@ -75,7 +126,7 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
       sourceCage: { select: { id: true, barcode: true } },
       destinationCage: { select: { id: true, barcode: true } },
       packets: { orderBy: { version: "desc" }, take: 1, select: { version: true, payloadHash: true, destinationPayload: true } },
-      items: { select: { animalId: true } },
+      items: { select: { animalId: true, animal: { select: { strainId: true } } } },
       events: {
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: 12,
@@ -116,13 +167,17 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
     return rows.filter((row) => subjects.has(row.animalId)).length;
   };
 
-  const destinationLabIdsNeedingCages = [...new Set(
+  const destinationLabIdsNeedingDecision = [...new Set(
     requests
       .filter((request) => (
-        request.subjectType === "animals"
-        && request.status === "requested"
+        request.status === "requested"
         && canDecideLabTransfer(actor, request.destinationLabId)
       ))
+      .map((request) => request.destinationLabId),
+  )];
+  const destinationLabIdsNeedingCages = [...new Set(
+    requests
+      .filter((request) => request.subjectType === "animals" && destinationLabIdsNeedingDecision.includes(request.destinationLabId))
       .map((request) => request.destinationLabId),
   )];
   const destinationCageRows = destinationLabIdsNeedingCages.length
@@ -149,6 +204,14 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
       },
     })
     : [];
+  const destinationProtocolRows = destinationLabIdsNeedingDecision.length
+    ? await prisma.protocolAuthorization.findMany({
+        where: activeTransferProtocolWhere(actor, destinationLabIdsNeedingDecision),
+        orderBy: [{ labId: "asc" }, { protocolCode: "asc" }],
+        select: transferProtocolSelect,
+        take: 500,
+      })
+    : [];
   const destinationCagesByLabId = new Map<string, typeof destinationCageRows>();
   for (const cage of destinationCageRows) {
     const cages = destinationCagesByLabId.get(cage.labId) ?? [];
@@ -173,6 +236,7 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
       ? destinationCagesByLabId.get(request.destinationLabId) ?? []
       : [];
     const requestAnimalIds = request.items.map((item) => item.animalId);
+    const requestStrainIds = [...new Set(request.items.map((item) => item.animal.strainId))];
     const blockers = {
       experiments: blockerCount(requestAnimalIds, assignmentRows),
       projects: blockerCount(requestAnimalIds, allocationRows),
@@ -212,6 +276,11 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
         occupancy: cage._count.animals,
         capacity: Math.min(cage.room.facility.maxCageOccupancy, cage.capacityOverride ?? cage.room.facility.maxCageOccupancy, 6),
       })),
+      destinationProtocols: destinationProtocolRows
+        .filter((protocol) => protocol.labId === request.destinationLabId)
+        .map(protocolOption)
+        .filter((protocol) => requestStrainIds.every((strainId) => protocol.strainIds.includes(strainId)))
+        .map(({ id, labId, label, validUntil }) => ({ id, labId, label, validUntil })),
       actions: {
         canDecide,
         canRevise: canRequestLabTransfer(actor, request.sourceLabId) && canReviseLabTransfer(request.status),

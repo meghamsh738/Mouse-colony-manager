@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 import { Prisma, type FacilityIdentifierType } from "@prisma/client";
 
+import { seedDutyQaFixture } from "../prisma/seed-duty-qa";
 import { assertRetainedVerificationTarget } from "./retained-verification-guard";
 
 function databaseUrlForSchema(rawUrl: string, schema: string, pooled: boolean) {
@@ -92,6 +93,282 @@ async function main() {
       data: { id: "command-standard", name: "Standard", code: "STANDARD", dailyRateCents: 100 },
     });
 
+    await db.user.create({
+      data: {
+        id: "command-compliance-reviewer",
+        name: "Command Compliance Reviewer",
+        email: "command-compliance-reviewer@example.test",
+        passwordHash: "not-a-login-hash",
+        role: "facility_admin",
+      },
+    });
+    await db.labMembership.create({
+      data: {
+        id: "command-admin-membership",
+        labId: "command-lab",
+        userId: "command-admin",
+        role: "owner",
+      },
+    });
+
+    const complianceIdentityLinkId = "command-compliance-identity-link-1";
+    const complianceProtocolId = "command-compliance-protocol";
+    const complianceProtocolVersionId = `${complianceProtocolId}-v1`;
+    const complianceReviewerId = "command-compliance-reviewer";
+    await db.$transaction(async (tx) => {
+      const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT CURRENT_TIMESTAMP AS now`;
+      const validFrom = new Date(now.getTime() - 24 * 60 * 60 * 1_000);
+      const validUntil = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1_000);
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+      await seedDutyQaFixture(tx, {
+        fixturePrefix: "command-compliance",
+        requesterId: "command-admin",
+        approverId: complianceReviewerId,
+        grants: [{
+          targetUserId: complianceReviewerId,
+          duties: ["protocol_reviewer", "training_administrator"],
+        }],
+        syntheticIdentities: [
+          { userId: "command-admin", subject: "command-admin@example.test" },
+          { userId: complianceReviewerId, subject: "command-compliance-reviewer@example.test" },
+        ],
+      });
+
+      const [creator, reviewer] = await Promise.all([
+        tx.user.findUniqueOrThrow({ where: { id: "command-admin" }, select: { authzVersion: true } }),
+        tx.user.findUniqueOrThrow({ where: { id: complianceReviewerId }, select: { authzVersion: true } }),
+      ]);
+      const createFixtureReceipt = async (input: {
+        id: string;
+        actorId: string;
+        actorAuthzVersion: number;
+        commandType: string;
+        aggregateType: string;
+        aggregateId: string;
+      }) => tx.commandReceipt.create({
+        data: {
+          ...input,
+          labId: "command-lab",
+          idempotencyKey: input.id,
+          requestHash: command.canonicalJsonHash({ fixture: input.id }),
+          requestId: input.id,
+          status: "succeeded",
+          result: { fixture: "command-foundation-compliance" },
+          completedAt: now,
+        },
+      });
+
+      const creationReceiptId = `${complianceProtocolId}-draft-receipt`;
+      const activationReceiptId = `${complianceProtocolId}-activate-receipt`;
+      await createFixtureReceipt({
+        id: creationReceiptId,
+        actorId: "command-admin",
+        actorAuthzVersion: creator.authzVersion,
+        commandType: "protocol_authorization.draft.create",
+        aggregateType: "protocol_authorization",
+        aggregateId: complianceProtocolId,
+      });
+      await createFixtureReceipt({
+        id: activationReceiptId,
+        actorId: complianceReviewerId,
+        actorAuthzVersion: reviewer.authzVersion,
+        commandType: "protocol_authorization.activate",
+        aggregateType: "protocol_authorization",
+        aggregateId: complianceProtocolId,
+      });
+      const protocolContent = {
+        labId: "command-lab",
+        protocolCode: "CMD-SYNTHETIC",
+        title: "Synthetic command-foundation authorization",
+        summary: "Synthetic protocol for retained disposable command verification.",
+        validFrom: validFrom.toISOString(),
+        validUntil: validUntil.toISOString(),
+        approvedAnimalCount: 50,
+        projectIds: [],
+        experimentIds: [],
+        strainIds: ["command-strain"],
+        procedureCodes: ["breeding"],
+        personnel: [{ userId: "command-admin", roleLabel: "breeding_operator" as const }],
+        policyVersion: "synthetic-fail-closed-v1",
+      };
+      await tx.protocolAuthorization.create({
+        data: {
+          id: complianceProtocolId,
+          labId: "command-lab",
+          protocolCode: protocolContent.protocolCode,
+          title: protocolContent.title,
+          status: "draft",
+          createdById: "command-admin",
+        },
+      });
+      await tx.protocolAuthorizationVersion.create({
+        data: {
+          id: complianceProtocolVersionId,
+          authorizationId: complianceProtocolId,
+          versionNumber: 1,
+          contentHash: command.canonicalJsonHash(protocolContent),
+          contentPayload: command.canonicalJson(protocolContent),
+          policyVersion: protocolContent.policyVersion,
+          validFrom,
+          validUntil,
+          approvedAnimalCount: protocolContent.approvedAnimalCount,
+          summary: protocolContent.summary,
+          createdById: "command-admin",
+          creationCommandReceiptId: creationReceiptId,
+          scopeSealedAt: now,
+        },
+      });
+      await Promise.all([
+        tx.protocolStrainBinding.create({
+          data: {
+            id: `${complianceProtocolVersionId}-strain`,
+            authorizationVersionId: complianceProtocolVersionId,
+            labId: "command-lab",
+            strainId: "command-strain",
+          },
+        }),
+        tx.protocolProcedureBinding.create({
+          data: {
+            id: `${complianceProtocolVersionId}-procedure`,
+            authorizationVersionId: complianceProtocolVersionId,
+            labId: "command-lab",
+            procedureCode: "breeding",
+          },
+        }),
+        tx.protocolPersonnelBinding.create({
+          data: {
+            id: `${complianceProtocolVersionId}-person`,
+            authorizationVersionId: complianceProtocolVersionId,
+            labId: "command-lab",
+            userId: "command-admin",
+            roleLabel: "breeding_operator",
+          },
+        }),
+        tx.protocolCountLedger.create({
+          data: {
+            id: `${complianceProtocolVersionId}-ledger`,
+            authorizationVersionId: complianceProtocolVersionId,
+            approvedCount: protocolContent.approvedAnimalCount,
+          },
+        }),
+      ]);
+      await tx.protocolAuthorization.update({
+        where: { id: complianceProtocolId },
+        data: {
+          currentVersionId: complianceProtocolVersionId,
+          status: "active",
+          reviewedById: complianceReviewerId,
+          reviewedByAuthzVersion: reviewer.authzVersion,
+          reviewedAssurance: "synthetic_mfa",
+          reviewedIdentityLinkId: "command-compliance-identity-link-2",
+          reviewedAuthenticatedAt: now,
+          reviewedDutyAssignmentId: "command-compliance-duty-assignment-1",
+          reviewedDutyAssignmentVersion: 1,
+          reviewedAt: now,
+          activatedAt: now,
+          statusReason: "Approved synthetic command verification fixture.",
+          version: 2,
+        },
+      });
+      await tx.protocolAuthorizationLifecycleEvent.create({
+        data: {
+          id: `${complianceProtocolId}-activate-event`,
+          authorizationId: complianceProtocolId,
+          fromStatus: "draft",
+          toStatus: "active",
+          actorId: complianceReviewerId,
+          actorAuthzVersion: reviewer.authzVersion,
+          assurance: "synthetic_mfa",
+          identityLinkId: "command-compliance-identity-link-2",
+          authenticatedAt: now,
+          dutyAssignmentId: "command-compliance-duty-assignment-1",
+          dutyAssignmentVersion: 1,
+          commandReceiptId: activationReceiptId,
+          reason: "Approved synthetic command verification fixture.",
+          occurredAt: now,
+        },
+      });
+
+      const competencyId = "command-breeding-competency";
+      const competencyVersionId = `${competencyId}-v1`;
+      const competencyReceiptId = `${competencyId}-receipt`;
+      const competencyNote = "Current synthetic breeding competency for retained verification.";
+      const competencyContent = {
+        userId: "command-admin",
+        labId: "command-lab",
+        procedureCode: "breeding",
+        evidenceType: "synthetic_training_record",
+        validFrom: validFrom.toISOString(),
+        validUntil: validUntil.toISOString(),
+        protocolVersionId: null,
+        note: competencyNote,
+        versionNumber: 1,
+      };
+      await createFixtureReceipt({
+        id: competencyReceiptId,
+        actorId: complianceReviewerId,
+        actorAuthzVersion: reviewer.authzVersion,
+        commandType: "competency_evidence.create",
+        aggregateType: "competency_evidence",
+        aggregateId: competencyId,
+      });
+      await tx.competencyEvidence.create({
+        data: {
+          id: competencyId,
+          userId: "command-admin",
+          labId: "command-lab",
+          procedureCode: "breeding",
+          status: "current",
+          governedById: complianceReviewerId,
+          governedByAuthzVersion: reviewer.authzVersion,
+          governedAssurance: "synthetic_mfa",
+          governedIdentityLinkId: "command-compliance-identity-link-2",
+          governedAuthenticatedAt: now,
+          governedDutyAssignmentId: "command-compliance-duty-assignment-2",
+          governedDutyAssignmentVersion: 1,
+          governedAt: now,
+        },
+      });
+      await tx.competencyEvidenceVersion.create({
+        data: {
+          id: competencyVersionId,
+          evidenceId: competencyId,
+          versionNumber: 1,
+          evidenceType: competencyContent.evidenceType,
+          contentHash: command.canonicalJsonHash(competencyContent),
+          contentPayload: command.canonicalJson(competencyContent),
+          validFrom,
+          validUntil,
+          issuedById: complianceReviewerId,
+          commandReceiptId: competencyReceiptId,
+          note: competencyNote,
+        },
+      });
+      await tx.competencyEvidence.update({
+        where: { id: competencyId },
+        data: { currentVersionId: competencyVersionId },
+      });
+      await tx.competencyLifecycleEvent.create({
+        data: {
+          id: `${competencyId}-event`,
+          evidenceId: competencyId,
+          actorId: complianceReviewerId,
+          actorAuthzVersion: reviewer.authzVersion,
+          assurance: "synthetic_mfa",
+          identityLinkId: "command-compliance-identity-link-2",
+          authenticatedAt: now,
+          dutyAssignmentId: "command-compliance-duty-assignment-2",
+          dutyAssignmentVersion: 1,
+          commandReceiptId: competencyReceiptId,
+          eventType: "created",
+          evidenceVersion: 1,
+          detail: { fixture: "command-foundation-compliance" },
+          occurredAt: now,
+        },
+      });
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+    });
+
     const capabilities = [...getActorCapabilities({ canonicalRole: "facility_admin", activeMembership: null })];
     const actor = {
       id: "command-admin",
@@ -101,6 +378,10 @@ async function main() {
       databaseRole: "facility_admin" as const,
       canonicalRole: "facility_admin" as const,
       authzVersion: 1,
+      authMethod: "synthetic_mfa" as const,
+      assurance: "synthetic_mfa" as const,
+      authenticatedAt: new Date().toISOString(),
+      identityLinkId: complianceIdentityLinkId,
       activeLabId: null,
       activeMembership: null,
       memberships: [],
@@ -392,6 +673,7 @@ async function main() {
       data: {
         id: "command-breeding",
         labId: "command-lab",
+        protocolAuthorizationId: complianceProtocolId,
         startDate: new Date("2026-06-01T00:00:00.000Z"),
         status: "active",
         targetGenotype: "verification target",
@@ -621,6 +903,7 @@ async function main() {
     const competingCreateCommand = {
       sireId: "command-breeding-sire-animal",
       damId: "command-breeding-dam-animal",
+      protocolAuthorizationId: complianceProtocolId,
       startDate: "2026-07-12",
       targetGenotype: "Concurrent command verification",
       targetSex: "unknown" as const,

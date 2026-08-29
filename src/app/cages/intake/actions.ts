@@ -51,6 +51,7 @@ const newCagePayloadSchema = z.object({
 });
 
 const weaningPayloadSchema = z.object({
+  protocolAuthorizationId: z.string().trim().min(1),
   litterId: z.string().trim().min(1),
   weanDate: dateOnlySchema,
   strainId: z.string().trim().min(1),
@@ -68,6 +69,7 @@ const weaningPayloadSchema = z.object({
 });
 
 const purchasePayloadSchema = z.object({
+  protocolAuthorizationId: z.string().trim().min(1),
   labId: z.string().trim().min(1),
   vendor: z.string().trim().min(2).max(200),
   orderReference: z.string().trim().min(2).max(200),

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   allocationFindMany: vi.fn(),
   breedingFindMany: vi.fn(),
   cageFindMany: vi.fn(),
+  protocolFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -18,6 +19,7 @@ vi.mock("@/lib/prisma", () => ({
     animalProjectAllocation: { findMany: mocks.allocationFindMany },
     breedingAdult: { findMany: mocks.breedingFindMany },
     cage: { findMany: mocks.cageFindMany },
+    protocolAuthorization: { findMany: mocks.protocolFindMany },
   },
 }));
 
@@ -84,7 +86,7 @@ const requestRow = {
   sourceCage: null,
   destinationCage: { id: "destination-cage-private", barcode: "DST-PRIVATE-9000" },
   packets: [{ version: 1, payloadHash: "hash-1", destinationPayload: packet }],
-  items: [{ animalId: "animal-1" }],
+  items: [{ animalId: "animal-1", animal: { strainId: "strain-1" } }],
   events: [],
 };
 
@@ -121,6 +123,7 @@ describe("lab transfer packet privacy", () => {
     mocks.allocationFindMany.mockResolvedValue([]);
     mocks.breedingFindMany.mockResolvedValue([]);
     mocks.cageFindMany.mockResolvedValue([]);
+    mocks.protocolFindMany.mockResolvedValue([]);
   });
 
   it("shows the allowlisted operational packet but hides the source-private note from the destination lab", async () => {

@@ -19,6 +19,7 @@ const createBreedingSetupApiSchema = z.object({
   targetSex: z.enum(["male", "female", "unknown"]).optional(),
   notes: z.string().trim().max(400).optional(),
   allowOverride: z.boolean().optional(),
+  protocolAuthorizationId: z.string().trim().min(1),
 });
 
 export async function POST(request: Request) {
@@ -70,6 +71,7 @@ export async function POST(request: Request) {
     targetSex: parsed.data.targetSex,
     notes: parsed.data.notes,
     allowOverride: parsed.data.allowOverride,
+    protocolAuthorizationId: parsed.data.protocolAuthorizationId,
   };
   const idempotencyKey = request.headers.get("idempotency-key")?.trim()
     || canonicalJsonHash({ actorId: auth.user.id, command });

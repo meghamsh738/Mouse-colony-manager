@@ -1,6 +1,6 @@
 # Product Readiness Remediation
 
-Status: M11 documentation reconciliation and M12 independent-duty/identity contracts verified; M13 next
+Status: M11–M13 verified through protocol authorization and competency gates; M14 next
 Source review: [`2026-08-29-chatgpt-pro-product-review.md`](./reviews/2026-08-29-chatgpt-pro-product-review.md)
 
 ## Approved Boundary
@@ -48,8 +48,8 @@ The maturity labels below mean:
 | --- | --- | --- |
 | M11 | Verified | Preserved the Pro response, reconciled documentation, and locked the synthetic-only boundary. |
 | M12 | Verified | Independent duties and identity contracts. |
-| M13 | Next | Protocol/licence and competency gates. |
-| M14 | Planned | Veterinary and welfare cases. |
+| M13 | Verified | Protocol/licence and competency gates. |
+| M14 | Next | Veterinary and welfare cases. |
 | M15 | Planned | Controlled corrections and immutable history. |
 | M16 | Planned | Shipment, census, quarantine, and transfer reconciliation. |
 | M17 | Planned | Private attachments, security controls, and full synthetic recovery. |

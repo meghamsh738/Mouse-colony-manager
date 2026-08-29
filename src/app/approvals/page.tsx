@@ -124,6 +124,7 @@ export default async function ApprovalsPage() {
             destinationLabs={options.canRequest ? options.destinationLabs : []}
             nonce={randomUUID()}
             requests={workspace.requests}
+            sourceProtocols={options.canRequest ? options.sourceProtocols : []}
           />
         </section>
       </div>

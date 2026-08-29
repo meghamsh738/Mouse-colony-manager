@@ -27,7 +27,7 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
       ? Promise.all([
           getExperimentPlannerView(user, parseExperimentPlannerFilters(resolvedSearchParams)),
           getExperimentPlannerOptions(user),
-          canManage ? getExperimentRegistryOptions(user) : Promise.resolve({ labOptions: [], projectOptions: [] }),
+          canManage ? getExperimentRegistryOptions(user) : Promise.resolve({ labOptions: [], projectOptions: [], protocolOptions: [] }),
         ])
       : Promise.resolve(null),
   ]);
@@ -43,6 +43,7 @@ export default async function ExperimentsPage({ searchParams }: ExperimentsPageP
               canManage={canManage}
               labOptions={fullWorkspace[2].labOptions}
               projectOptions={fullWorkspace[2].projectOptions}
+              protocolOptions={fullWorkspace[2].protocolOptions}
             />
             <ExperimentsWorksheet overview={overview} options={fullWorkspace[1]} planner={fullWorkspace[0]} />
           </>

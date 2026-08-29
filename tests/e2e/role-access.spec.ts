@@ -40,6 +40,10 @@ async function expectDenied(page: Page, path: string) {
   await expect(page.getByRole("heading", { name: "This workspace is not available" })).toBeVisible();
 }
 
+function actionControl(page: Page, name: RegExp) {
+  return page.getByRole("button", { name }).or(page.getByRole("link", { name }));
+}
+
 test("IT Head can inspect system status but cannot open colony records", async ({ page }) => {
   await signIn(page, SEEDED_ROLE_QA_EMAILS.itHead);
   await expectAllowed(page, "/system", "System");
@@ -79,7 +83,7 @@ test("Lab Manager can use approvals but cannot administer lab ownership", async 
 test("Lab Staff can manage animals but cannot use the approval queue", async ({ page }) => {
   await signIn(page, SEEDED_ROLE_QA_EMAILS.labStaff);
   await expectAllowed(page, "/animals", "Animals");
-  await expect(page.getByRole("button", { name: "Add mouse" })).toBeVisible();
+  await expect(actionControl(page, /^Add mouse(?:$|:)/)).toBeVisible();
   await expectAllowed(page, "/procedures", "Procedures");
   await expect(page.getByRole("button", { name: "Plan procedure" })).toBeVisible();
   await expectAllowed(page, "/cryostorage", "Cryostorage");
@@ -90,7 +94,7 @@ test("Lab Staff can manage animals but cannot use the approval queue", async ({ 
 test("Lab Viewer can read animals without mutation or approval access", async ({ page }) => {
   await signIn(page, SEEDED_ROLE_QA_EMAILS.labViewer);
   await expectAllowed(page, "/animals", "Animals");
-  await expect(page.getByRole("button", { name: "Add mouse" })).toHaveCount(0);
+  await expect(actionControl(page, /^Add mouse(?:$|:)/)).toHaveCount(0);
   await expectAllowed(page, "/forecast", "Forecast");
   await expectAllowed(page, "/procedures", "Procedures");
   await expect(page.getByRole("button", { name: "Plan procedure" })).toHaveCount(0);

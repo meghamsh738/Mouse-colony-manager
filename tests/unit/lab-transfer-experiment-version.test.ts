@@ -10,7 +10,9 @@ describe("lab transfer experiment override versioning", () => {
     expect(source).toContain("tx.experiment.updateMany({");
     expect(source).toContain("where: { id: experimentId, version: experiment.version }");
     expect(source).toContain("tx.experimentAssignment.updateMany({");
-    expect(source).toContain("where: { id: assignment.id, version: assignment.version, status: assignment.status }");
+    expect(source).toMatch(
+      /where:\s*\{\s*id: assignment\.id,\s*version: assignment\.version,\s*status: assignment\.status,?\s*\}/,
+    );
     expect(source.match(/version: \{ increment: 1 \}/g)?.length).toBeGreaterThanOrEqual(2);
     expect(source).toContain('entityType: "experiment"');
     expect(source).toContain("cancelledAssignmentIds: experiment.assignmentIds");

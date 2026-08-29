@@ -16,7 +16,7 @@ describe("destructive seed guard", () => {
       allowed: true,
       nodeEnv: "test",
       rawUrl: "postgresql://postgres:postgres@localhost:5432/colony?schema=public",
-    })).toContain("schema must contain a test, e2e, or disposable marker");
+    })).toContain("database name or schema must contain a test, e2e, or disposable marker");
   });
 
   it("rejects production, remote, or unapproved targets", () => {
@@ -32,12 +32,12 @@ describe("destructive seed guard", () => {
     ]));
   });
 
-  it("requires a disposable schema even when the database name is marked", () => {
+  it("allows a disposable database name when no schema is supplied", () => {
     expect(destructiveSeedTargetErrors({
       allowed: true,
       nodeEnv: "test",
       rawUrl: "postgresql://postgres:postgres@[::1]:5432/colony_test",
-    })).toContain("schema must contain a test, e2e, or disposable marker");
+    })).toEqual([]);
   });
 });
 

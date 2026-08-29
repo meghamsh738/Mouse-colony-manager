@@ -1,12 +1,36 @@
 import { Prisma } from "@prisma/client";
 
-import { removeStoredAttachment, storeUploadedAttachment, type PreparedAttachmentUpload } from "@/lib/attachment-storage";
-import { validateProjectedSexComposition, validateQuarantineAssignments } from "@/lib/cage-assignment-rules";
-import { getCageCapacityState, validateFacilityCageCapacity } from "@/lib/cage-capacity";
-import { actorHasCapability, normalizeUserRole, type Capability } from "@/lib/capabilities";
-import { allocateFacilityIdentifiers, canonicalJsonHash, executeIdempotentCommand } from "@/lib/command-foundation";
-import { isTerminalBreedingStatus, validateBreedingTransition } from "@/lib/breeding-state-machine";
-import { validateBiosampleStorage, validateBiosampleTransition } from "@/lib/biosample-state-machine";
+import {
+  removeStoredAttachment,
+  storeUploadedAttachment,
+  type PreparedAttachmentUpload,
+} from "@/lib/attachment-storage";
+import {
+  validateProjectedSexComposition,
+  validateQuarantineAssignments,
+} from "@/lib/cage-assignment-rules";
+import {
+  getCageCapacityState,
+  validateFacilityCageCapacity,
+} from "@/lib/cage-capacity";
+import {
+  actorHasCapability,
+  normalizeUserRole,
+  type Capability,
+} from "@/lib/capabilities";
+import {
+  allocateFacilityIdentifiers,
+  canonicalJsonHash,
+  executeIdempotentCommand,
+} from "@/lib/command-foundation";
+import {
+  isTerminalBreedingStatus,
+  validateBreedingTransition,
+} from "@/lib/breeding-state-machine";
+import {
+  validateBiosampleStorage,
+  validateBiosampleTransition,
+} from "@/lib/biosample-state-machine";
 import { biosampleReplayMatches } from "@/lib/biosample-idempotency";
 import {
   canManageLab,
@@ -15,6 +39,12 @@ import {
   type LabActor,
 } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
+import {
+  evaluateAndWriteComplianceEvidence,
+  releaseProtocolReservation,
+  withComplianceWriteScope,
+  withM13MutationSavepoint,
+} from "@/lib/protocol-compliance";
 import { isReservedQuarantineHealthAction } from "@/lib/quarantine-state-machine";
 import { materializeNotificationAlertInTransaction } from "@/lib/notification-materialization";
 import { parseExactLifecycleTimestamp } from "@/lib/lifecycle-provenance";
@@ -44,8 +74,14 @@ type MutationResult =
       message: string;
     };
 
-const OPEN_QUARANTINE_CASE_STATUSES = ["admitted", "under_observation", "exception_open", "release_requested"] as const;
-const QUARANTINE_CONTAINMENT_MESSAGE = "Use the quarantine release workflow before moving animals or changing the cage's operational state.";
+const OPEN_QUARANTINE_CASE_STATUSES = [
+  "admitted",
+  "under_observation",
+  "exception_open",
+  "release_requested",
+] as const;
+const QUARANTINE_CONTAINMENT_MESSAGE =
+  "Use the quarantine release workflow before moving animals or changing the cage's operational state.";
 
 type CreateAnimalInput = {
   animalId: string;
@@ -94,7 +130,8 @@ export type UpdateAnimalPresenceInput = {
 
 type UpdateCageDetailsInput = {
   cageId: string;
-  status?: "active" | "breeding" | "quarantine" | "experiment" | "retired" | "closed";
+  status?:
+    "active" | "breeding" | "quarantine" | "experiment" | "retired" | "closed";
   notes?: string | null;
   welfareFlags?: string[];
   chargeCategoryId?: string | null;
@@ -149,6 +186,7 @@ type PlanExperimentCohortInput = {
 };
 
 type CreateBreedingSetupInput = {
+  id?: string;
   sireId: string;
   damId: string;
   startDate: string;
@@ -156,6 +194,8 @@ type CreateBreedingSetupInput = {
   targetSex?: Sex;
   notes?: string;
   allowOverride?: boolean;
+  protocolAuthorizationId?: string;
+  complianceEvidenceSnapshotId?: string;
 };
 
 export type TransitionBreedingSetupInput = {
@@ -166,13 +206,14 @@ export type TransitionBreedingSetupInput = {
 };
 
 export type CreateLitterInput = {
+  litterId?: string;
   breedingSetupId: string;
   birthDate: string;
   litterSizeBirth: number;
   notes?: string;
 };
 
-type WeanLitterInput = {
+export type WeanLitterInput = {
   litterId: string;
   weanDate: string;
   femaleCount: number;
@@ -221,7 +262,6 @@ type UpdateSampleRecordInput = {
   notes?: string | null;
 };
 
-
 type CreateCryostorageRecordInput = {
   labId?: string;
   strainId: string;
@@ -253,7 +293,10 @@ type ImportGenotypeCsvInput = {
 
 export type UpdateAnimalLifecycleInput = {
   animalId: string;
-  targetStatus: Extract<AnimalStatus, "euthanized" | "dead" | "transferred_out" | "archived">;
+  targetStatus: Extract<
+    AnimalStatus,
+    "euthanized" | "dead" | "transferred_out" | "archived"
+  >;
   happenedAt: string;
   reason: string;
   destination?: string;
@@ -292,23 +335,33 @@ function createId(prefix: string) {
 }
 
 function canCreateAnimal(role: UserRole) {
-  return role === "admin" || role === "colony_manager" || role === "animal_staff";
+  return (
+    role === "admin" || role === "colony_manager" || role === "animal_staff"
+  );
 }
 
 function canCreateHealthNote(role: UserRole) {
-  return role === "admin" || role === "colony_manager" || role === "animal_staff";
+  return (
+    role === "admin" || role === "colony_manager" || role === "animal_staff"
+  );
 }
 
 function canMoveCage(role: UserRole) {
-  return role === "admin" || role === "colony_manager" || role === "animal_staff";
+  return (
+    role === "admin" || role === "colony_manager" || role === "animal_staff"
+  );
 }
 
 function canMoveAnimal(role: UserRole) {
-  return role === "admin" || role === "colony_manager" || role === "animal_staff";
+  return (
+    role === "admin" || role === "colony_manager" || role === "animal_staff"
+  );
 }
 
 function canReserveAnimal(role: UserRole) {
-  return role === "admin" || role === "colony_manager" || role === "animal_staff";
+  return (
+    role === "admin" || role === "colony_manager" || role === "animal_staff"
+  );
 }
 
 function canCreateBreeding(role: UserRole) {
@@ -320,7 +373,9 @@ function canRecordLitter(role: UserRole) {
 }
 
 function canWeanLitter(role: UserRole) {
-  return role === "admin" || role === "colony_manager" || role === "animal_staff";
+  return (
+    role === "admin" || role === "colony_manager" || role === "animal_staff"
+  );
 }
 
 function canRecordGenotype(role: UserRole) {
@@ -336,7 +391,9 @@ function canRecordCryostorage(role: UserRole) {
 }
 
 function canUpdateAnimalLifecycle(role: UserRole) {
-  return role === "admin" || role === "colony_manager" || role === "animal_staff";
+  return (
+    role === "admin" || role === "colony_manager" || role === "animal_staff"
+  );
 }
 
 function canUpdateRuleConfig(role: UserRole) {
@@ -351,7 +408,9 @@ function getReferenceDate() {
   return process.env.COLONY_REFERENCE_DATE ?? new Date().toISOString();
 }
 
-async function runSerializableTransaction<T>(operation: (tx: Prisma.TransactionClient) => Promise<T>) {
+async function runSerializableTransaction<T>(
+  operation: (tx: Prisma.TransactionClient) => Promise<T>,
+) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       return await prisma.$transaction(operation, {
@@ -360,7 +419,9 @@ async function runSerializableTransaction<T>(operation: (tx: Prisma.TransactionC
         timeout: 20_000,
       });
     } catch (error) {
-      const isWriteConflict = error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
+      const isWriteConflict =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2034";
 
       if (!isWriteConflict || attempt === 2) {
         throw error;
@@ -371,7 +432,10 @@ async function runSerializableTransaction<T>(operation: (tx: Prisma.TransactionC
   throw new Error("Serializable transaction retry limit reached.");
 }
 
-async function getCageCapacitySnapshot(tx: Prisma.TransactionClient, cageId: string) {
+async function getCageCapacitySnapshot(
+  tx: Prisma.TransactionClient,
+  cageId: string,
+) {
   const cage = await tx.cage.findUnique({
     where: { id: cageId },
     select: {
@@ -429,12 +493,22 @@ async function validateProjectedCageOccupancy(
     return { ok: false as const, message: "Destination cage not found." };
   }
 
-  if (!snapshot.active || snapshot.status === "closed" || snapshot.status === "retired") {
-    return { ok: false as const, message: `${snapshot.barcode} is not an active operational cage.` };
+  if (
+    !snapshot.active ||
+    snapshot.status === "closed" ||
+    snapshot.status === "retired"
+  ) {
+    return {
+      ok: false as const,
+      message: `${snapshot.barcode} is not an active operational cage.`,
+    };
   }
 
   if (!canManageLab(access, snapshot.labId)) {
-    return { ok: false as const, message: `You cannot assign animals to ${snapshot.barcode}.` };
+    return {
+      ok: false as const,
+      message: `You cannot assign animals to ${snapshot.barcode}.`,
+    };
   }
 
   const projectedCount = snapshot.occupantCount + incomingCount;
@@ -539,7 +613,10 @@ function buildNextAnimalIdentifiers(
   const yearPrefix = String(year).slice(-2);
   let nextSequence =
     existingAnimals.reduce((max, animal) => {
-      const animalSequence = parseYearlyAnimalSequence(animal.animalId, yearPrefix);
+      const animalSequence = parseYearlyAnimalSequence(
+        animal.animalId,
+        yearPrefix,
+      );
       const labSequence = parseYearlyLabSequence(animal.labId, year);
 
       return Math.max(max, animalSequence ?? 0, labSequence ?? 0);
@@ -555,7 +632,11 @@ function buildNextAnimalIdentifiers(
   });
 }
 
-function buildFinalGenotypeCall(alleleName: string, zygosity: string, status: GenotypeCallStatus) {
+function buildFinalGenotypeCall(
+  alleleName: string,
+  zygosity: string,
+  status: GenotypeCallStatus,
+) {
   if (status === "pending") {
     return "Pending";
   }
@@ -568,10 +649,15 @@ function buildFinalGenotypeCall(alleleName: string, zygosity: string, status: Ge
 }
 
 function shouldClearPendingGenotypeStatus(experimentalStatus?: string | null) {
-  return typeof experimentalStatus === "string" && /awaiting genotype|pending genotype/i.test(experimentalStatus);
+  return (
+    typeof experimentalStatus === "string" &&
+    /awaiting genotype|pending genotype/i.test(experimentalStatus)
+  );
 }
 
-function getLifecycleOutcomeStatus(targetStatus: UpdateAnimalLifecycleInput["targetStatus"]) {
+function getLifecycleOutcomeStatus(
+  targetStatus: UpdateAnimalLifecycleInput["targetStatus"],
+) {
   switch (targetStatus) {
     case "euthanized":
       return "euthanized" as const;
@@ -584,7 +670,9 @@ function getLifecycleOutcomeStatus(targetStatus: UpdateAnimalLifecycleInput["tar
   }
 }
 
-function getLifecycleExperimentalStatus(targetStatus: UpdateAnimalLifecycleInput["targetStatus"]) {
+function getLifecycleExperimentalStatus(
+  targetStatus: UpdateAnimalLifecycleInput["targetStatus"],
+) {
   switch (targetStatus) {
     case "euthanized":
       return "Euthanized";
@@ -597,7 +685,11 @@ function getLifecycleExperimentalStatus(targetStatus: UpdateAnimalLifecycleInput
   }
 }
 
-function buildLocationLabel(location: { roomNumber: string; rackNumber: string; cageNumber: string }) {
+function buildLocationLabel(location: {
+  roomNumber: string;
+  rackNumber: string;
+  cageNumber: string;
+}) {
   return `${location.roomNumber} / ${location.rackNumber} / ${location.cageNumber}`;
 }
 
@@ -653,12 +745,14 @@ export async function startReplacementChargePeriod(
   },
 ) {
   if (
-    input.timestamp.getUTCHours() !== 0
-    || input.timestamp.getUTCMinutes() !== 0
-    || input.timestamp.getUTCSeconds() !== 0
-    || input.timestamp.getUTCMilliseconds() !== 0
+    input.timestamp.getUTCHours() !== 0 ||
+    input.timestamp.getUTCMinutes() !== 0 ||
+    input.timestamp.getUTCSeconds() !== 0 ||
+    input.timestamp.getUTCMilliseconds() !== 0
   ) {
-    throw new Error("Cage rate changes must start on a UTC calendar-day boundary.");
+    throw new Error(
+      "Cage rate changes must start on a UTC calendar-day boundary.",
+    );
   }
   const cage = await tx.cage.findUnique({
     where: { id: input.cageId },
@@ -681,7 +775,9 @@ export async function startReplacementChargePeriod(
     throw new Error("Choose an active cage charge category.");
   }
 
-  const [activePeriod] = await tx.$queryRaw<Array<{ id: string; startedAt: Date }>>(Prisma.sql`
+  const [activePeriod] = await tx.$queryRaw<
+    Array<{ id: string; startedAt: Date }>
+  >(Prisma.sql`
     SELECT id, "startedAt"
     FROM "CageChargePeriod"
     WHERE "cageId" = ${input.cageId} AND "endedAt" IS NULL
@@ -690,7 +786,9 @@ export async function startReplacementChargePeriod(
     FOR UPDATE
   `);
   if (activePeriod && activePeriod.startedAt >= input.timestamp) {
-    throw new Error("This cage already has a rate effective on that UTC day. Choose a later day.");
+    throw new Error(
+      "This cage already has a rate effective on that UTC day. Choose a later day.",
+    );
   }
 
   const protectedLine = await tx.invoiceLineItem.findFirst({
@@ -714,7 +812,9 @@ export async function startReplacementChargePeriod(
       data: { endedAt: input.timestamp },
     });
     if (closed.count !== 1) {
-      throw new Error("The active cage charge changed. Refresh before saving a new rate.");
+      throw new Error(
+        "The active cage charge changed. Refresh before saving a new rate.",
+      );
     }
   }
 
@@ -749,7 +849,10 @@ export async function createProjectRecord(
       where: { id: input.ownerId },
       select: {
         id: true,
-        labMemberships: { where: { active: true, lab: { active: true } }, select: { labId: true } },
+        labMemberships: {
+          where: { active: true, lab: { active: true } },
+          select: { labId: true },
+        },
       },
     }),
   ]);
@@ -763,10 +866,22 @@ export async function createProjectRecord(
   }
 
   const access = await getActorLabAccess(actor);
-  const ownerLabIds = [...new Set(owner.labMemberships.map((membership) => membership.labId))];
-  const projectLabId = input.labId ?? actor.activeLabId ?? (ownerLabIds.length === 1 ? ownerLabIds[0] : null);
-  if (!projectLabId || !canManageLab(access, projectLabId) || !ownerLabIds.includes(projectLabId)) {
-    return { ok: false, message: "Choose a manageable owning lab shared by the project owner." };
+  const ownerLabIds = [
+    ...new Set(owner.labMemberships.map((membership) => membership.labId)),
+  ];
+  const projectLabId =
+    input.labId ??
+    actor.activeLabId ??
+    (ownerLabIds.length === 1 ? ownerLabIds[0] : null);
+  if (
+    !projectLabId ||
+    !canManageLab(access, projectLabId) ||
+    !ownerLabIds.includes(projectLabId)
+  ) {
+    return {
+      ok: false,
+      message: "Choose a manageable owning lab shared by the project owner.",
+    };
   }
 
   const timestamp = new Date();
@@ -855,15 +970,26 @@ export async function updateProjectRecord(
     return { ok: false, message: "Choose a valid project owner." };
   }
 
-  if (owner && !owner.labMemberships.some((membership) => membership.labId === existingProject.labId)) {
-    return { ok: false, message: "Choose a project owner who belongs to the project's lab." };
+  if (
+    owner &&
+    !owner.labMemberships.some(
+      (membership) => membership.labId === existingProject.labId,
+    )
+  ) {
+    return {
+      ok: false,
+      message: "Choose a project owner who belongs to the project's lab.",
+    };
   }
 
   const timestamp = new Date();
   const nextValue = {
     title: input.title?.trim() ?? existingProject.title,
     ownerId: input.ownerId ?? existingProject.ownerId,
-    notes: input.notes === undefined ? existingProject.notes : input.notes?.trim() || null,
+    notes:
+      input.notes === undefined
+        ? existingProject.notes
+        : input.notes?.trim() || null,
   };
 
   await prisma.$transaction(async (tx) => {
@@ -906,38 +1032,51 @@ export async function createAnimalRecord(
   actor: LabActor,
 ): Promise<MutationResult> {
   if (!canCreateAnimal(actor.role)) {
-    return { ok: false, message: "Your role cannot create new animal records." };
+    return {
+      ok: false,
+      message: "Your role cannot create new animal records.",
+    };
   }
 
-  const [existingAnimalId, existingLabId, cage, strain] = await prisma.$transaction([
-    prisma.animal.findUnique({
-      where: { animalId: input.animalId },
-      select: {
-        id: true,
-        animalId: true,
-        labId: true,
-        currentCageId: true,
-        strainId: true,
-        projectSummary: true,
-      },
-    }),
-    prisma.animal.findUnique({
-      where: { labId: input.labId },
-      select: {
-        id: true,
-        animalId: true,
-        labId: true,
-        currentCageId: true,
-        strainId: true,
-        projectSummary: true,
-      },
-    }),
-    prisma.cage.findUnique({
-      where: { id: input.cageId },
-      select: { id: true, labId: true, active: true, status: true, barcode: true },
-    }),
-    prisma.strain.findUnique({ where: { id: input.strainId }, select: { id: true } }),
-  ]);
+  const [existingAnimalId, existingLabId, cage, strain] =
+    await prisma.$transaction([
+      prisma.animal.findUnique({
+        where: { animalId: input.animalId },
+        select: {
+          id: true,
+          animalId: true,
+          labId: true,
+          currentCageId: true,
+          strainId: true,
+          projectSummary: true,
+        },
+      }),
+      prisma.animal.findUnique({
+        where: { labId: input.labId },
+        select: {
+          id: true,
+          animalId: true,
+          labId: true,
+          currentCageId: true,
+          strainId: true,
+          projectSummary: true,
+        },
+      }),
+      prisma.cage.findUnique({
+        where: { id: input.cageId },
+        select: {
+          id: true,
+          labId: true,
+          active: true,
+          status: true,
+          barcode: true,
+        },
+      }),
+      prisma.strain.findUnique({
+        where: { id: input.strainId },
+        select: { id: true },
+      }),
+    ]);
   const project = input.projectId
     ? await prisma.project.findUnique({
         where: { id: input.projectId },
@@ -971,14 +1110,22 @@ export async function createAnimalRecord(
     return { ok: false, message: "Lab ID already exists." };
   }
 
-  if (!cage || !cage.active || cage.status === "closed" || cage.status === "retired") {
+  if (
+    !cage ||
+    !cage.active ||
+    cage.status === "closed" ||
+    cage.status === "retired"
+  ) {
     return { ok: false, message: "Choose an active operational cage." };
   }
 
   const actorAccess = await getActorLabAccess(actor);
 
   if (!canManageLab(actorAccess, cage.labId)) {
-    return { ok: false, message: "You can only add animals to cages from labs you manage." };
+    return {
+      ok: false,
+      message: "You can only add animals to cages from labs you manage.",
+    };
   }
 
   if (!strain) {
@@ -990,20 +1137,32 @@ export async function createAnimalRecord(
   }
 
   if (project && project.labId !== cage.labId) {
-    return { ok: false, message: "Choose a project owned by the destination cage's lab." };
+    return {
+      ok: false,
+      message: "Choose a project owned by the destination cage's lab.",
+    };
   }
 
   const timestamp = new Date();
   const animalId = createId("animal");
 
   const creationResult = await runSerializableTransaction(async (tx) => {
-    const capacityCheck = await validateProjectedCageOccupancy(tx, input.cageId, 1, actorAccess);
+    const capacityCheck = await validateProjectedCageOccupancy(
+      tx,
+      input.cageId,
+      1,
+      actorAccess,
+    );
 
     if (!capacityCheck.ok) {
       return capacityCheck;
     }
     const destinationLabId = capacityCheck.snapshot.labId;
-    const [facilityAnimalId] = await allocateFacilityIdentifiers(tx, "animal", 1);
+    const [facilityAnimalId] = await allocateFacilityIdentifiers(
+      tx,
+      "animal",
+      1,
+    );
 
     await tx.animal.create({
       data: {
@@ -1095,7 +1254,11 @@ export async function addCageHealthNote(
   }
   const normalizedActionTaken = input.actionTaken?.trim() || null;
   if (isReservedQuarantineHealthAction(normalizedActionTaken)) {
-    return { ok: false, message: "That action label is reserved for the quarantine observation workflow." };
+    return {
+      ok: false,
+      message:
+        "That action label is reserved for the quarantine observation workflow.",
+    };
   }
 
   const cage = await prisma.cage.findUnique({
@@ -1121,19 +1284,29 @@ export async function addCageHealthNote(
   }
 
   if (!(await ensureCanManageCageLab(actor, cage.labId))) {
-    return { ok: false, message: "You can only add notes to cages from labs you manage." };
+    return {
+      ok: false,
+      message: "You can only add notes to cages from labs you manage.",
+    };
   }
 
   const timestamp = new Date();
-  if (existingNote && timestamp.getTime() - existingNote.createdAt.getTime() < 2 * 60 * 1000) {
+  if (
+    existingNote &&
+    timestamp.getTime() - existingNote.createdAt.getTime() < 2 * 60 * 1000
+  ) {
     const preparedAttachment = input.attachment
-      ? await prepareAttachmentUpload(input.attachment, "health-notes").catch((error) => {
-          if (error instanceof Error) {
-            return error;
-          }
+      ? await prepareAttachmentUpload(input.attachment, "health-notes").catch(
+          (error) => {
+            if (error instanceof Error) {
+              return error;
+            }
 
-          return new Error("Unable to store the uploaded health-note attachment.");
-        })
+            return new Error(
+              "Unable to store the uploaded health-note attachment.",
+            );
+          },
+        )
       : null;
 
     if (preparedAttachment instanceof Error) {
@@ -1142,21 +1315,24 @@ export async function addCageHealthNote(
 
     if (preparedAttachment) {
       try {
-        await prisma.$transaction(async (tx) => {
-          await createAttachmentRecord(tx, {
-            actorId: actor.id,
-            labId: cage.labId!,
-            timestamp,
-            preparedAttachment,
-            cageId: input.cageId,
-            healthNoteId: existingNote.id,
-          });
+        await prisma.$transaction(
+          async (tx) => {
+            await createAttachmentRecord(tx, {
+              actorId: actor.id,
+              labId: cage.labId!,
+              timestamp,
+              preparedAttachment,
+              cageId: input.cageId,
+              healthNoteId: existingNote.id,
+            });
 
-          await tx.cage.update({
-            where: { id: input.cageId },
-            data: { lastUpdatedAt: timestamp },
-          });
-        }, { timeout: 15_000, maxWait: 10_000 });
+            await tx.cage.update({
+              where: { id: input.cageId },
+              data: { lastUpdatedAt: timestamp },
+            });
+          },
+          { timeout: 15_000, maxWait: 10_000 },
+        );
       } catch (error) {
         await removeStoredAttachment(preparedAttachment.storageUrl);
         throw error;
@@ -1172,13 +1348,17 @@ export async function addCageHealthNote(
 
   const noteId = createId("health");
   const preparedAttachment = input.attachment
-    ? await prepareAttachmentUpload(input.attachment, "health-notes").catch((error) => {
-        if (error instanceof Error) {
-          return error;
-        }
+    ? await prepareAttachmentUpload(input.attachment, "health-notes").catch(
+        (error) => {
+          if (error instanceof Error) {
+            return error;
+          }
 
-        return new Error("Unable to store the uploaded health-note attachment.");
-      })
+          return new Error(
+            "Unable to store the uploaded health-note attachment.",
+          );
+        },
+      )
     : null;
 
   if (preparedAttachment instanceof Error) {
@@ -1186,72 +1366,83 @@ export async function addCageHealthNote(
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.healthNote.create({
-        data: {
-          id: noteId,
-          labId: cage.labId!,
-          cageId: input.cageId,
-          noteType: input.noteType,
-          severity: input.severity,
-          note: input.note.trim(),
-          followupRequired: input.followupRequired,
-          actionTaken: normalizedActionTaken ?? undefined,
-          resolved: false,
-          createdById: actor.id,
-          createdAt: timestamp,
-        },
-      });
-
-      if (input.followupRequired || input.severity === "warning" || input.severity === "critical") {
-        await materializeNotificationAlertInTransaction(tx, {
-          id: `rule-cage-note-${noteId}`,
-          labId: cage.labId!,
-          entityType: "cage",
-          entityId: input.cageId,
-          alertType: "welfare_note",
-          severity: input.severity,
-          message: input.note.trim(),
-          status: "open",
-          generatedAt: timestamp.toISOString(),
-          source: "rule",
-        }, actor.id);
-      }
-
-      if (preparedAttachment) {
-        await createAttachmentRecord(tx, {
-          actorId: actor.id,
-          labId: cage.labId!,
-          timestamp,
-          preparedAttachment,
-          cageId: input.cageId,
-          healthNoteId: noteId,
-        });
-      }
-
-      await tx.cage.update({
-        where: { id: input.cageId },
-        data: { lastUpdatedAt: timestamp },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          id: createId("audit"),
-          actorId: actor.id,
-          entityType: "health_note",
-          entityId: noteId,
-          action: "create",
-          newValue: {
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.healthNote.create({
+          data: {
+            id: noteId,
+            labId: cage.labId!,
             cageId: input.cageId,
             noteType: input.noteType,
             severity: input.severity,
+            note: input.note.trim(),
             followupRequired: input.followupRequired,
-            attachmentLabel: preparedAttachment?.label ?? null,
+            actionTaken: normalizedActionTaken ?? undefined,
+            resolved: false,
+            createdById: actor.id,
+            createdAt: timestamp,
           },
-          timestamp,
-        },
-      });
-    }, { timeout: 15_000, maxWait: 10_000 });
+        });
+
+        if (
+          input.followupRequired ||
+          input.severity === "warning" ||
+          input.severity === "critical"
+        ) {
+          await materializeNotificationAlertInTransaction(
+            tx,
+            {
+              id: `rule-cage-note-${noteId}`,
+              labId: cage.labId!,
+              entityType: "cage",
+              entityId: input.cageId,
+              alertType: "welfare_note",
+              severity: input.severity,
+              message: input.note.trim(),
+              status: "open",
+              generatedAt: timestamp.toISOString(),
+              source: "rule",
+            },
+            actor.id,
+          );
+        }
+
+        if (preparedAttachment) {
+          await createAttachmentRecord(tx, {
+            actorId: actor.id,
+            labId: cage.labId!,
+            timestamp,
+            preparedAttachment,
+            cageId: input.cageId,
+            healthNoteId: noteId,
+          });
+        }
+
+        await tx.cage.update({
+          where: { id: input.cageId },
+          data: { lastUpdatedAt: timestamp },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            id: createId("audit"),
+            actorId: actor.id,
+            entityType: "health_note",
+            entityId: noteId,
+            action: "create",
+            newValue: {
+              cageId: input.cageId,
+              noteType: input.noteType,
+              severity: input.severity,
+              followupRequired: input.followupRequired,
+              attachmentLabel: preparedAttachment?.label ?? null,
+            },
+            timestamp,
+          },
+        });
+      },
+      { timeout: 15_000, maxWait: 10_000 },
+    );
   } catch (error) {
     if (preparedAttachment) {
       await removeStoredAttachment(preparedAttachment.storageUrl);
@@ -1345,7 +1536,10 @@ export async function moveCageLocation(
   }
 
   if (!cage.active) {
-    return { ok: false, message: `${cage.barcode} is inactive and cannot be moved.` };
+    return {
+      ok: false,
+      message: `${cage.barcode} is inactive and cannot be moved.`,
+    };
   }
 
   if (!room || !rack) {
@@ -1353,7 +1547,10 @@ export async function moveCageLocation(
   }
 
   if (rack.roomId !== room.id) {
-    return { ok: false, message: "The selected rack does not belong to the selected room." };
+    return {
+      ok: false,
+      message: "The selected rack does not belong to the selected room.",
+    };
   }
 
   const fromLocation = buildLocationLabel({
@@ -1368,7 +1565,11 @@ export async function moveCageLocation(
   });
 
   if (fromLocation === toLocation) {
-    return { ok: false, message: "Choose a different room, rack, or cage number before saving the move." };
+    return {
+      ok: false,
+      message:
+        "Choose a different room, rack, or cage number before saving the move.",
+    };
   }
 
   const conflictingCage = await prisma.cage.findUnique({
@@ -1400,54 +1601,57 @@ export async function moveCageLocation(
 
   const movementId = createId("cage-move");
 
-  await prisma.$transaction(async (tx) => {
-    await tx.cageMovement.create({
-      data: {
-        id: movementId,
-        cageId: cage.id,
-        fromLocation,
-        toLocation,
-        movedById: actor.id,
-        movedAt: normalizedMovedAt,
-        reason: normalizedReason,
-      },
-    });
-
-    await tx.cage.update({
-      where: { id: cage.id },
-      data: {
-        roomId: room.id,
-        rackId: rack.id,
-        cageNumber: normalizedCageNumber,
-        lastUpdatedAt: normalizedMovedAt,
-      },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        id: createId("audit"),
-        actorId: actor.id,
-        entityType: "cage",
-        entityId: cage.id,
-        action: "move",
-        previousValue: {
-          roomId: cage.roomId,
-          rackId: cage.rackId,
-          cageNumber: cage.cageNumber,
-          location: fromLocation,
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.cageMovement.create({
+        data: {
+          id: movementId,
+          cageId: cage.id,
+          fromLocation,
+          toLocation,
+          movedById: actor.id,
+          movedAt: normalizedMovedAt,
+          reason: normalizedReason,
         },
-        newValue: {
+      });
+
+      await tx.cage.update({
+        where: { id: cage.id },
+        data: {
           roomId: room.id,
           rackId: rack.id,
           cageNumber: normalizedCageNumber,
-          location: toLocation,
-          movedAt: input.movedAt,
-          reason: normalizedReason,
+          lastUpdatedAt: normalizedMovedAt,
         },
-        timestamp: normalizedMovedAt,
-      },
-    });
-  }, { timeout: 15_000, maxWait: 10_000 });
+      });
+
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "cage",
+          entityId: cage.id,
+          action: "move",
+          previousValue: {
+            roomId: cage.roomId,
+            rackId: cage.rackId,
+            cageNumber: cage.cageNumber,
+            location: fromLocation,
+          },
+          newValue: {
+            roomId: room.id,
+            rackId: rack.id,
+            cageNumber: normalizedCageNumber,
+            location: toLocation,
+            movedAt: input.movedAt,
+            reason: normalizedReason,
+          },
+          timestamp: normalizedMovedAt,
+        },
+      });
+    },
+    { timeout: 15_000, maxWait: 10_000 },
+  );
 
   return {
     ok: true,
@@ -1496,30 +1700,47 @@ export async function updateCageDetails(
   }
 
   if (!(await ensureCanManageCageLab(actor, cage.labId))) {
-    return { ok: false, message: "You can only edit cages from labs you manage." };
+    return {
+      ok: false,
+      message: "You can only edit cages from labs you manage.",
+    };
   }
 
   if (!cage.active || cage.status === "closed") {
-    return { ok: false, message: `${cage.barcode} is closed and cannot be edited.` };
+    return {
+      ok: false,
+      message: `${cage.barcode} is closed and cannot be edited.`,
+    };
   }
 
   if (input.status === "closed") {
-    return { ok: false, message: "Use Exit cage to close a cage and end charging." };
+    return {
+      ok: false,
+      message: "Use Exit cage to close a cage and end charging.",
+    };
   }
-  if (input.status && input.status !== cage.status && cage.quarantineCases.length) {
+  if (
+    input.status &&
+    input.status !== cage.status &&
+    cage.quarantineCases.length
+  ) {
     return { ok: false, message: QUARANTINE_CONTAINMENT_MESSAGE };
   }
 
   const normalizedFlags = normalizeWelfareFlags(input.welfareFlags);
-  const normalizedNotes = input.notes === undefined ? undefined : input.notes?.trim() || null;
+  const normalizedNotes =
+    input.notes === undefined ? undefined : input.notes?.trim() || null;
   const timestamp = new Date();
-  const billingEffectiveAt = new Date(Date.UTC(
-    timestamp.getUTCFullYear(),
-    timestamp.getUTCMonth(),
-    timestamp.getUTCDate(),
-  ));
+  const billingEffectiveAt = new Date(
+    Date.UTC(
+      timestamp.getUTCFullYear(),
+      timestamp.getUTCMonth(),
+      timestamp.getUTCDate(),
+    ),
+  );
   const activeChargePeriod = cage.chargePeriods[0];
-  const nextCategoryId = input.chargeCategoryId || activeChargePeriod?.categoryId || null;
+  const nextCategoryId =
+    input.chargeCategoryId || activeChargePeriod?.categoryId || null;
   const nextDailyRateCents =
     input.dailyRateCents === undefined || input.dailyRateCents === null
       ? activeChargePeriod?.dailyRateCents
@@ -1527,96 +1748,126 @@ export async function updateCageDetails(
   const shouldReplaceChargePeriod =
     Boolean(nextCategoryId) &&
     (nextCategoryId !== activeChargePeriod?.categoryId ||
-      (nextDailyRateCents !== undefined && nextDailyRateCents !== activeChargePeriod?.dailyRateCents));
+      (nextDailyRateCents !== undefined &&
+        nextDailyRateCents !== activeChargePeriod?.dailyRateCents));
 
   const canManageBilling = actor.capabilities
     ? actor.capabilities.includes("billing:manage")
     : actorHasCapability(
-        { canonicalRole: normalizeUserRole(actor.role), activeMembership: null },
+        {
+          canonicalRole: normalizeUserRole(actor.role),
+          activeMembership: null,
+        },
         "billing:manage",
       );
   if (shouldReplaceChargePeriod && !canManageBilling) {
-    return { ok: false, message: "Cage rates can only be changed by a billing administrator." };
+    return {
+      ok: false,
+      message: "Cage rates can only be changed by a billing administrator.",
+    };
   }
 
-  if (input.dailyRateCents !== undefined && input.dailyRateCents !== null && input.dailyRateCents < 0) {
+  if (
+    input.dailyRateCents !== undefined &&
+    input.dailyRateCents !== null &&
+    input.dailyRateCents < 0
+  ) {
     return { ok: false, message: "Daily cage rate must be zero or higher." };
   }
 
   if (shouldReplaceChargePeriod && !cage.labId) {
-    return { ok: false, message: "Assign the cage to a lab before changing cage charging." };
+    return {
+      ok: false,
+      message: "Assign the cage to a lab before changing cage charging.",
+    };
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      const currentAccess = await getActorLabAccess(actor, tx);
-      if (!canManageLab(currentAccess, cage.labId)) {
-        throw new Error("You can only edit cages from labs you manage.");
-      }
+    await prisma.$transaction(
+      async (tx) => {
+        const currentAccess = await getActorLabAccess(actor, tx);
+        if (!canManageLab(currentAccess, cage.labId)) {
+          throw new Error("You can only edit cages from labs you manage.");
+        }
 
-      if (input.status && input.status !== cage.status) {
-        const openCase = await tx.quarantineCase.findFirst({
-          where: { cageId: cage.id, status: { in: [...OPEN_QUARANTINE_CASE_STATUSES] } },
-          select: { id: true },
+        if (input.status && input.status !== cage.status) {
+          const openCase = await tx.quarantineCase.findFirst({
+            where: {
+              cageId: cage.id,
+              status: { in: [...OPEN_QUARANTINE_CASE_STATUSES] },
+            },
+            select: { id: true },
+          });
+          if (openCase) throw new Error(QUARANTINE_CONTAINMENT_MESSAGE);
+        }
+        const cageUpdateData: Prisma.CageUpdateInput = {
+          status: input.status ?? cage.status,
+          notes: normalizedNotes === undefined ? cage.notes : normalizedNotes,
+          lastUpdatedAt: timestamp,
+        };
+
+        if (normalizedFlags !== undefined) {
+          cageUpdateData.welfareFlags =
+            normalizedFlags as Prisma.InputJsonValue;
+        }
+
+        await tx.cage.update({
+          where: { id: cage.id },
+          data: cageUpdateData,
         });
-        if (openCase) throw new Error(QUARANTINE_CONTAINMENT_MESSAGE);
-      }
-      const cageUpdateData: Prisma.CageUpdateInput = {
-        status: input.status ?? cage.status,
-        notes: normalizedNotes === undefined ? cage.notes : normalizedNotes,
-        lastUpdatedAt: timestamp,
-      };
 
-      if (normalizedFlags !== undefined) {
-        cageUpdateData.welfareFlags = normalizedFlags as Prisma.InputJsonValue;
-      }
+        if (shouldReplaceChargePeriod && cage.labId && nextCategoryId) {
+          await startReplacementChargePeriod(tx, {
+            cageId: cage.id,
+            labId: cage.labId,
+            categoryId: nextCategoryId,
+            dailyRateCents: nextDailyRateCents,
+            timestamp: billingEffectiveAt,
+            notes: "Cage detail update.",
+          });
+        }
 
-      await tx.cage.update({
-        where: { id: cage.id },
-        data: cageUpdateData,
-      });
-
-      if (shouldReplaceChargePeriod && cage.labId && nextCategoryId) {
-        await startReplacementChargePeriod(tx, {
-          cageId: cage.id,
-          labId: cage.labId,
-          categoryId: nextCategoryId,
-          dailyRateCents: nextDailyRateCents,
-          timestamp: billingEffectiveAt,
-          notes: "Cage detail update.",
+        await tx.auditLog.create({
+          data: {
+            id: createId("audit"),
+            actorId: actor.id,
+            entityType: "cage",
+            entityId: cage.id,
+            action: "update_details",
+            previousValue: {
+              status: cage.status,
+              notes: cage.notes,
+              welfareFlags: cage.welfareFlags,
+              chargeCategoryId: activeChargePeriod?.categoryId ?? null,
+              dailyRateCents: activeChargePeriod?.dailyRateCents ?? null,
+            },
+            newValue: {
+              status: input.status ?? cage.status,
+              notes:
+                normalizedNotes === undefined ? cage.notes : normalizedNotes,
+              welfareFlags:
+                normalizedFlags === undefined
+                  ? cage.welfareFlags
+                  : normalizedFlags,
+              chargeCategoryId: nextCategoryId,
+              dailyRateCents: nextDailyRateCents ?? null,
+              chargeEffectiveAt: shouldReplaceChargePeriod
+                ? billingEffectiveAt
+                : null,
+            },
+            timestamp,
+          },
         });
-      }
-
-      await tx.auditLog.create({
-        data: {
-          id: createId("audit"),
-          actorId: actor.id,
-          entityType: "cage",
-          entityId: cage.id,
-          action: "update_details",
-          previousValue: {
-            status: cage.status,
-            notes: cage.notes,
-            welfareFlags: cage.welfareFlags,
-            chargeCategoryId: activeChargePeriod?.categoryId ?? null,
-            dailyRateCents: activeChargePeriod?.dailyRateCents ?? null,
-          },
-          newValue: {
-            status: input.status ?? cage.status,
-            notes: normalizedNotes === undefined ? cage.notes : normalizedNotes,
-            welfareFlags: normalizedFlags === undefined ? cage.welfareFlags : normalizedFlags,
-            chargeCategoryId: nextCategoryId,
-            dailyRateCents: nextDailyRateCents ?? null,
-            chargeEffectiveAt: shouldReplaceChargePeriod ? billingEffectiveAt : null,
-          },
-          timestamp,
-        },
-      });
-    }, { timeout: 15_000, maxWait: 10_000 });
+      },
+      { timeout: 15_000, maxWait: 10_000 },
+    );
   } catch (error) {
     return {
       ok: false,
-      message: error instanceof Error ? error.message : "Cage details could not be saved.",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Cage details could not be saved.",
     };
   }
 
@@ -1635,7 +1886,8 @@ export async function transferCageToLab(
   void actor;
   return {
     ok: false,
-    message: "Direct lab transfers are disabled. Use the source request, destination approval, and CMU finalization workflow.",
+    message:
+      "Direct lab transfers are disabled. Use the source request, destination approval, and CMU finalization workflow.",
   };
 }
 
@@ -1646,24 +1898,34 @@ export async function moveAnimalToCage(
   options: MoveAnimalExecutionOptions = {},
 ): Promise<MoveAnimalResult> {
   if (options.deferCageMaintenance && !transaction) {
-    throw new Error("Deferred cage maintenance requires an existing transaction.");
+    throw new Error(
+      "Deferred cage maintenance requires an existing transaction.",
+    );
   }
   if (!canMoveAnimal(actor.role)) {
-    return { ok: false, message: "Your role cannot transfer animals between cages." };
+    return {
+      ok: false,
+      message: "Your role cannot transfer animals between cages.",
+    };
   }
 
   const normalizedReason = input.reason.trim();
   const normalizedMovedAt = new Date(input.movedAt);
 
   if (normalizedReason.length < 3) {
-    return { ok: false, message: "Enter a concise reason for the animal transfer." };
+    return {
+      ok: false,
+      message: "Enter a concise reason for the animal transfer.",
+    };
   }
 
   if (Number.isNaN(normalizedMovedAt.getTime())) {
     return { ok: false, message: "Choose a valid transfer date." };
   }
 
-  const operation = async (tx: Prisma.TransactionClient): Promise<MoveAnimalResult> => {
+  const operation = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<MoveAnimalResult> => {
     const actorAccess = await getActorLabAccess(actor, tx);
     const [animal, destinationCage, mixedSexRule] = await Promise.all([
       tx.animal.findUnique({
@@ -1691,7 +1953,11 @@ export async function moveAnimalToCage(
             },
           },
           breedingAdults: {
-            where: { breedingSetup: { status: { in: ["planned", "active", "paused"] } } },
+            where: {
+              breedingSetup: {
+                status: { in: ["planned", "active", "paused"] },
+              },
+            },
             select: { breedingSetupId: true },
           },
         },
@@ -1713,14 +1979,21 @@ export async function moveAnimalToCage(
           },
         },
       }),
-      tx.ruleConfig.findUnique({ where: { key: "mixed_sex_holding_allowed" }, select: { value: true } }),
+      tx.ruleConfig.findUnique({
+        where: { key: "mixed_sex_holding_allowed" },
+        select: { value: true },
+      }),
     ]);
 
     if (!animal) return { ok: false, message: "Animal not found." };
     const sourceLabId = animal.currentCage?.labId ?? animal.owningLabId;
-    if (!canManageLab(actorAccess, sourceLabId)) return { ok: false, message: "Animal not found." };
+    if (!canManageLab(actorAccess, sourceLabId))
+      return { ok: false, message: "Animal not found." };
     if (animal.outcomeStatus !== "alive") {
-      return { ok: false, message: `${animal.animalId} is not in the live colony and cannot be moved.` };
+      return {
+        ok: false,
+        message: `${animal.animalId} is not in the live colony and cannot be moved.`,
+      };
     }
     if (animal.breedingAdults.length) {
       return {
@@ -1729,7 +2002,10 @@ export async function moveAnimalToCage(
       };
     }
     if (!animal.currentCageId || !animal.currentCage) {
-      return { ok: false, message: `${animal.animalId} is not currently assigned to a source cage.` };
+      return {
+        ok: false,
+        message: `${animal.animalId} is not currently assigned to a source cage.`,
+      };
     }
     if (animal.currentCage.quarantineCases.length) {
       return { ok: false, message: QUARANTINE_CONTAINMENT_MESSAGE };
@@ -1737,41 +2013,71 @@ export async function moveAnimalToCage(
     if (!destinationCage || !canManageLab(actorAccess, destinationCage.labId)) {
       return { ok: false, message: "Destination cage not found." };
     }
-    if (!destinationCage.active || destinationCage.status === "closed" || destinationCage.status === "retired") {
-      return { ok: false, message: `${destinationCage.barcode} is not an active operational cage.` };
+    if (
+      !destinationCage.active ||
+      destinationCage.status === "closed" ||
+      destinationCage.status === "retired"
+    ) {
+      return {
+        ok: false,
+        message: `${destinationCage.barcode} is not an active operational cage.`,
+      };
     }
     if (animal.currentCageId === destinationCage.id) {
-      return { ok: false, message: "Choose a different destination cage before saving the transfer." };
+      return {
+        ok: false,
+        message:
+          "Choose a different destination cage before saving the transfer.",
+      };
     }
 
     const quarantineError = validateQuarantineAssignments({
       workflow: "new",
-      destinations: [{
-        key: `existing:${destinationCage.id}`,
-        label: destinationCage.barcode,
-        status: destinationCage.status,
-        occupants: destinationCage.animals,
-      }],
+      destinations: [
+        {
+          key: `existing:${destinationCage.id}`,
+          label: destinationCage.barcode,
+          status: destinationCage.status,
+          occupants: destinationCage.animals,
+        },
+      ],
       usedDestinationKeys: new Set([`existing:${destinationCage.id}`]),
     });
     if (quarantineError) return { ok: false, message: quarantineError };
     const sexError = validateProjectedSexComposition({
-      destinations: [{
-        key: `existing:${destinationCage.id}`,
-        label: destinationCage.barcode,
-        status: destinationCage.status,
-        occupants: destinationCage.animals,
-      }],
-      incoming: [{ subjectId: animal.id, sex: animal.sex, destinationKey: `existing:${destinationCage.id}` }],
+      destinations: [
+        {
+          key: `existing:${destinationCage.id}`,
+          label: destinationCage.barcode,
+          status: destinationCage.status,
+          occupants: destinationCage.animals,
+        },
+      ],
+      incoming: [
+        {
+          subjectId: animal.id,
+          sex: animal.sex,
+          destinationKey: `existing:${destinationCage.id}`,
+        },
+      ],
       mixedSexHoldingAllowed: mixedSexRule?.value === true,
     });
     if (sexError) return { ok: false, message: sexError };
 
-    const capacityCheck = await validateProjectedCageOccupancy(tx, destinationCage.id, 1, actorAccess);
+    const capacityCheck = await validateProjectedCageOccupancy(
+      tx,
+      destinationCage.id,
+      1,
+      actorAccess,
+    );
     if (!capacityCheck.ok) return capacityCheck;
     const destinationLabId = capacityCheck.snapshot.labId;
     if (!sourceLabId || !destinationLabId || sourceLabId !== destinationLabId) {
-      return { ok: false, message: "Use the cross-lab transfer approval workflow before moving this animal." };
+      return {
+        ok: false,
+        message:
+          "Use the cross-lab transfer approval workflow before moving this animal.",
+      };
     }
 
     const sourceCage = animal.currentCage;
@@ -1856,7 +2162,9 @@ export async function moveAnimalToCage(
     };
   };
 
-  return transaction ? operation(transaction) : runSerializableTransaction(operation);
+  return transaction
+    ? operation(transaction)
+    : runSerializableTransaction(operation);
 }
 
 export async function executeMoveAnimalToCageCommand(input: {
@@ -1873,18 +2181,33 @@ export async function executeMoveAnimalToCageCommand(input: {
     requestId: input.requestId,
     request: input.command as unknown as Prisma.InputJsonValue,
     requiredCapability: "cages:manage",
-    labId: input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null,
+    labId:
+      input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null,
     aggregateType: "animal",
     aggregateId: input.command.animalId,
     expectedVersion: input.expectedVersion,
     handler: async (tx) => {
-      const result = await moveAnimalToCage(input.command, {
-        id: input.actor.id,
-        role: input.actor.role,
-        activeLabId: input.actor.activeLabId,
-      }, tx);
-      if (!result.ok) return { ok: false as const, code: "validation_error", message: result.message };
-      return { ok: true as const, result: result as unknown as Prisma.InputJsonValue, aggregateType: "animal", aggregateId: result.animalId };
+      const result = await moveAnimalToCage(
+        input.command,
+        {
+          id: input.actor.id,
+          role: input.actor.role,
+          activeLabId: input.actor.activeLabId,
+        },
+        tx,
+      );
+      if (!result.ok)
+        return {
+          ok: false as const,
+          code: "validation_error",
+          message: result.message,
+        };
+      return {
+        ok: true as const,
+        result: result as unknown as Prisma.InputJsonValue,
+        aggregateType: "animal",
+        aggregateId: result.animalId,
+      };
     },
   });
 }
@@ -1894,13 +2217,24 @@ export async function updateAnimalPresenceStatus(
   actor: LabActor,
   transaction?: Prisma.TransactionClient,
 ): Promise<MutationResult> {
-  if (!canMoveAnimal(actor.role)) return { ok: false, message: "Your role cannot update animal location status." };
+  if (!canMoveAnimal(actor.role))
+    return {
+      ok: false,
+      message: "Your role cannot update animal location status.",
+    };
   const happenedAt = new Date(input.happenedAt);
   const reason = input.reason.trim();
-  if (Number.isNaN(happenedAt.getTime())) return { ok: false, message: "Choose a valid event date." };
-  if (reason.length < 3) return { ok: false, message: "Enter a clear reason for this location update." };
+  if (Number.isNaN(happenedAt.getTime()))
+    return { ok: false, message: "Choose a valid event date." };
+  if (reason.length < 3)
+    return {
+      ok: false,
+      message: "Enter a clear reason for this location update.",
+    };
 
-  const operation = async (tx: Prisma.TransactionClient): Promise<MutationResult> => {
+  const operation = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<MutationResult> => {
     const access = await getActorLabAccess(actor, tx);
     const animal = await tx.animal.findUnique({
       where: { id: input.animalId },
@@ -1925,14 +2259,24 @@ export async function updateAnimalPresenceStatus(
         },
       },
     });
-    if (!animal || !canManageLab(access, animal.owningLabId)) return { ok: false, message: "Animal not found." };
+    if (!animal || !canManageLab(access, animal.owningLabId))
+      return { ok: false, message: "Animal not found." };
     if (animal.currentCage?.quarantineCases.length) {
       return { ok: false, message: QUARANTINE_CONTAINMENT_MESSAGE };
     }
 
     if (input.action === "missing") {
-      if (animal.outcomeStatus === "missing") return { ok: true, message: `${animal.animalId} is already marked missing.`, entityId: animal.id };
-      if (animal.outcomeStatus !== "alive") return { ok: false, message: `${animal.animalId} is not in the live colony.` };
+      if (animal.outcomeStatus === "missing")
+        return {
+          ok: true,
+          message: `${animal.animalId} is already marked missing.`,
+          entityId: animal.id,
+        };
+      if (animal.outcomeStatus !== "alive")
+        return {
+          ok: false,
+          message: `${animal.animalId} is not in the live colony.`,
+        };
       if (animal.currentCageId) {
         await tx.animalMovement.create({
           data: {
@@ -1945,9 +2289,15 @@ export async function updateAnimalPresenceStatus(
             reason,
           },
         });
-        await tx.cage.update({ where: { id: animal.currentCageId }, data: { lastUpdatedAt: happenedAt } });
+        await tx.cage.update({
+          where: { id: animal.currentCageId },
+          data: { lastUpdatedAt: happenedAt },
+        });
       }
-      await tx.animal.update({ where: { id: animal.id }, data: { outcomeStatus: "missing", currentCageId: null } });
+      await tx.animal.update({
+        where: { id: animal.id },
+        data: { outcomeStatus: "missing", currentCageId: null },
+      });
       await tx.alert.create({
         data: {
           id: createId("alert"),
@@ -1963,74 +2313,174 @@ export async function updateAnimalPresenceStatus(
       });
       await tx.auditLog.create({
         data: {
-          id: createId("audit"), actorId: actor.id, entityType: "animal", entityId: animal.id,
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "animal",
+          entityId: animal.id,
           action: "mark_missing",
-          previousValue: { outcomeStatus: animal.outcomeStatus, currentCageId: animal.currentCageId },
-          newValue: { outcomeStatus: "missing", currentCageId: null, happenedAt: input.happenedAt, reason },
+          previousValue: {
+            outcomeStatus: animal.outcomeStatus,
+            currentCageId: animal.currentCageId,
+          },
+          newValue: {
+            outcomeStatus: "missing",
+            currentCageId: null,
+            happenedAt: input.happenedAt,
+            reason,
+          },
           timestamp: happenedAt,
         },
       });
-      return { ok: true, message: `${animal.animalId} marked missing and the owning lab was alerted.`, entityId: animal.id };
+      return {
+        ok: true,
+        message: `${animal.animalId} marked missing and the owning lab was alerted.`,
+        entityId: animal.id,
+      };
     }
 
-    if (animal.outcomeStatus !== "missing") return { ok: false, message: `${animal.animalId} is not currently marked missing.` };
-    if (!input.toCageId) return { ok: false, message: "Choose the cage where the animal was found." };
+    if (animal.outcomeStatus !== "missing")
+      return {
+        ok: false,
+        message: `${animal.animalId} is not currently marked missing.`,
+      };
+    if (!input.toCageId)
+      return {
+        ok: false,
+        message: "Choose the cage where the animal was found.",
+      };
     const [destination, mixedSexRule] = await Promise.all([
       tx.cage.findUnique({
         where: { id: input.toCageId },
         select: {
-          id: true, barcode: true, labId: true, active: true, status: true,
-          animals: { where: { outcomeStatus: "alive" }, select: { id: true, sex: true } },
+          id: true,
+          barcode: true,
+          labId: true,
+          active: true,
+          status: true,
+          animals: {
+            where: { outcomeStatus: "alive" },
+            select: { id: true, sex: true },
+          },
         },
       }),
-      tx.ruleConfig.findUnique({ where: { key: "mixed_sex_holding_allowed" }, select: { value: true } }),
+      tx.ruleConfig.findUnique({
+        where: { key: "mixed_sex_holding_allowed" },
+        select: { value: true },
+      }),
     ]);
-    if (!destination || !canManageLab(access, destination.labId)) return { ok: false, message: "Destination cage not found." };
+    if (!destination || !canManageLab(access, destination.labId))
+      return { ok: false, message: "Destination cage not found." };
     if (destination.labId !== animal.owningLabId) {
-      return { ok: false, message: "Use the cross-lab transfer workflow before changing the animal's owning lab." };
+      return {
+        ok: false,
+        message:
+          "Use the cross-lab transfer workflow before changing the animal's owning lab.",
+      };
     }
-    if (!destination.active || destination.status === "closed" || destination.status === "retired") {
-      return { ok: false, message: `${destination.barcode} is not an active operational cage.` };
+    if (
+      !destination.active ||
+      destination.status === "closed" ||
+      destination.status === "retired"
+    ) {
+      return {
+        ok: false,
+        message: `${destination.barcode} is not an active operational cage.`,
+      };
     }
     const quarantineError = validateQuarantineAssignments({
       workflow: "new",
-      destinations: [{ key: `existing:${destination.id}`, label: destination.barcode, status: destination.status, occupants: destination.animals }],
+      destinations: [
+        {
+          key: `existing:${destination.id}`,
+          label: destination.barcode,
+          status: destination.status,
+          occupants: destination.animals,
+        },
+      ],
       usedDestinationKeys: new Set([`existing:${destination.id}`]),
     });
     if (quarantineError) return { ok: false, message: quarantineError };
     const sexError = validateProjectedSexComposition({
-      destinations: [{ key: `existing:${destination.id}`, label: destination.barcode, status: destination.status, occupants: destination.animals }],
-      incoming: [{ subjectId: animal.id, sex: animal.sex, destinationKey: `existing:${destination.id}` }],
+      destinations: [
+        {
+          key: `existing:${destination.id}`,
+          label: destination.barcode,
+          status: destination.status,
+          occupants: destination.animals,
+        },
+      ],
+      incoming: [
+        {
+          subjectId: animal.id,
+          sex: animal.sex,
+          destinationKey: `existing:${destination.id}`,
+        },
+      ],
       mixedSexHoldingAllowed: mixedSexRule?.value === true,
     });
     if (sexError) return { ok: false, message: sexError };
-    const capacity = await validateProjectedCageOccupancy(tx, destination.id, 1, access);
+    const capacity = await validateProjectedCageOccupancy(
+      tx,
+      destination.id,
+      1,
+      access,
+    );
     if (!capacity.ok) return capacity;
 
-    await tx.animal.update({ where: { id: animal.id }, data: { outcomeStatus: "alive", currentCageId: destination.id } });
+    await tx.animal.update({
+      where: { id: animal.id },
+      data: { outcomeStatus: "alive", currentCageId: destination.id },
+    });
     await tx.animalMovement.create({
       data: {
-        id: createId("animal-move"), animalId: animal.id, fromCageId: null, toCageId: destination.id,
-        movedById: actor.id, movedAt: happenedAt, reason,
+        id: createId("animal-move"),
+        animalId: animal.id,
+        fromCageId: null,
+        toCageId: destination.id,
+        movedById: actor.id,
+        movedAt: happenedAt,
+        reason,
       },
     });
-    await tx.cage.update({ where: { id: destination.id }, data: { lastUpdatedAt: happenedAt } });
+    await tx.cage.update({
+      where: { id: destination.id },
+      data: { lastUpdatedAt: happenedAt },
+    });
     await tx.alert.updateMany({
-      where: { entityType: "animal", entityId: animal.id, alertType: "animal_missing", status: "open" },
+      where: {
+        entityType: "animal",
+        entityId: animal.id,
+        alertType: "animal_missing",
+        status: "open",
+      },
       data: { status: "resolved", resolvedAt: happenedAt },
     });
     await tx.auditLog.create({
       data: {
-        id: createId("audit"), actorId: actor.id, entityType: "animal", entityId: animal.id,
+        id: createId("audit"),
+        actorId: actor.id,
+        entityType: "animal",
+        entityId: animal.id,
         action: "mark_found",
         previousValue: { outcomeStatus: "missing", currentCageId: null },
-        newValue: { outcomeStatus: "alive", currentCageId: destination.id, happenedAt: input.happenedAt, reason },
+        newValue: {
+          outcomeStatus: "alive",
+          currentCageId: destination.id,
+          happenedAt: input.happenedAt,
+          reason,
+        },
         timestamp: happenedAt,
       },
     });
-    return { ok: true, message: `${animal.animalId} marked found in ${destination.barcode}.`, entityId: animal.id };
+    return {
+      ok: true,
+      message: `${animal.animalId} marked found in ${destination.barcode}.`,
+      entityId: animal.id,
+    };
   };
-  return transaction ? operation(transaction) : runSerializableTransaction(operation);
+  return transaction
+    ? operation(transaction)
+    : runSerializableTransaction(operation);
 }
 
 export async function executeUpdateAnimalPresenceCommand(input: {
@@ -2047,16 +2497,31 @@ export async function executeUpdateAnimalPresenceCommand(input: {
     requestId: input.requestId,
     request: input.command as unknown as Prisma.InputJsonValue,
     requiredCapability: "animals:manage",
-    labId: input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null,
+    labId:
+      input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null,
     aggregateType: "animal",
     aggregateId: input.command.animalId,
     expectedVersion: input.expectedVersion,
     handler: async (tx) => {
-      const result = await updateAnimalPresenceStatus(input.command, {
-        id: input.actor.id, role: input.actor.role, activeLabId: input.actor.activeLabId,
-      }, tx);
-      if (!result.ok) return { ok: false as const, code: "validation_error", message: result.message };
-      return { ok: true as const, result: { message: result.message, entityId: result.entityId ?? null } };
+      const result = await updateAnimalPresenceStatus(
+        input.command,
+        {
+          id: input.actor.id,
+          role: input.actor.role,
+          activeLabId: input.actor.activeLabId,
+        },
+        tx,
+      );
+      if (!result.ok)
+        return {
+          ok: false as const,
+          code: "validation_error",
+          message: result.message,
+        };
+      return {
+        ok: true as const,
+        result: { message: result.message, entityId: result.entityId ?? null },
+      };
     },
   });
 }
@@ -2066,60 +2531,68 @@ export async function reserveAnimalForExperiment(
   actor: LabActor,
 ): Promise<MutationResult> {
   if (!canReserveAnimal(actor.role)) {
-    return { ok: false, message: "Your role cannot reserve animals for experiments." };
+    return {
+      ok: false,
+      message: "Your role cannot reserve animals for experiments.",
+    };
   }
 
-  const [animal, experiment, alleles, conflictingAssignment] = await prisma.$transaction([
-    prisma.animal.findUnique({
-      where: { id: input.animalId },
-      select: {
-        id: true,
-        animalId: true,
-        status: true,
-        outcomeStatus: true,
-        owningLabId: true,
-        projectSummary: true,
-      },
-    }),
-    prisma.experiment.findUnique({
-      where: { id: input.experimentId },
-      select: {
-        id: true,
-        labId: true,
-        experimentCode: true,
-        projectId: true,
-        project: {
-          select: {
-            projectCode: true,
-          },
+  const [animal, experiment, alleles, conflictingAssignment] =
+    await prisma.$transaction([
+      prisma.animal.findUnique({
+        where: { id: input.animalId },
+        select: {
+          id: true,
+          animalId: true,
+          status: true,
+          outcomeStatus: true,
+          owningLabId: true,
+          projectSummary: true,
         },
-        status: true,
-      },
-    }),
-    prisma.animalAllele.findMany({
-      where: { animalId: input.animalId },
-      select: { callStatus: true },
-    }),
-    prisma.experimentAssignment.findFirst({
-      where: {
-        animalId: input.animalId,
-        status: { in: ["reserved", "active"] },
-      },
-      select: {
-        id: true,
-        experimentId: true,
-        status: true,
-        treatmentGroup: true,
-        startDate: true,
-      },
-    }),
-  ]);
+      }),
+      prisma.experiment.findUnique({
+        where: { id: input.experimentId },
+        select: {
+          id: true,
+          labId: true,
+          experimentCode: true,
+          projectId: true,
+          project: {
+            select: {
+              projectCode: true,
+            },
+          },
+          status: true,
+        },
+      }),
+      prisma.animalAllele.findMany({
+        where: { animalId: input.animalId },
+        select: { callStatus: true },
+      }),
+      prisma.experimentAssignment.findFirst({
+        where: {
+          animalId: input.animalId,
+          status: { in: ["reserved", "active"] },
+        },
+        select: {
+          id: true,
+          experimentId: true,
+          status: true,
+          treatmentGroup: true,
+          startDate: true,
+        },
+      }),
+    ]);
 
   if (!animal) {
     return { ok: false, message: "Animal not found." };
   }
 
-  if (!experiment || experiment.status === "completed" || experiment.status === "cancelled") {
+  if (
+    !experiment ||
+    experiment.status === "completed" ||
+    experiment.status === "cancelled"
+  ) {
     return { ok: false, message: "Choose an active or planned experiment." };
   }
 
@@ -2129,7 +2602,10 @@ export async function reserveAnimalForExperiment(
     animal.owningLabId !== experiment.labId ||
     !canManageLab(reservationAccess, experiment.labId)
   ) {
-    return { ok: false, message: "Choose an animal and experiment from the same manageable lab." };
+    return {
+      ok: false,
+      message: "Choose an animal and experiment from the same manageable lab.",
+    };
   }
 
   const normalizedStartDate = new Date(input.startDate);
@@ -2137,8 +2613,10 @@ export async function reserveAnimalForExperiment(
     conflictingAssignment &&
     conflictingAssignment.experimentId === input.experimentId &&
     conflictingAssignment.status === "reserved" &&
-    conflictingAssignment.treatmentGroup === (input.treatmentGroup?.trim() || null) &&
-    conflictingAssignment.startDate.toISOString().slice(0, 10) === normalizedStartDate.toISOString().slice(0, 10);
+    conflictingAssignment.treatmentGroup ===
+      (input.treatmentGroup?.trim() || null) &&
+    conflictingAssignment.startDate.toISOString().slice(0, 10) ===
+      normalizedStartDate.toISOString().slice(0, 10);
 
   if (sameReservation) {
     return {
@@ -2153,95 +2631,110 @@ export async function reserveAnimalForExperiment(
   }
 
   if (animal.status !== "colony_holding") {
-    return { ok: false, message: `${animal.animalId} is not available for a new reservation.` };
+    return {
+      ok: false,
+      message: `${animal.animalId} is not available for a new reservation.`,
+    };
   }
 
-  if (!alleles.length || alleles.some((allele) => allele.callStatus !== "confirmed")) {
-    return { ok: false, message: `${animal.animalId} still needs genotype confirmation before reservation.` };
+  if (
+    !alleles.length ||
+    alleles.some((allele) => allele.callStatus !== "confirmed")
+  ) {
+    return {
+      ok: false,
+      message: `${animal.animalId} still needs genotype confirmation before reservation.`,
+    };
   }
 
   if (conflictingAssignment) {
-    return { ok: false, message: `${animal.animalId} already has an active or reserved experiment assignment.` };
+    return {
+      ok: false,
+      message: `${animal.animalId} already has an active or reserved experiment assignment.`,
+    };
   }
 
   const timestamp = new Date();
   const assignmentId = createId("assign");
   const previousStatus = animal.status;
 
-  await prisma.$transaction(async (tx) => {
-    await tx.experimentAssignment.create({
-      data: {
-        id: assignmentId,
-        animalId: animal.id,
-        experimentId: experiment.id,
-        status: "reserved",
-        startDate: normalizedStartDate,
-        treatmentGroup: input.treatmentGroup?.trim() || undefined,
-        notes: input.notes?.trim() || undefined,
-        isPrimary: true,
-      },
-    });
-
-    await tx.animal.update({
-      where: { id: animal.id },
-      data: {
-        status: "reserved",
-        experimentalStatus: `Reserved for ${experiment.experimentCode}`,
-        projectSummary: experiment.project.projectCode,
-      },
-    });
-
-    const hasProjectAllocation = await tx.animalProjectAllocation.findFirst({
-      where: {
-        animalId: animal.id,
-        projectId: experiment.projectId,
-        endedAt: null,
-      },
-      select: { id: true },
-    });
-
-    if (!hasProjectAllocation) {
-      await tx.animalProjectAllocation.create({
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.experimentAssignment.create({
         data: {
-          id: createId("alloc"),
+          id: assignmentId,
           animalId: animal.id,
-          projectId: experiment.projectId,
-          startedAt: timestamp,
-          chargeable: true,
-          notes: `Added automatically during reservation for ${experiment.experimentCode}.`,
+          experimentId: experiment.id,
+          status: "reserved",
+          startDate: normalizedStartDate,
+          treatmentGroup: input.treatmentGroup?.trim() || undefined,
+          notes: input.notes?.trim() || undefined,
+          isPrimary: true,
         },
       });
-    }
 
-    await tx.animalStatusEvent.create({
-      data: {
-        id: createId("status"),
-        animalId: animal.id,
-        fromStatus: previousStatus,
-        toStatus: "reserved",
-        happenedAt: timestamp,
-        actorId: actor.id,
-        reason: `Reserved for ${experiment.experimentCode}.`,
-      },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        id: createId("audit"),
-        actorId: actor.id,
-        entityType: "experiment_assignment",
-        entityId: assignmentId,
-        action: "reserve",
-        previousValue: { animalStatus: previousStatus },
-        newValue: {
-          experimentId: experiment.id,
-          startDate: input.startDate,
-          treatmentGroup: input.treatmentGroup,
+      await tx.animal.update({
+        where: { id: animal.id },
+        data: {
+          status: "reserved",
+          experimentalStatus: `Reserved for ${experiment.experimentCode}`,
+          projectSummary: experiment.project.projectCode,
         },
-        timestamp,
-      },
-    });
-  }, { timeout: 15_000, maxWait: 10_000 });
+      });
+
+      const hasProjectAllocation = await tx.animalProjectAllocation.findFirst({
+        where: {
+          animalId: animal.id,
+          projectId: experiment.projectId,
+          endedAt: null,
+        },
+        select: { id: true },
+      });
+
+      if (!hasProjectAllocation) {
+        await tx.animalProjectAllocation.create({
+          data: {
+            id: createId("alloc"),
+            animalId: animal.id,
+            projectId: experiment.projectId,
+            startedAt: timestamp,
+            chargeable: true,
+            notes: `Added automatically during reservation for ${experiment.experimentCode}.`,
+          },
+        });
+      }
+
+      await tx.animalStatusEvent.create({
+        data: {
+          id: createId("status"),
+          animalId: animal.id,
+          fromStatus: previousStatus,
+          toStatus: "reserved",
+          happenedAt: timestamp,
+          actorId: actor.id,
+          reason: `Reserved for ${experiment.experimentCode}.`,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "experiment_assignment",
+          entityId: assignmentId,
+          action: "reserve",
+          previousValue: { animalStatus: previousStatus },
+          newValue: {
+            experimentId: experiment.id,
+            startDate: input.startDate,
+            treatmentGroup: input.treatmentGroup,
+          },
+          timestamp,
+        },
+      });
+    },
+    { timeout: 15_000, maxWait: 10_000 },
+  );
 
   return {
     ok: true,
@@ -2265,7 +2758,11 @@ export async function planExperimentCohortAssignments(
   }
 
   if (!input.selectedAnimals.length) {
-    return { ok: false, message: "Select at least one candidate in the planner before saving a cohort." };
+    return {
+      ok: false,
+      message:
+        "Select at least one candidate in the planner before saving a cohort.",
+    };
   }
 
   const experiment = await prisma.experiment.findUnique({
@@ -2278,18 +2775,33 @@ export async function planExperimentCohortAssignments(
     },
   });
 
-  if (!experiment || experiment.status === "completed" || experiment.status === "cancelled") {
-    return { ok: false, message: "Choose an active or planned experiment for the cohort." };
+  if (
+    !experiment ||
+    experiment.status === "completed" ||
+    experiment.status === "cancelled"
+  ) {
+    return {
+      ok: false,
+      message: "Choose an active or planned experiment for the cohort.",
+    };
   }
 
   const cohortAccess = await getActorLabAccess(actor);
   if (!canManageLab(cohortAccess, experiment.labId)) {
-    return { ok: false, message: "Choose an active or planned experiment for the cohort." };
+    return {
+      ok: false,
+      message: "Choose an active or planned experiment for the cohort.",
+    };
   }
 
-  const requestedAnimalIds = [...new Set(input.selectedAnimals.map((animal) => animal.animalId))];
+  const requestedAnimalIds = [
+    ...new Set(input.selectedAnimals.map((animal) => animal.animalId)),
+  ];
   const treatmentGroupByAnimalId = new Map(
-    input.selectedAnimals.map((animal) => [animal.animalId, animal.treatmentGroup.trim() || "Group A"]),
+    input.selectedAnimals.map((animal) => [
+      animal.animalId,
+      animal.treatmentGroup.trim() || "Group A",
+    ]),
   );
   const animals = await prisma.animal.findMany({
     where: {
@@ -2314,7 +2826,9 @@ export async function planExperimentCohortAssignments(
     },
   });
 
-  const animalsByAnimalId = new Map(animals.map((animal) => [animal.animalId, animal]));
+  const animalsByAnimalId = new Map(
+    animals.map((animal) => [animal.animalId, animal]),
+  );
   const creatableAnimals = requestedAnimalIds
     .map((animalId) => animalsByAnimalId.get(animalId))
     .filter((animal): animal is (typeof animals)[number] => {
@@ -2322,53 +2836,64 @@ export async function planExperimentCohortAssignments(
         return false;
       }
 
-      return ["colony_holding", "reserved", "experiment_completed"].includes(animal.status) && animal.experimentAssignments.length === 0;
+      return (
+        ["colony_holding", "reserved", "experiment_completed"].includes(
+          animal.status,
+        ) && animal.experimentAssignments.length === 0
+      );
     });
 
   if (!creatableAnimals.length) {
-    return { ok: false, message: `No new planned assignments were created for ${experiment.experimentCode}.` };
+    return {
+      ok: false,
+      message: `No new planned assignments were created for ${experiment.experimentCode}.`,
+    };
   }
 
   const skippedCount = requestedAnimalIds.length - creatableAnimals.length;
   const timestamp = new Date();
 
-  await prisma.$transaction(async (tx) => {
-    for (const animal of creatableAnimals) {
-      const assignmentId = createId("assign");
-      const treatmentGroup = treatmentGroupByAnimalId.get(animal.animalId) ?? "Group A";
+  await prisma.$transaction(
+    async (tx) => {
+      for (const animal of creatableAnimals) {
+        const assignmentId = createId("assign");
+        const treatmentGroup =
+          treatmentGroupByAnimalId.get(animal.animalId) ?? "Group A";
 
-      await tx.experimentAssignment.create({
-        data: {
-          id: assignmentId,
-          animalId: animal.id,
-          experimentId: experiment.id,
-          status: "planned",
-          startDate: normalizedStartDate,
-          treatmentGroup,
-          notes: input.notes?.trim() || undefined,
-          isPrimary: false,
-        },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          id: createId("audit"),
-          actorId: actor.id,
-          entityType: "experiment_assignment",
-          entityId: assignmentId,
-          action: "plan",
-          newValue: {
-            experimentId: experiment.id,
+        await tx.experimentAssignment.create({
+          data: {
+            id: assignmentId,
             animalId: animal.id,
-            startDate: input.startDate,
+            experimentId: experiment.id,
+            status: "planned",
+            startDate: normalizedStartDate,
             treatmentGroup,
             notes: input.notes?.trim() || undefined,
+            isPrimary: false,
           },
-          timestamp,
-        },
-      });
-    }
-  }, { timeout: 15_000, maxWait: 10_000 });
+        });
+
+        await tx.auditLog.create({
+          data: {
+            id: createId("audit"),
+            actorId: actor.id,
+            entityType: "experiment_assignment",
+            entityId: assignmentId,
+            action: "plan",
+            newValue: {
+              experimentId: experiment.id,
+              animalId: animal.id,
+              startDate: input.startDate,
+              treatmentGroup,
+              notes: input.notes?.trim() || undefined,
+            },
+            timestamp,
+          },
+        });
+      }
+    },
+    { timeout: 15_000, maxWait: 10_000 },
+  );
 
   return {
     ok: true,
@@ -2431,7 +2956,11 @@ export async function promotePlannedExperimentAssignments(
     },
   });
 
-  if (!experiment || experiment.status === "completed" || experiment.status === "cancelled") {
+  if (
+    !experiment ||
+    experiment.status === "completed" ||
+    experiment.status === "cancelled"
+  ) {
     return { ok: false, message: "Choose an active or planned experiment." };
   }
 
@@ -2440,7 +2969,10 @@ export async function promotePlannedExperimentAssignments(
   }
 
   if (!experiment.assignments.length) {
-    return { ok: false, message: `No planned cohort assignments are waiting for ${experiment.experimentCode}.` };
+    return {
+      ok: false,
+      message: `No planned cohort assignments are waiting for ${experiment.experimentCode}.`,
+    };
   }
 
   const promotableAssignments = experiment.assignments.filter((assignment) => {
@@ -2460,84 +2992,93 @@ export async function promotePlannedExperimentAssignments(
   });
 
   if (!promotableAssignments.length) {
-    return { ok: false, message: `No planned assignments could be promoted for ${experiment.experimentCode}.` };
+    return {
+      ok: false,
+      message: `No planned assignments could be promoted for ${experiment.experimentCode}.`,
+    };
   }
 
-  const skippedCount = experiment.assignments.length - promotableAssignments.length;
+  const skippedCount =
+    experiment.assignments.length - promotableAssignments.length;
   const timestamp = new Date();
 
-  await prisma.$transaction(async (tx) => {
-    for (const assignment of promotableAssignments) {
-      await tx.experimentAssignment.update({
-        where: { id: assignment.id },
-        data: {
-          status: "reserved",
-        },
-      });
-
-      await tx.animal.update({
-        where: { id: assignment.animal.id },
-        data: {
-          status: "reserved",
-          experimentalStatus: `Reserved for ${experiment.experimentCode}`,
-          projectSummary: experiment.project.projectCode,
-        },
-      });
-
-      const hasProjectAllocation = await tx.animalProjectAllocation.findFirst({
-        where: {
-          animalId: assignment.animal.id,
-          projectId: experiment.projectId,
-          endedAt: null,
-        },
-        select: { id: true },
-      });
-
-      if (!hasProjectAllocation) {
-        await tx.animalProjectAllocation.create({
+  await prisma.$transaction(
+    async (tx) => {
+      for (const assignment of promotableAssignments) {
+        await tx.experimentAssignment.update({
+          where: { id: assignment.id },
           data: {
-            id: createId("alloc"),
+            status: "reserved",
+          },
+        });
+
+        await tx.animal.update({
+          where: { id: assignment.animal.id },
+          data: {
+            status: "reserved",
+            experimentalStatus: `Reserved for ${experiment.experimentCode}`,
+            projectSummary: experiment.project.projectCode,
+          },
+        });
+
+        const hasProjectAllocation = await tx.animalProjectAllocation.findFirst(
+          {
+            where: {
+              animalId: assignment.animal.id,
+              projectId: experiment.projectId,
+              endedAt: null,
+            },
+            select: { id: true },
+          },
+        );
+
+        if (!hasProjectAllocation) {
+          await tx.animalProjectAllocation.create({
+            data: {
+              id: createId("alloc"),
+              animalId: assignment.animal.id,
+              projectId: experiment.projectId,
+              startedAt: timestamp,
+              chargeable: true,
+              notes: `Added automatically during cohort promotion for ${experiment.experimentCode}.`,
+            },
+          });
+        }
+
+        await tx.animalStatusEvent.create({
+          data: {
+            id: createId("status"),
             animalId: assignment.animal.id,
-            projectId: experiment.projectId,
-            startedAt: timestamp,
-            chargeable: true,
-            notes: `Added automatically during cohort promotion for ${experiment.experimentCode}.`,
+            fromStatus: "colony_holding",
+            toStatus: "reserved",
+            happenedAt: timestamp,
+            actorId: actor.id,
+            reason: `Promoted planned cohort assignment for ${experiment.experimentCode}.`,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            id: createId("audit"),
+            actorId: actor.id,
+            entityType: "experiment_assignment",
+            entityId: assignment.id,
+            action: "promote_plan",
+            previousValue: {
+              status: "planned",
+            },
+            newValue: {
+              status: "reserved",
+              treatmentGroup: assignment.treatmentGroup,
+              startDate: assignment.startDate.toISOString().slice(0, 10),
+            },
+            timestamp,
           },
         });
       }
-
-      await tx.animalStatusEvent.create({
-        data: {
-          id: createId("status"),
-          animalId: assignment.animal.id,
-          fromStatus: "colony_holding",
-          toStatus: "reserved",
-          happenedAt: timestamp,
-          actorId: actor.id,
-          reason: `Promoted planned cohort assignment for ${experiment.experimentCode}.`,
-        },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          id: createId("audit"),
-          actorId: actor.id,
-          entityType: "experiment_assignment",
-          entityId: assignment.id,
-          action: "promote_plan",
-          previousValue: {
-            status: "planned",
-          },
-          newValue: {
-            status: "reserved",
-            treatmentGroup: assignment.treatmentGroup,
-            startDate: assignment.startDate.toISOString().slice(0, 10),
-          },
-          timestamp,
-        },
-      });
-    }
-  }, { timeout: 15_000, maxWait: 10_000 });
+    },
+    { timeout: 15_000, maxWait: 10_000 },
+  );
 
   return {
     ok: true,
@@ -2550,7 +3091,10 @@ export async function demoteReservedExperimentAssignments(
   actor: LabActor,
 ): Promise<MutationResult> {
   if (!canReserveAnimal(actor.role)) {
-    return { ok: false, message: "Your role cannot roll back promoted cohorts." };
+    return {
+      ok: false,
+      message: "Your role cannot roll back promoted cohorts.",
+    };
   }
 
   const experiment = await prisma.experiment.findUnique({
@@ -2592,15 +3136,24 @@ export async function demoteReservedExperimentAssignments(
   });
 
   if (!experiment) {
-    return { ok: false, message: "Choose a valid experiment before rolling back reservations." };
+    return {
+      ok: false,
+      message: "Choose a valid experiment before rolling back reservations.",
+    };
   }
 
   if (!canManageLab(await getActorLabAccess(actor), experiment.labId)) {
-    return { ok: false, message: "Choose a valid experiment before rolling back reservations." };
+    return {
+      ok: false,
+      message: "Choose a valid experiment before rolling back reservations.",
+    };
   }
 
   if (!experiment.assignments.length) {
-    return { ok: false, message: `No reserved cohort assignments are waiting for ${experiment.experimentCode}.` };
+    return {
+      ok: false,
+      message: `No reserved cohort assignments are waiting for ${experiment.experimentCode}.`,
+    };
   }
 
   const demotableAssignments = experiment.assignments.filter((assignment) => {
@@ -2616,67 +3169,76 @@ export async function demoteReservedExperimentAssignments(
       return false;
     }
 
-    return assignment.animal.experimentAssignments.every((linked) => linked.id === assignment.id);
+    return assignment.animal.experimentAssignments.every(
+      (linked) => linked.id === assignment.id,
+    );
   });
 
   if (!demotableAssignments.length) {
-    return { ok: false, message: `No reserved cohort assignments could be rolled back for ${experiment.experimentCode}.` };
+    return {
+      ok: false,
+      message: `No reserved cohort assignments could be rolled back for ${experiment.experimentCode}.`,
+    };
   }
 
-  const skippedCount = experiment.assignments.length - demotableAssignments.length;
+  const skippedCount =
+    experiment.assignments.length - demotableAssignments.length;
   const timestamp = new Date();
 
-  await prisma.$transaction(async (tx) => {
-    for (const assignment of demotableAssignments) {
-      await tx.experimentAssignment.update({
-        where: { id: assignment.id },
-        data: {
-          status: "planned",
-        },
-      });
-
-      await tx.animal.update({
-        where: { id: assignment.animal.id },
-        data: {
-          status: "colony_holding",
-          experimentalStatus: "Available for experiment planning",
-        },
-      });
-
-      await tx.animalStatusEvent.create({
-        data: {
-          id: createId("status"),
-          animalId: assignment.animal.id,
-          fromStatus: "reserved",
-          toStatus: "colony_holding",
-          happenedAt: timestamp,
-          actorId: actor.id,
-          reason: `Rolled back cohort reservation for ${experiment.experimentCode}.`,
-        },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          id: createId("audit"),
-          actorId: actor.id,
-          entityType: "experiment_assignment",
-          entityId: assignment.id,
-          action: "demote_reservation",
-          previousValue: {
-            status: "reserved",
-            treatmentGroup: assignment.treatmentGroup,
-            startDate: assignment.startDate.toISOString().slice(0, 10),
-          },
-          newValue: {
+  await prisma.$transaction(
+    async (tx) => {
+      for (const assignment of demotableAssignments) {
+        await tx.experimentAssignment.update({
+          where: { id: assignment.id },
+          data: {
             status: "planned",
-            treatmentGroup: assignment.treatmentGroup,
-            startDate: assignment.startDate.toISOString().slice(0, 10),
           },
-          timestamp,
-        },
-      });
-    }
-  }, { timeout: 15_000, maxWait: 10_000 });
+        });
+
+        await tx.animal.update({
+          where: { id: assignment.animal.id },
+          data: {
+            status: "colony_holding",
+            experimentalStatus: "Available for experiment planning",
+          },
+        });
+
+        await tx.animalStatusEvent.create({
+          data: {
+            id: createId("status"),
+            animalId: assignment.animal.id,
+            fromStatus: "reserved",
+            toStatus: "colony_holding",
+            happenedAt: timestamp,
+            actorId: actor.id,
+            reason: `Rolled back cohort reservation for ${experiment.experimentCode}.`,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            id: createId("audit"),
+            actorId: actor.id,
+            entityType: "experiment_assignment",
+            entityId: assignment.id,
+            action: "demote_reservation",
+            previousValue: {
+              status: "reserved",
+              treatmentGroup: assignment.treatmentGroup,
+              startDate: assignment.startDate.toISOString().slice(0, 10),
+            },
+            newValue: {
+              status: "planned",
+              treatmentGroup: assignment.treatmentGroup,
+              startDate: assignment.startDate.toISOString().slice(0, 10),
+            },
+            timestamp,
+          },
+        });
+      }
+    },
+    { timeout: 15_000, maxWait: 10_000 },
+  );
 
   return {
     ok: true,
@@ -2741,7 +3303,8 @@ export async function updatePlannedExperimentAssignment(
   const normalizedTreatmentGroup = input.treatmentGroup?.trim() || null;
   const normalizedNotes = input.notes?.trim() || null;
   const sameValues =
-    assignment.startDate.toISOString().slice(0, 10) === normalizedStartDate.toISOString().slice(0, 10) &&
+    assignment.startDate.toISOString().slice(0, 10) ===
+      normalizedStartDate.toISOString().slice(0, 10) &&
     (assignment.treatmentGroup ?? null) === normalizedTreatmentGroup &&
     (assignment.notes ?? null) === normalizedNotes;
 
@@ -2755,37 +3318,40 @@ export async function updatePlannedExperimentAssignment(
 
   const timestamp = new Date();
 
-  await prisma.$transaction(async (tx) => {
-    await tx.experimentAssignment.update({
-      where: { id: assignment.id },
-      data: {
-        startDate: normalizedStartDate,
-        treatmentGroup: normalizedTreatmentGroup ?? undefined,
-        notes: normalizedNotes ?? undefined,
-      },
-    });
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.experimentAssignment.update({
+        where: { id: assignment.id },
+        data: {
+          startDate: normalizedStartDate,
+          treatmentGroup: normalizedTreatmentGroup ?? undefined,
+          notes: normalizedNotes ?? undefined,
+        },
+      });
 
-    await tx.auditLog.create({
-      data: {
-        id: createId("audit"),
-        actorId: actor.id,
-        entityType: "experiment_assignment",
-        entityId: assignment.id,
-        action: "update_plan",
-        previousValue: {
-          startDate: assignment.startDate.toISOString().slice(0, 10),
-          treatmentGroup: assignment.treatmentGroup,
-          notes: assignment.notes,
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "experiment_assignment",
+          entityId: assignment.id,
+          action: "update_plan",
+          previousValue: {
+            startDate: assignment.startDate.toISOString().slice(0, 10),
+            treatmentGroup: assignment.treatmentGroup,
+            notes: assignment.notes,
+          },
+          newValue: {
+            startDate: normalizedStartDate.toISOString().slice(0, 10),
+            treatmentGroup: normalizedTreatmentGroup,
+            notes: normalizedNotes,
+          },
+          timestamp,
         },
-        newValue: {
-          startDate: normalizedStartDate.toISOString().slice(0, 10),
-          treatmentGroup: normalizedTreatmentGroup,
-          notes: normalizedNotes,
-        },
-        timestamp,
-      },
-    });
-  }, { timeout: 15_000, maxWait: 10_000 });
+      });
+    },
+    { timeout: 15_000, maxWait: 10_000 },
+  );
 
   return {
     ok: true,
@@ -2838,27 +3404,30 @@ export async function deletePlannedExperimentAssignment(
 
   const timestamp = new Date();
 
-  await prisma.$transaction(async (tx) => {
-    await tx.experimentAssignment.delete({
-      where: { id: assignment.id },
-    });
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.experimentAssignment.delete({
+        where: { id: assignment.id },
+      });
 
-    await tx.auditLog.create({
-      data: {
-        id: createId("audit"),
-        actorId: actor.id,
-        entityType: "experiment_assignment",
-        entityId: assignment.id,
-        action: "delete_plan",
-        previousValue: {
-          startDate: assignment.startDate.toISOString().slice(0, 10),
-          treatmentGroup: assignment.treatmentGroup,
-          notes: assignment.notes,
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "experiment_assignment",
+          entityId: assignment.id,
+          action: "delete_plan",
+          previousValue: {
+            startDate: assignment.startDate.toISOString().slice(0, 10),
+            treatmentGroup: assignment.treatmentGroup,
+            notes: assignment.notes,
+          },
+          timestamp,
         },
-        timestamp,
-      },
-    });
-  }, { timeout: 15_000, maxWait: 10_000 });
+      });
+    },
+    { timeout: 15_000, maxWait: 10_000 },
+  );
 
   return {
     ok: true,
@@ -2877,145 +3446,199 @@ export async function createBreedingSetup(
   }
 
   if (input.allowOverride && actor.role !== "admin") {
-    return { ok: false, message: "Only admins can override duplicate breeding safeguards." };
+    return {
+      ok: false,
+      message: "Only admins can override duplicate breeding safeguards.",
+    };
   }
 
   if (input.sireId === input.damId) {
-    return { ok: false, message: "Choose two different animals for the breeding setup." };
-  }
-
-  const operation = async (tx: Prisma.TransactionClient): Promise<MutationResult> => {
-  const [sire, dam, minAgeRule] = await Promise.all([
-    tx.animal.findUnique({
-      where: { id: input.sireId },
-      include: {
-        breedingAdults: {
-          where: {
-            breedingSetup: {
-              status: { in: ["planned", "active", "paused"] },
-            },
-          },
-          select: { id: true },
-        },
-        currentCage: { select: { id: true, active: true, status: true } },
-      },
-    }),
-    tx.animal.findUnique({
-      where: { id: input.damId },
-      include: {
-        breedingAdults: {
-          where: {
-            breedingSetup: {
-              status: { in: ["planned", "active", "paused"] },
-            },
-          },
-          select: { id: true },
-        },
-        currentCage: { select: { id: true, active: true, status: true } },
-      },
-    }),
-    tx.ruleConfig.findUnique({
-      where: { key: "breeder_min_age_days" },
-      select: { value: true },
-    }),
-  ]);
-
-  if (!sire || sire.outcomeStatus !== "alive") {
-    return { ok: false, message: "Choose a live sire for the breeding setup." };
-  }
-
-  if (!dam || dam.outcomeStatus !== "alive") {
-    return { ok: false, message: "Choose a live dam for the breeding setup." };
-  }
-
-  const breedingAccess = await getActorLabAccess(actor, tx);
-  if (
-    !sire.owningLabId ||
-    sire.owningLabId !== dam.owningLabId ||
-    !canManageLab(breedingAccess, sire.owningLabId)
-  ) {
-    return { ok: false, message: "Choose breeders from the same manageable lab." };
-  }
-
-  if (sire.sex !== "male") {
-    return { ok: false, message: `${sire.animalId} is not marked as a male breeder.` };
-  }
-
-  if (dam.sex !== "female") {
-    return { ok: false, message: `${dam.animalId} is not marked as a female breeder.` };
-  }
-
-  if (!sire.currentCage || !dam.currentCage) {
-    return { ok: false, message: "Both breeders need an active cage assignment before starting breeding." };
-  }
-  if (sire.currentCage.id !== dam.currentCage.id) {
-    return { ok: false, message: "Move the sire and dam into the same mating cage before starting breeding." };
-  }
-  if (
-    !sire.currentCage.active ||
-    !dam.currentCage.active ||
-    !["active", "breeding"].includes(sire.currentCage.status) ||
-    !["active", "breeding"].includes(dam.currentCage.status)
-  ) {
-    return { ok: false, message: "The mating cage must be active and available for breeding." };
-  }
-
-  const blockedStatuses = new Set([
-    "in_experiment",
-    "experiment_completed",
-    "archived",
-    "dead",
-    "euthanized",
-    "transferred_out",
-  ]);
-
-  if (blockedStatuses.has(sire.status)) {
-    return { ok: false, message: `${sire.animalId} cannot enter breeding from its current lifecycle state.` };
-  }
-
-  if (blockedStatuses.has(dam.status)) {
-    return { ok: false, message: `${dam.animalId} cannot enter breeding from its current lifecycle state.` };
-  }
-
-  if (!input.allowOverride) {
-    if (sire.status === "breeding" || sire.breedingAdults.length > 0) {
-      return { ok: false, message: `${sire.animalId} is already in an active breeding setup.` };
-    }
-
-    if (dam.status === "breeding" || dam.breedingAdults.length > 0) {
-      return { ok: false, message: `${dam.animalId} is already in an active breeding setup.` };
-    }
-  }
-
-  const breederMinAgeDays = Number(minAgeRule?.value ?? 0);
-  const referenceDate = new Date(getReferenceDate());
-  const sireAgeDays = Math.floor((referenceDate.getTime() - sire.dob.getTime()) / 86_400_000);
-  const damAgeDays = Math.floor((referenceDate.getTime() - dam.dob.getTime()) / 86_400_000);
-
-  if (sireAgeDays < breederMinAgeDays) {
     return {
       ok: false,
-      message: `${sire.animalId} is not yet old enough for breeding under the configured threshold.`,
+      message: "Choose two different animals for the breeding setup.",
     };
   }
 
-  if (damAgeDays < breederMinAgeDays) {
-    return {
-      ok: false,
-      message: `${dam.animalId} is not yet old enough for breeding under the configured threshold.`,
-    };
-  }
+  const operation = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<MutationResult> => {
+    const [sire, dam, minAgeRule] = await Promise.all([
+      tx.animal.findUnique({
+        where: { id: input.sireId },
+        include: {
+          breedingAdults: {
+            where: {
+              breedingSetup: {
+                status: { in: ["planned", "active", "paused"] },
+              },
+            },
+            select: { id: true },
+          },
+          currentCage: { select: { id: true, active: true, status: true } },
+        },
+      }),
+      tx.animal.findUnique({
+        where: { id: input.damId },
+        include: {
+          breedingAdults: {
+            where: {
+              breedingSetup: {
+                status: { in: ["planned", "active", "paused"] },
+              },
+            },
+            select: { id: true },
+          },
+          currentCage: { select: { id: true, active: true, status: true } },
+        },
+      }),
+      tx.ruleConfig.findUnique({
+        where: { key: "breeder_min_age_days" },
+        select: { value: true },
+      }),
+    ]);
 
-  const timestamp = new Date();
-  const startDate = new Date(input.startDate);
-  if (Number.isNaN(startDate.getTime())) {
-    return { ok: false, message: "Choose a valid breeding start date." };
-  }
-  if (startDate.getTime() > timestamp.getTime()) {
-    return { ok: false, message: "Breeding start date cannot be in the future." };
-  }
-  const breedingId = createId("breeding");
-  const targetSex = input.targetSex && input.targetSex !== "unknown" ? input.targetSex : null;
+    if (!sire || sire.outcomeStatus !== "alive") {
+      return {
+        ok: false,
+        message: "Choose a live sire for the breeding setup.",
+      };
+    }
+
+    if (!dam || dam.outcomeStatus !== "alive") {
+      return {
+        ok: false,
+        message: "Choose a live dam for the breeding setup.",
+      };
+    }
+
+    const breedingAccess = await getActorLabAccess(actor, tx);
+    if (
+      !sire.owningLabId ||
+      sire.owningLabId !== dam.owningLabId ||
+      !canManageLab(breedingAccess, sire.owningLabId)
+    ) {
+      return {
+        ok: false,
+        message: "Choose breeders from the same manageable lab.",
+      };
+    }
+
+    if (sire.sex !== "male") {
+      return {
+        ok: false,
+        message: `${sire.animalId} is not marked as a male breeder.`,
+      };
+    }
+
+    if (dam.sex !== "female") {
+      return {
+        ok: false,
+        message: `${dam.animalId} is not marked as a female breeder.`,
+      };
+    }
+
+    if (!sire.currentCage || !dam.currentCage) {
+      return {
+        ok: false,
+        message:
+          "Both breeders need an active cage assignment before starting breeding.",
+      };
+    }
+    if (sire.currentCage.id !== dam.currentCage.id) {
+      return {
+        ok: false,
+        message:
+          "Move the sire and dam into the same mating cage before starting breeding.",
+      };
+    }
+    if (
+      !sire.currentCage.active ||
+      !dam.currentCage.active ||
+      !["active", "breeding"].includes(sire.currentCage.status) ||
+      !["active", "breeding"].includes(dam.currentCage.status)
+    ) {
+      return {
+        ok: false,
+        message: "The mating cage must be active and available for breeding.",
+      };
+    }
+
+    const blockedStatuses = new Set([
+      "in_experiment",
+      "experiment_completed",
+      "archived",
+      "dead",
+      "euthanized",
+      "transferred_out",
+    ]);
+
+    if (blockedStatuses.has(sire.status)) {
+      return {
+        ok: false,
+        message: `${sire.animalId} cannot enter breeding from its current lifecycle state.`,
+      };
+    }
+
+    if (blockedStatuses.has(dam.status)) {
+      return {
+        ok: false,
+        message: `${dam.animalId} cannot enter breeding from its current lifecycle state.`,
+      };
+    }
+
+    if (!input.allowOverride) {
+      if (sire.status === "breeding" || sire.breedingAdults.length > 0) {
+        return {
+          ok: false,
+          message: `${sire.animalId} is already in an active breeding setup.`,
+        };
+      }
+
+      if (dam.status === "breeding" || dam.breedingAdults.length > 0) {
+        return {
+          ok: false,
+          message: `${dam.animalId} is already in an active breeding setup.`,
+        };
+      }
+    }
+
+    const breederMinAgeDays = Number(minAgeRule?.value ?? 0);
+    const referenceDate = new Date(getReferenceDate());
+    const sireAgeDays = Math.floor(
+      (referenceDate.getTime() - sire.dob.getTime()) / 86_400_000,
+    );
+    const damAgeDays = Math.floor(
+      (referenceDate.getTime() - dam.dob.getTime()) / 86_400_000,
+    );
+
+    if (sireAgeDays < breederMinAgeDays) {
+      return {
+        ok: false,
+        message: `${sire.animalId} is not yet old enough for breeding under the configured threshold.`,
+      };
+    }
+
+    if (damAgeDays < breederMinAgeDays) {
+      return {
+        ok: false,
+        message: `${dam.animalId} is not yet old enough for breeding under the configured threshold.`,
+      };
+    }
+
+    const timestamp = new Date();
+    const startDate = new Date(input.startDate);
+    if (Number.isNaN(startDate.getTime())) {
+      return { ok: false, message: "Choose a valid breeding start date." };
+    }
+    if (startDate.getTime() > timestamp.getTime()) {
+      return {
+        ok: false,
+        message: "Breeding start date cannot be in the future.",
+      };
+    }
+    const breedingId = input.id ?? createId("breeding");
+    const targetSex =
+      input.targetSex && input.targetSex !== "unknown" ? input.targetSex : null;
 
     await tx.breedingSetup.create({
       data: {
@@ -3026,13 +3649,25 @@ export async function createBreedingSetup(
         targetGenotype: input.targetGenotype.trim(),
         targetSex,
         notes: input.notes?.trim() || undefined,
+        protocolAuthorizationId: input.protocolAuthorizationId,
+        complianceEvidenceSnapshotId: input.complianceEvidenceSnapshotId,
       },
     });
 
     await tx.breedingAdult.createMany({
       data: [
-        { id: createId("breeding-adult"), breedingSetupId: breedingId, animalId: sire.id, role: "sire" },
-        { id: createId("breeding-adult"), breedingSetupId: breedingId, animalId: dam.id, role: "dam" },
+        {
+          id: createId("breeding-adult"),
+          breedingSetupId: breedingId,
+          animalId: sire.id,
+          role: "sire",
+        },
+        {
+          id: createId("breeding-adult"),
+          breedingSetupId: breedingId,
+          animalId: dam.id,
+          role: "dam",
+        },
       ],
     });
 
@@ -3105,13 +3740,15 @@ export async function createBreedingSetup(
     });
 
     return {
-    ok: true,
-    message: `Breeding setup created for ${sire.animalId} and ${dam.animalId}.`,
-    entityId: breedingId,
+      ok: true,
+      message: `Breeding setup created for ${sire.animalId} and ${dam.animalId}.`,
+      entityId: breedingId,
     };
   };
 
-  return transaction ? operation(transaction) : runSerializableTransaction(operation);
+  return transaction
+    ? operation(transaction)
+    : runSerializableTransaction(operation);
 }
 
 type BreedingCageStatusChange = {
@@ -3161,7 +3798,11 @@ export async function reconcileBreedingCageStatuses(input: {
 
     await input.tx.cage.update({
       where: { id: cage.id },
-      data: { status, lastUpdatedAt: input.auditTimestamp, version: { increment: 1 } },
+      data: {
+        status,
+        lastUpdatedAt: input.auditTimestamp,
+        version: { increment: 1 },
+      },
     });
     await input.tx.auditLog.create({
       data: {
@@ -3199,6 +3840,10 @@ export async function executeCreateBreedingSetupCommand(input: {
   idempotencyKey: string;
   requestId: string;
 }) {
+  const sireScope = await prisma.animal.findUnique({
+    where: { id: input.command.sireId },
+    select: { owningLabId: true },
+  });
   return executeIdempotentCommand({
     actor: input.actor,
     commandType: "breeding_setup.create",
@@ -3206,18 +3851,73 @@ export async function executeCreateBreedingSetupCommand(input: {
     requestId: input.requestId,
     request: input.command as unknown as Prisma.InputJsonValue,
     requiredCapability: "breeding:manage",
-    labId: input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null,
-    handler: async (tx) => {
-      const result = await createBreedingSetup(input.command, input.actor, tx);
-      return result.ok
-        ? {
-            ok: true as const,
-            result: { message: result.message, entityId: result.entityId ?? null },
-            aggregateType: "breeding_setup",
-            aggregateId: result.entityId,
-            resultingVersion: 1,
-          }
-        : { ok: false as const, code: "validation_error", message: result.message };
+    labId:
+      sireScope?.owningLabId ??
+      (input.actor.canonicalRole === "lab_user"
+        ? input.actor.activeLabId
+        : null),
+    handler: async (tx, context) => {
+      const parents = await tx.animal.findMany({
+        where: { id: { in: [input.command.sireId, input.command.damId] } },
+        select: { id: true, owningLabId: true, strainId: true },
+      });
+      const labId = parents[0]?.owningLabId;
+      if (
+        !labId ||
+        parents.length !== 2 ||
+        parents.some((parent) => parent.owningLabId !== labId)
+      ) {
+        return {
+          ok: false as const,
+          code: "compliance_protocol_out_of_scope",
+          message: "Breeding parents must remain in one lab.",
+        };
+      }
+      const breedingSetupId = createId("breeding");
+      return withComplianceWriteScope(
+        tx,
+        {
+          actor: input.actor,
+          receiptId: context.receiptId,
+          commandType: "breeding_setup.create",
+          labId,
+          aggregateType: "breeding_setup",
+          aggregateId: breedingSetupId,
+          protocolAuthorizationId: input.command.protocolAuthorizationId,
+          strainIds: parents.map((parent) => parent.strainId),
+          procedureCode: "breeding",
+          requiredPersonnelRoles: ["breeding_operator"],
+          countOperation: "none",
+        },
+        async (compliance) => {
+          const result = await createBreedingSetup(
+            {
+              ...input.command,
+              id: breedingSetupId,
+              protocolAuthorizationId: compliance.protocolAuthorizationId,
+              complianceEvidenceSnapshotId: compliance.evidenceSnapshotId,
+            },
+            input.actor,
+            tx,
+          );
+          return result.ok
+            ? {
+                ok: true as const,
+                result: {
+                  message: result.message,
+                  entityId: result.entityId ?? null,
+                },
+                aggregateType: "breeding_setup",
+                aggregateId: result.entityId,
+                resultingVersion: 1,
+              }
+            : {
+                ok: false as const,
+                code: "validation_error",
+                message: result.message,
+              };
+        },
+      );
     },
   });
 }
@@ -3226,12 +3926,18 @@ export async function transitionBreedingSetup(
   input: TransitionBreedingSetupInput,
   actor: LabActor,
   transaction?: Prisma.TransactionClient,
+  complianceEvidenceSnapshotId?: string,
 ): Promise<MutationResult> {
   if (!canCreateBreeding(actor.role)) {
-    return { ok: false, message: "Your role cannot change breeding setup status." };
+    return {
+      ok: false,
+      message: "Your role cannot change breeding setup status.",
+    };
   }
 
-  const operation = async (tx: Prisma.TransactionClient): Promise<MutationResult> => {
+  const operation = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<MutationResult> => {
     const breeding = await tx.breedingSetup.findUnique({
       where: { id: input.breedingSetupId },
       select: {
@@ -3256,7 +3962,9 @@ export async function transitionBreedingSetup(
                 status: true,
                 outcomeStatus: true,
                 currentCageId: true,
-                currentCage: { select: { id: true, active: true, status: true } },
+                currentCage: {
+                  select: { id: true, active: true, status: true },
+                },
                 experimentAssignments: {
                   where: { status: { in: ["planned", "reserved", "active"] } },
                   select: { id: true },
@@ -3267,7 +3975,10 @@ export async function transitionBreedingSetup(
         },
       },
     });
-    if (!breeding || !canManageLab(await getActorLabAccess(actor, tx), breeding.labId)) {
+    if (
+      !breeding ||
+      !canManageLab(await getActorLabAccess(actor, tx), breeding.labId)
+    ) {
       return { ok: false, message: "Breeding setup not found." };
     }
     if (breeding.status === input.targetStatus) {
@@ -3290,14 +4001,22 @@ export async function transitionBreedingSetup(
       },
       select: { newValue: true },
     });
-    const latestEffectiveDate = priorTransitionAudits.reduce<Date | null>((latest, audit) => {
-      if (!audit.newValue || typeof audit.newValue !== "object" || Array.isArray(audit.newValue)) return latest;
-      const value = (audit.newValue as Prisma.JsonObject).happenedAt;
-      if (typeof value !== "string") return latest;
-      const parsed = new Date(value);
-      if (Number.isNaN(parsed.getTime())) return latest;
-      return !latest || parsed.getTime() > latest.getTime() ? parsed : latest;
-    }, null);
+    const latestEffectiveDate = priorTransitionAudits.reduce<Date | null>(
+      (latest, audit) => {
+        if (
+          !audit.newValue ||
+          typeof audit.newValue !== "object" ||
+          Array.isArray(audit.newValue)
+        )
+          return latest;
+        const value = (audit.newValue as Prisma.JsonObject).happenedAt;
+        if (typeof value !== "string") return latest;
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return latest;
+        return !latest || parsed.getTime() > latest.getTime() ? parsed : latest;
+      },
+      null,
+    );
     const transitionError = validateBreedingTransition({
       fromStatus: breeding.status,
       toStatus: input.targetStatus,
@@ -3311,45 +4030,98 @@ export async function transitionBreedingSetup(
     if (transitionError) return { ok: false, message: transitionError };
 
     if (input.targetStatus === "active") {
-      const sireCount = breeding.adults.filter((adult) => adult.role === "sire").length;
-      const damCount = breeding.adults.filter((adult) => adult.role === "dam").length;
-      const matingCageIds = new Set(breeding.adults.map(({ animal }) => animal.currentCageId).filter(Boolean));
+      const sireCount = breeding.adults.filter(
+        (adult) => adult.role === "sire",
+      ).length;
+      const damCount = breeding.adults.filter(
+        (adult) => adult.role === "dam",
+      ).length;
+      const matingCageIds = new Set(
+        breeding.adults
+          .map(({ animal }) => animal.currentCageId)
+          .filter(Boolean),
+      );
       if (sireCount !== 1 || damCount < 1) {
-        return { ok: false, message: "Active breeding requires exactly one sire and at least one dam." };
+        return {
+          ok: false,
+          message:
+            "Active breeding requires exactly one sire and at least one dam.",
+        };
       }
-      if (matingCageIds.size !== 1 || breeding.adults.some(({ animal }) => !animal.currentCageId)) {
-        return { ok: false, message: "All breeding adults must share one active mating cage before breeding can resume." };
+      if (
+        matingCageIds.size !== 1 ||
+        breeding.adults.some(({ animal }) => !animal.currentCageId)
+      ) {
+        return {
+          ok: false,
+          message:
+            "All breeding adults must share one active mating cage before breeding can resume.",
+        };
       }
       for (const { animal } of breeding.adults) {
         if (animal.outcomeStatus !== "alive") {
-          return { ok: false, message: `${animal.animalId} is not available to resume breeding.` };
+          return {
+            ok: false,
+            message: `${animal.animalId} is not available to resume breeding.`,
+          };
         }
-        if (!animal.currentCage || !animal.currentCage.active || !["active", "breeding"].includes(animal.currentCage.status)) {
-          return { ok: false, message: `${animal.animalId} needs an active non-quarantine cage before breeding can resume.` };
+        if (
+          !animal.currentCage ||
+          !animal.currentCage.active ||
+          !["active", "breeding"].includes(animal.currentCage.status)
+        ) {
+          return {
+            ok: false,
+            message: `${animal.animalId} needs an active non-quarantine cage before breeding can resume.`,
+          };
         }
         if (animal.experimentAssignments.length) {
-          return { ok: false, message: `${animal.animalId} has an active experiment assignment.` };
+          return {
+            ok: false,
+            message: `${animal.animalId} has an active experiment assignment.`,
+          };
         }
       }
     }
 
     const updated = await tx.breedingSetup.updateMany({
-      where: { id: breeding.id, version: breeding.version, status: breeding.status },
+      where: {
+        id: breeding.id,
+        version: breeding.version,
+        status: breeding.status,
+      },
       data: {
         status: input.targetStatus,
-        endDate: isTerminalBreedingStatus(input.targetStatus) ? happenedAt : null,
+        endDate: isTerminalBreedingStatus(input.targetStatus)
+          ? happenedAt
+          : null,
+        ...(complianceEvidenceSnapshotId
+          ? { complianceEvidenceSnapshotId }
+          : {}),
         version: { increment: 1 },
       },
     });
     if (updated.count !== 1) {
-      return { ok: false, message: "Breeding setup changed before this transition was saved." };
+      return {
+        ok: false,
+        message: "Breeding setup changed before this transition was saved.",
+      };
     }
 
     const terminal = isTerminalBreedingStatus(input.targetStatus);
-    const cageIds = [...new Set(breeding.adults.map(({ animal }) => animal.currentCageId).filter(Boolean))] as string[];
+    const cageIds = [
+      ...new Set(
+        breeding.adults
+          .map(({ animal }) => animal.currentCageId)
+          .filter(Boolean),
+      ),
+    ] as string[];
     for (const { animal } of breeding.adults) {
       if (input.targetStatus === "active" && animal.status !== "breeding") {
-        await tx.animal.update({ where: { id: animal.id }, data: { status: "breeding", version: { increment: 1 } } });
+        await tx.animal.update({
+          where: { id: animal.id },
+          data: { status: "breeding", version: { increment: 1 } },
+        });
         await tx.animalStatusEvent.create({
           data: {
             id: createId("status"),
@@ -3362,7 +4134,11 @@ export async function transitionBreedingSetup(
           },
         });
       }
-      if (terminal && animal.status === "breeding" && animal.outcomeStatus === "alive") {
+      if (
+        terminal &&
+        animal.status === "breeding" &&
+        animal.outcomeStatus === "alive"
+      ) {
         const otherBreeding = await tx.breedingAdult.findFirst({
           where: {
             animalId: animal.id,
@@ -3390,17 +4166,18 @@ export async function transitionBreedingSetup(
       }
     }
 
-    const cageStatusChanges = input.targetStatus === "active" || terminal
-      ? await reconcileBreedingCageStatuses({
-          tx,
-          labId: breeding.labId,
-          actorId: actor.id,
-          effectiveAt: happenedAt,
-          auditTimestamp,
-          reason,
-          candidateCageIds: cageIds,
-        })
-      : [];
+    const cageStatusChanges =
+      input.targetStatus === "active" || terminal
+        ? await reconcileBreedingCageStatuses({
+            tx,
+            labId: breeding.labId,
+            actorId: actor.id,
+            effectiveAt: happenedAt,
+            auditTimestamp,
+            reason,
+            candidateCageIds: cageIds,
+          })
+        : [];
 
     await tx.auditLog.create({
       data: {
@@ -3419,7 +4196,10 @@ export async function transitionBreedingSetup(
           happenedAt: happenedAt.toISOString(),
           reason,
           version: breeding.version + 1,
-          adults: breeding.adults.map(({ animal, role }) => ({ animalId: animal.id, role })),
+          adults: breeding.adults.map(({ animal, role }) => ({
+            animalId: animal.id,
+            role,
+          })),
           cageStatusChanges,
         },
         timestamp: auditTimestamp,
@@ -3434,7 +4214,9 @@ export async function transitionBreedingSetup(
     };
   };
 
-  return transaction ? operation(transaction) : runSerializableTransaction(operation);
+  return transaction
+    ? operation(transaction)
+    : runSerializableTransaction(operation);
 }
 
 export async function executeTransitionBreedingSetupCommand(input: {
@@ -3444,6 +4226,10 @@ export async function executeTransitionBreedingSetupCommand(input: {
   idempotencyKey: string;
   requestId: string;
 }) {
+  const breedingScope = await prisma.breedingSetup.findUnique({
+    where: { id: input.command.breedingSetupId },
+    select: { labId: true },
+  });
   return executeIdempotentCommand({
     actor: input.actor,
     commandType: "breeding_setup.transition",
@@ -3451,21 +4237,88 @@ export async function executeTransitionBreedingSetupCommand(input: {
     requestId: input.requestId,
     request: input.command as unknown as Prisma.InputJsonValue,
     requiredCapability: "breeding:manage",
-    labId: input.actor.activeLabId,
+    labId: breedingScope?.labId ?? input.actor.activeLabId,
     aggregateType: "breeding_setup",
     aggregateId: input.command.breedingSetupId,
     expectedVersion: input.expectedVersion,
-    handler: async (tx) => {
-      const result = await transitionBreedingSetup(input.command, input.actor, tx);
+    handler: async (tx, context) => {
+      if (input.command.targetStatus === "active") {
+        const breeding = await tx.breedingSetup.findUnique({
+          where: { id: input.command.breedingSetupId },
+          select: {
+            labId: true,
+            protocolAuthorizationId: true,
+            adults: { select: { animal: { select: { strainId: true } } } },
+          },
+        });
+        if (!breeding)
+          return {
+            ok: false as const,
+            code: "not_found",
+            message: "Breeding setup not found.",
+          };
+        return withComplianceWriteScope(
+          tx,
+          {
+            actor: input.actor,
+            receiptId: context.receiptId,
+            commandType: "breeding_setup.transition",
+            labId: breeding.labId,
+            aggregateType: "breeding_setup",
+            aggregateId: input.command.breedingSetupId,
+            protocolAuthorizationId: breeding.protocolAuthorizationId,
+            strainIds: breeding.adults.map((adult) => adult.animal.strainId),
+            procedureCode: "breeding",
+            requiredPersonnelRoles: ["breeding_operator"],
+            countOperation: "none",
+          },
+          async (compliance) => {
+            const result = await transitionBreedingSetup(
+              input.command,
+              input.actor,
+              tx,
+              compliance.evidenceSnapshotId,
+            );
+            if (!result.ok)
+              return {
+                ok: false as const,
+                code: "validation_error",
+                message: result.message,
+              };
+            return {
+              ok: true as const,
+              result: {
+                message: result.message,
+                entityId: result.entityId ?? null,
+              },
+              aggregateType: "breeding_setup",
+              aggregateId: result.entityId,
+              resultingVersion: result.resultingVersion,
+            };
+          },
+        );
+      }
+      const result = await transitionBreedingSetup(
+        input.command,
+        input.actor,
+        tx,
+      );
       return result.ok
         ? {
             ok: true as const,
-            result: { message: result.message, entityId: result.entityId ?? null },
+            result: {
+              message: result.message,
+              entityId: result.entityId ?? null,
+            },
             aggregateType: "breeding_setup",
             aggregateId: result.entityId,
             resultingVersion: result.resultingVersion,
           }
-        : { ok: false as const, code: "validation_error", message: result.message };
+        : {
+            ok: false as const,
+            code: "validation_error",
+            message: result.message,
+          };
     },
   });
 }
@@ -3479,113 +4332,154 @@ export async function recordBreedingLitter(
     return { ok: false, message: "Your role cannot record litters." };
   }
 
-  const operation = async (tx: Prisma.TransactionClient): Promise<MutationResult> => {
-  const breeding = await tx.breedingSetup.findUnique({
-    where: { id: input.breedingSetupId },
-    select: {
-      id: true,
-      labId: true,
-      status: true,
-      startDate: true,
-      adults: {
-        select: {
-          role: true,
-          animal: {
-            select: {
-              owningLabId: true,
-              outcomeStatus: true,
-              currentCageId: true,
-              currentCage: { select: { active: true, status: true } },
+  const operation = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<MutationResult> => {
+    const breeding = await tx.breedingSetup.findUnique({
+      where: { id: input.breedingSetupId },
+      select: {
+        id: true,
+        labId: true,
+        status: true,
+        startDate: true,
+        adults: {
+          select: {
+            role: true,
+            animal: {
+              select: {
+                owningLabId: true,
+                outcomeStatus: true,
+                currentCageId: true,
+                currentCage: { select: { active: true, status: true } },
+              },
             },
           },
         },
-      },
-      litters: {
-        orderBy: [{ birthDate: "desc" }, { id: "desc" }],
-        select: {
-          id: true,
-          birthDate: true,
-          litterSizeBirth: true,
-          notes: true,
+        litters: {
+          orderBy: [{ birthDate: "desc" }, { id: "desc" }],
+          select: {
+            id: true,
+            birthDate: true,
+            litterSizeBirth: true,
+            notes: true,
+          },
         },
       },
-    },
-  });
+    });
 
-  if (!breeding) {
-    return { ok: false, message: "Breeding setup not found." };
-  }
+    if (!breeding) {
+      return { ok: false, message: "Breeding setup not found." };
+    }
 
-  const litterAccess = await getActorLabAccess(actor, tx);
-  const breedingLabIds = [...new Set(breeding.adults.map((adult) => adult.animal.owningLabId).filter(Boolean))];
-  if (
-    breedingLabIds.length !== 1 ||
-    breedingLabIds[0] !== breeding.labId ||
-    !canManageLab(litterAccess, breeding.labId)
-  ) {
-    return { ok: false, message: "Breeding setup not found." };
-  }
+    const litterAccess = await getActorLabAccess(actor, tx);
+    const breedingLabIds = [
+      ...new Set(
+        breeding.adults
+          .map((adult) => adult.animal.owningLabId)
+          .filter(Boolean),
+      ),
+    ];
+    if (
+      breedingLabIds.length !== 1 ||
+      breedingLabIds[0] !== breeding.labId ||
+      !canManageLab(litterAccess, breeding.labId)
+    ) {
+      return { ok: false, message: "Breeding setup not found." };
+    }
 
-  if (breeding.status !== "active") {
-    return { ok: false, message: "Only active breeding setups can receive a litter record." };
-  }
+    if (breeding.status !== "active") {
+      return {
+        ok: false,
+        message: "Only active breeding setups can receive a litter record.",
+      };
+    }
 
-  const sireCount = breeding.adults.filter((adult) => adult.role === "sire").length;
-  const damCount = breeding.adults.filter((adult) => adult.role === "dam").length;
-  const matingCageIds = new Set(breeding.adults.map((adult) => adult.animal.currentCageId).filter(Boolean));
-  const invalidAdult = breeding.adults.find(({ animal }) =>
-    animal.outcomeStatus !== "alive"
-    || !animal.currentCage
-    || !animal.currentCage.active
-    || !["active", "breeding"].includes(animal.currentCage.status));
-  if (sireCount !== 1 || damCount < 1 || matingCageIds.size !== 1 || invalidAdult) {
-    return {
-      ok: false,
-      message: "Resolve the breeding adults and shared active mating cage before recording a litter.",
-    };
-  }
+    const sireCount = breeding.adults.filter(
+      (adult) => adult.role === "sire",
+    ).length;
+    const damCount = breeding.adults.filter(
+      (adult) => adult.role === "dam",
+    ).length;
+    const matingCageIds = new Set(
+      breeding.adults
+        .map((adult) => adult.animal.currentCageId)
+        .filter(Boolean),
+    );
+    const invalidAdult = breeding.adults.find(
+      ({ animal }) =>
+        animal.outcomeStatus !== "alive" ||
+        !animal.currentCage ||
+        !animal.currentCage.active ||
+        !["active", "breeding"].includes(animal.currentCage.status),
+    );
+    if (
+      sireCount !== 1 ||
+      damCount < 1 ||
+      matingCageIds.size !== 1 ||
+      invalidAdult
+    ) {
+      return {
+        ok: false,
+        message:
+          "Resolve the breeding adults and shared active mating cage before recording a litter.",
+      };
+    }
 
-  const normalizedBirthDate = new Date(input.birthDate);
-  const timestamp = new Date();
+    const normalizedBirthDate = new Date(input.birthDate);
+    const timestamp = new Date();
 
-  if (Number.isNaN(normalizedBirthDate.getTime())) {
-    return { ok: false, message: "Choose a valid litter birth date." };
-  }
+    if (Number.isNaN(normalizedBirthDate.getTime())) {
+      return { ok: false, message: "Choose a valid litter birth date." };
+    }
 
-  if (normalizedBirthDate.getTime() < breeding.startDate.getTime()) {
-    return { ok: false, message: "Litter birth date cannot be earlier than the breeding start date." };
-  }
-  if (normalizedBirthDate.getTime() > timestamp.getTime()) {
-    return { ok: false, message: "Litter birth date cannot be in the future." };
-  }
+    if (normalizedBirthDate.getTime() < breeding.startDate.getTime()) {
+      return {
+        ok: false,
+        message:
+          "Litter birth date cannot be earlier than the breeding start date.",
+      };
+    }
+    if (normalizedBirthDate.getTime() > timestamp.getTime()) {
+      return {
+        ok: false,
+        message: "Litter birth date cannot be in the future.",
+      };
+    }
 
-  const normalizedBirthKey = normalizedBirthDate.toISOString().slice(0, 10);
-  const normalizedNotes = input.notes?.trim() || null;
-  const matchingLitter = breeding.litters.find(
-    (litter) =>
-      litter.birthDate.toISOString().slice(0, 10) === normalizedBirthKey &&
-      litter.litterSizeBirth === input.litterSizeBirth &&
-      (litter.notes ?? null) === normalizedNotes,
-  );
+    const normalizedBirthKey = normalizedBirthDate.toISOString().slice(0, 10);
+    const normalizedNotes = input.notes?.trim() || null;
+    const matchingLitter = breeding.litters.find(
+      (litter) =>
+        litter.birthDate.toISOString().slice(0, 10) === normalizedBirthKey &&
+        litter.litterSizeBirth === input.litterSizeBirth &&
+        (litter.notes ?? null) === normalizedNotes,
+    );
 
-  if (matchingLitter) {
-    return {
-      ok: true,
-      message: `Litter recorded for ${breeding.id}.`,
-      entityId: matchingLitter.id,
-    };
-  }
+    if (matchingLitter) {
+      if (input.litterId) {
+        return { ok: false, message: "This litter has already been recorded." };
+      }
+      return {
+        ok: true,
+        message: `Litter recorded for ${breeding.id}.`,
+        entityId: matchingLitter.id,
+      };
+    }
 
-  const latestLitter = breeding.litters[0];
+    const latestLitter = breeding.litters[0];
 
-  if (latestLitter && normalizedBirthDate.getTime() <= latestLitter.birthDate.getTime()) {
-    return {
-      ok: false,
-      message: "Litter birth date must be later than the latest recorded litter for this breeding setup.",
-    };
-  }
+    if (
+      latestLitter &&
+      normalizedBirthDate.getTime() <= latestLitter.birthDate.getTime()
+    ) {
+      return {
+        ok: false,
+        message:
+          "Litter birth date must be later than the latest recorded litter for this breeding setup.",
+      };
+    }
 
-  const litterId = createId("litter");
+    const litterId = input.litterId ?? createId("litter");
 
     await tx.litter.create({
       data: {
@@ -3618,14 +4512,16 @@ export async function recordBreedingLitter(
       data: { version: { increment: 1 } },
       select: { version: true },
     });
-  return {
-    ok: true,
-    message: `Litter recorded for ${breeding.id}.`,
-    entityId: litterId,
-    resultingVersion: advancedBreeding.version,
+    return {
+      ok: true,
+      message: `Litter recorded for ${breeding.id}.`,
+      entityId: litterId,
+      resultingVersion: advancedBreeding.version,
+    };
   };
-  };
-  return transaction ? operation(transaction) : runSerializableTransaction(operation);
+  return transaction
+    ? operation(transaction)
+    : runSerializableTransaction(operation);
 }
 
 export async function executeRecordBreedingLitterCommand(input: {
@@ -3635,6 +4531,10 @@ export async function executeRecordBreedingLitterCommand(input: {
   requestId: string;
   expectedVersion: number;
 }) {
+  const breedingScope = await prisma.breedingSetup.findUnique({
+    where: { id: input.command.breedingSetupId },
+    select: { labId: true },
+  });
   return executeIdempotentCommand({
     actor: input.actor,
     commandType: "breeding.record_litter",
@@ -3642,20 +4542,82 @@ export async function executeRecordBreedingLitterCommand(input: {
     requestId: input.requestId,
     request: input.command as unknown as Prisma.InputJsonValue,
     requiredCapability: "breeding:manage",
-    labId: input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null,
+    labId:
+      breedingScope?.labId ??
+      (input.actor.canonicalRole === "lab_user"
+        ? input.actor.activeLabId
+        : null),
     aggregateType: "breeding_setup",
     aggregateId: input.command.breedingSetupId,
     expectedVersion: input.expectedVersion,
-    handler: async (tx) => {
-      const result = await recordBreedingLitter(input.command, {
-        id: input.actor.id, role: input.actor.role, activeLabId: input.actor.activeLabId,
-      }, tx);
-      if (!result.ok) return { ok: false as const, code: "validation_error", message: result.message };
-      return {
-        ok: true as const,
-        result: { message: result.message, entityId: result.entityId ?? null },
-        resultingVersion: result.resultingVersion,
-      };
+    handler: async (tx, context) => {
+      const breeding = await tx.breedingSetup.findUnique({
+        where: { id: input.command.breedingSetupId },
+        select: {
+          labId: true,
+          protocolAuthorizationId: true,
+          adults: { select: { animal: { select: { strainId: true } } } },
+        },
+      });
+      if (!breeding)
+        return {
+          ok: false as const,
+          code: "not_found",
+          message: "Breeding setup not found.",
+        };
+      const litterId = createId("litter");
+      return withComplianceWriteScope(
+        tx,
+        {
+          actor: input.actor,
+          receiptId: context.receiptId,
+          commandType: "breeding.record_litter",
+          labId: breeding.labId,
+          aggregateType: "litter",
+          aggregateId: litterId,
+          commandAggregateType: "breeding_setup",
+          commandAggregateId: input.command.breedingSetupId,
+          protocolAuthorizationId: breeding.protocolAuthorizationId,
+          strainIds: breeding.adults.map((adult) => adult.animal.strainId),
+          procedureCode: "breeding",
+          requiredPersonnelRoles: ["breeding_operator"],
+          countOperation: "reserve",
+          quantity: input.command.litterSizeBirth,
+          allocationKey: `litter:${litterId}:birth`,
+        },
+        async (compliance) => {
+          const result = await recordBreedingLitter(
+            { ...input.command, litterId },
+            {
+              id: input.actor.id,
+              role: input.actor.role,
+              activeLabId: input.actor.activeLabId,
+            },
+            tx,
+          );
+          if (!result.ok)
+            return {
+              ok: false as const,
+              code: "validation_error",
+              message: result.message,
+            };
+          await tx.litter.update({
+            where: { id: result.entityId! },
+            data: {
+              complianceEvidenceSnapshotId: compliance.evidenceSnapshotId,
+              protocolCountAllocationId: compliance.allocationId,
+            },
+          });
+          return {
+            ok: true as const,
+            result: {
+              message: result.message,
+              entityId: result.entityId ?? null,
+            },
+            resultingVersion: result.resultingVersion,
+          };
+        },
+      );
     },
   });
 }
@@ -3663,6 +4625,7 @@ export async function executeRecordBreedingLitterCommand(input: {
 export async function weanLitterToCages(
   input: WeanLitterInput,
   actor: LabActor,
+  transaction?: Prisma.TransactionClient,
 ): Promise<MutationResult> {
   if (!canWeanLitter(actor.role)) {
     return { ok: false, message: "Your role cannot record litter weaning." };
@@ -3671,19 +4634,35 @@ export async function weanLitterToCages(
   const totalWeaned = input.femaleCount + input.maleCount;
 
   if (totalWeaned <= 0) {
-    return { ok: false, message: "Enter at least one male or female pup for weaning." };
+    return {
+      ok: false,
+      message: "Enter at least one male or female pup for weaning.",
+    };
   }
 
   if (input.femaleCount > 0 && !input.femaleCageId) {
-    return { ok: false, message: "Choose a female cage before assigning female pups." };
+    return {
+      ok: false,
+      message: "Choose a female cage before assigning female pups.",
+    };
   }
 
   if (input.maleCount > 0 && !input.maleCageId) {
-    return { ok: false, message: "Choose a male cage before assigning male pups." };
+    return {
+      ok: false,
+      message: "Choose a male cage before assigning male pups.",
+    };
   }
 
-  if (input.femaleCount > 0 && input.maleCount > 0 && input.femaleCageId === input.maleCageId) {
-    return { ok: false, message: "Assign male and female pups into separate cages at weaning." };
+  if (
+    input.femaleCount > 0 &&
+    input.maleCount > 0 &&
+    input.femaleCageId === input.maleCageId
+  ) {
+    return {
+      ok: false,
+      message: "Assign male and female pups into separate cages at weaning.",
+    };
   }
 
   const normalizedWeanDate = new Date(input.weanDate);
@@ -3693,9 +4672,10 @@ export async function weanLitterToCages(
   }
 
   const actorAccess = await getActorLabAccess(actor);
+  const db = transaction ?? prisma;
 
   const [litter, strain, femaleCage, maleCage] = await Promise.all([
-    prisma.litter.findUnique({
+    db.litter.findUnique({
       where: { id: input.litterId },
       select: {
         id: true,
@@ -3730,20 +4710,32 @@ export async function weanLitterToCages(
         },
       },
     }),
-    prisma.strain.findUnique({
+    db.strain.findUnique({
       where: { id: input.strainId },
       select: { id: true, name: true },
     }),
     input.femaleCageId
-      ? prisma.cage.findUnique({
+      ? db.cage.findUnique({
           where: { id: input.femaleCageId },
-          select: { id: true, status: true, active: true, barcode: true, labId: true },
+          select: {
+            id: true,
+            status: true,
+            active: true,
+            barcode: true,
+            labId: true,
+          },
         })
       : Promise.resolve(null),
     input.maleCageId
-      ? prisma.cage.findUnique({
+      ? db.cage.findUnique({
           where: { id: input.maleCageId },
-          select: { id: true, status: true, active: true, barcode: true, labId: true },
+          select: {
+            id: true,
+            status: true,
+            active: true,
+            barcode: true,
+            labId: true,
+          },
         })
       : Promise.resolve(null),
   ]);
@@ -3753,25 +4745,38 @@ export async function weanLitterToCages(
   }
 
   if (!strain) {
-    return { ok: false, message: "Choose a valid strain for the weaned progeny." };
+    return {
+      ok: false,
+      message: "Choose a valid strain for the weaned progeny.",
+    };
   }
 
   if (normalizedWeanDate.getTime() < litter.birthDate.getTime()) {
-    return { ok: false, message: "Weaning date cannot be earlier than the litter birth date." };
+    return {
+      ok: false,
+      message: "Weaning date cannot be earlier than the litter birth date.",
+    };
   }
 
   if (totalWeaned > litter.litterSizeBirth) {
-    return { ok: false, message: "Weaning count cannot exceed the recorded litter size at birth." };
+    return {
+      ok: false,
+      message: "Weaning count cannot exceed the recorded litter size at birth.",
+    };
   }
 
   if (litter.litterSizeWean !== null) {
-    return { ok: false, message: "This litter already has a recorded weaning outcome." };
+    return {
+      ok: false,
+      message: "This litter already has a recorded weaning outcome.",
+    };
   }
 
   if (litter.litterAnimals.length > 0) {
     return {
       ok: false,
-      message: "This litter already has linked progeny records. Review those pups from the colony table instead of creating a second weaning batch.",
+      message:
+        "This litter already has linked progeny records. Review those pups from the colony table instead of creating a second weaning batch.",
     };
   }
 
@@ -3789,37 +4794,66 @@ export async function weanLitterToCages(
     parentLabIds[0] !== breedingLabId ||
     !canManageLab(actorAccess, breedingLabId)
   ) {
-    return { ok: false, message: "You cannot wean a litter owned by another lab." };
+    return {
+      ok: false,
+      message: "You cannot wean a litter owned by another lab.",
+    };
   }
 
   const blockedCageStatuses = new Set(["closed", "retired"]);
 
-  if (input.femaleCount > 0 && (!femaleCage || !femaleCage.active || blockedCageStatuses.has(femaleCage.status))) {
-    return { ok: false, message: "Choose an active female holding cage for the weaned litter." };
+  if (
+    input.femaleCount > 0 &&
+    (!femaleCage ||
+      !femaleCage.active ||
+      blockedCageStatuses.has(femaleCage.status))
+  ) {
+    return {
+      ok: false,
+      message: "Choose an active female holding cage for the weaned litter.",
+    };
   }
 
-  if (input.maleCount > 0 && (!maleCage || !maleCage.active || blockedCageStatuses.has(maleCage.status))) {
-    return { ok: false, message: "Choose an active male holding cage for the weaned litter." };
+  if (
+    input.maleCount > 0 &&
+    (!maleCage || !maleCage.active || blockedCageStatuses.has(maleCage.status))
+  ) {
+    return {
+      ok: false,
+      message: "Choose an active male holding cage for the weaned litter.",
+    };
   }
 
   const destinationLabIds = new Set(
-    [femaleCage?.labId, maleCage?.labId].filter((labId): labId is string => Boolean(labId)),
+    [femaleCage?.labId, maleCage?.labId].filter((labId): labId is string =>
+      Boolean(labId),
+    ),
   );
   if ([...destinationLabIds].some((labId) => labId !== breedingLabId)) {
-    return { ok: false, message: "Wean progeny into cages owned by the breeding setup's lab." };
+    return {
+      ok: false,
+      message: "Wean progeny into cages owned by the breeding setup's lab.",
+    };
   }
 
-  const sire = litter.breedingSetup.adults.find((adult) => adult.role === "sire")?.animal ?? null;
-  const dam = litter.breedingSetup.adults.find((adult) => adult.role === "dam")?.animal ?? null;
+  const sire =
+    litter.breedingSetup.adults.find((adult) => adult.role === "sire")
+      ?.animal ?? null;
+  const dam =
+    litter.breedingSetup.adults.find((adult) => adult.role === "dam")?.animal ??
+    null;
   const projectSummaryCandidates = new Set(
     litter.breedingSetup.adults
       .map((adult) => adult.animal?.projectSummary ?? null)
       .filter((value): value is string => Boolean(value)),
   );
-  const inheritedProjectSummary = projectSummaryCandidates.size === 1 ? [...projectSummaryCandidates][0] : undefined;
+  const inheritedProjectSummary =
+    projectSummaryCandidates.size === 1
+      ? [...projectSummaryCandidates][0]
+      : undefined;
   const timestamp = new Date();
 
-  const weaningResult = await runSerializableTransaction(async (tx) => {
+  const operation = async (tx: Prisma.TransactionClient) => {
     const freshLitter = await tx.litter.findUnique({
       where: { id: litter.id },
       select: {
@@ -3834,12 +4868,22 @@ export async function weanLitterToCages(
       return { ok: false as const, message: "Litter not found." };
     }
 
-    if (freshLitter.litterSizeWean !== null || freshLitter._count.litterAnimals > 0) {
-      return { ok: false as const, message: "This litter already has a recorded weaning outcome." };
+    if (
+      freshLitter.litterSizeWean !== null ||
+      freshLitter._count.litterAnimals > 0
+    ) {
+      return {
+        ok: false as const,
+        message: "This litter already has a recorded weaning outcome.",
+      };
     }
 
     if (totalWeaned > freshLitter.litterSizeBirth) {
-      return { ok: false as const, message: "Weaning count cannot exceed the recorded litter size at birth." };
+      return {
+        ok: false as const,
+        message:
+          "Weaning count cannot exceed the recorded litter size at birth.",
+      };
     }
 
     const freshIdentifiers = buildNextAnimalIdentifiers(
@@ -3847,7 +4891,11 @@ export async function weanLitterToCages(
       freshLitter.birthDate.getUTCFullYear(),
       totalWeaned,
     );
-    const facilityAnimalIds = await allocateFacilityIdentifiers(tx, "animal", totalWeaned);
+    const facilityAnimalIds = await allocateFacilityIdentifiers(
+      tx,
+      "animal",
+      totalWeaned,
+    );
     const animalsToCreate = [
       ...Array.from({ length: input.femaleCount }, (_, index) => ({
         id: createId("animal"),
@@ -3869,7 +4917,9 @@ export async function weanLitterToCages(
     const plannedAssignments = [
       { cageId: input.femaleCageId, count: input.femaleCount },
       { cageId: input.maleCageId, count: input.maleCount },
-    ].filter((assignment): assignment is { cageId: string; count: number } => Boolean(assignment.cageId && assignment.count));
+    ].filter((assignment): assignment is { cageId: string; count: number } =>
+      Boolean(assignment.cageId && assignment.count),
+    );
 
     for (const assignment of plannedAssignments) {
       const capacityCheck = await validateProjectedCageOccupancy(
@@ -3933,7 +4983,9 @@ export async function weanLitterToCages(
       },
     });
 
-    const cageIds = [input.femaleCageId, input.maleCageId].filter((value): value is string => Boolean(value));
+    const cageIds = [input.femaleCageId, input.maleCageId].filter(
+      (value): value is string => Boolean(value),
+    );
 
     if (cageIds.length > 0) {
       await tx.cage.updateMany({
@@ -3970,7 +5022,10 @@ export async function weanLitterToCages(
       },
     });
     return { ok: true as const };
-  });
+  };
+  const weaningResult = transaction
+    ? await operation(transaction)
+    : await runSerializableTransaction(operation);
 
   if (!weaningResult.ok) {
     return weaningResult;
@@ -3983,12 +5038,160 @@ export async function weanLitterToCages(
   };
 }
 
+export async function executeWeanLitterCommand(input: {
+  actor: ResolvedActor;
+  command: WeanLitterInput;
+  idempotencyKey: string;
+  requestId: string;
+}) {
+  const litterScope = await prisma.litter.findUnique({
+    where: { id: input.command.litterId },
+    select: { breedingSetup: { select: { labId: true } } },
+  });
+  return executeIdempotentCommand({
+    actor: input.actor,
+    commandType: "breeding.wean_litter",
+    idempotencyKey: input.idempotencyKey,
+    requestId: input.requestId,
+    request: input.command as unknown as Prisma.InputJsonValue,
+    requiredCapability: "breeding:manage",
+    labId:
+      litterScope?.breedingSetup.labId ??
+      (input.actor.canonicalRole === "lab_user"
+        ? input.actor.activeLabId
+        : null),
+    aggregateType: "litter",
+    aggregateId: input.command.litterId,
+    handler: async (tx, { receiptId }) =>
+      withM13MutationSavepoint(tx, async () => {
+        const litter = await tx.litter.findUnique({
+          where: { id: input.command.litterId },
+          select: {
+            id: true,
+            litterSizeBirth: true,
+            protocolCountAllocationId: true,
+            protocolCountAllocation: {
+              select: {
+                allocationKey: true,
+                aggregateType: true,
+                aggregateId: true,
+                reservedQuantity: true,
+                consumedQuantity: true,
+                releasedQuantity: true,
+              },
+            },
+            breedingSetup: {
+              select: { labId: true, protocolAuthorizationId: true },
+            },
+          },
+        });
+        if (!litter) {
+          return {
+            ok: false as const,
+            code: "not_found",
+            message: "Litter not found.",
+          };
+        }
+        const allocation = litter.protocolCountAllocation;
+        const expectedAllocationKey = `litter:${litter.id}:birth`;
+        if (
+          !litter.protocolCountAllocationId ||
+          !allocation ||
+          allocation.allocationKey !== expectedAllocationKey ||
+          allocation.aggregateType !== "litter" ||
+          allocation.aggregateId !== litter.id ||
+          allocation.reservedQuantity !== litter.litterSizeBirth ||
+          allocation.consumedQuantity !== 0 ||
+          allocation.releasedQuantity !== 0
+        ) {
+          return {
+            ok: false as const,
+            code: "compliance_count_conflict",
+            message:
+              "The litter has no exact unsettled birth-to-weaning protocol allocation.",
+          };
+        }
+        const totalWeaned =
+          input.command.femaleCount + input.command.maleCount;
+        if (totalWeaned < 1 || totalWeaned > allocation.reservedQuantity) {
+          return {
+            ok: false as const,
+            code: "validation_error",
+            message:
+              "Weaning count must be positive and cannot exceed the litter's exact protocol allocation.",
+          };
+        }
+        const compliance = await evaluateAndWriteComplianceEvidence(tx, {
+          actor: input.actor,
+          receiptId,
+          commandType: "breeding.wean_litter",
+          labId: litter.breedingSetup.labId,
+          aggregateType: "litter",
+          aggregateId: litter.id,
+          protocolAuthorizationId:
+            litter.breedingSetup.protocolAuthorizationId,
+          strainIds: [input.command.strainId],
+          procedureCode: "breeding",
+          requiredPersonnelRoles: ["breeding_operator"],
+          countOperation: "consume",
+          quantity: totalWeaned,
+          sourceAllocationId: litter.protocolCountAllocationId,
+          allocationKey: `litter:${litter.id}:wean:consume`,
+          evidenceKey: "wean-consume",
+        });
+        if (!compliance.ok) return compliance;
+        const mutation = await weanLitterToCages(
+          input.command,
+          {
+            id: input.actor.id,
+            role: input.actor.role,
+            activeLabId: input.actor.activeLabId,
+          },
+          tx,
+        );
+        if (!mutation.ok) {
+          return {
+            ok: false as const,
+            code: "validation_error",
+            message: mutation.message,
+          };
+        }
+        const mortality = allocation.reservedQuantity - totalWeaned;
+        if (mortality > 0) {
+          const released = await releaseProtocolReservation(tx, {
+            actor: input.actor,
+            receiptId,
+            protocolAuthorizationId: compliance.protocolAuthorizationId,
+            allocationId: litter.protocolCountAllocationId,
+            quantity: mortality,
+            allocationKey: `litter:${litter.id}:wean:release`,
+            aggregateType: "litter",
+            aggregateId: litter.id,
+          });
+          if (!released.ok) return released;
+        }
+        return {
+          ok: true as const,
+          result: {
+            message: mutation.message,
+            entityId: mutation.entityId ?? litter.id,
+          },
+          aggregateType: "litter",
+          aggregateId: litter.id,
+        };
+      }),
+  });
+}
+
 export async function recordAnimalGenotype(
   input: RecordAnimalGenotypeInput,
   actor: LabActor,
 ): Promise<MutationResult> {
   if (!canRecordGenotype(actor.role)) {
-    return { ok: false, message: "Your role cannot record genotyping results." };
+    return {
+      ok: false,
+      message: "Your role cannot record genotyping results.",
+    };
   }
 
   const [animal, allele, existingAlleles] = await Promise.all([
@@ -4032,18 +5235,30 @@ export async function recordAnimalGenotype(
   }
 
   if (animal.outcomeStatus !== "alive") {
-    return { ok: false, message: "Only live animals can receive new genotyping records." };
+    return {
+      ok: false,
+      message: "Only live animals can receive new genotyping records.",
+    };
   }
 
   const normalizedSampleDate = new Date(input.sampleDate);
   const normalizedResultDate = new Date(input.resultDate);
 
-  if (Number.isNaN(normalizedSampleDate.getTime()) || Number.isNaN(normalizedResultDate.getTime())) {
-    return { ok: false, message: "Choose valid sample and assay dates for the genotype record." };
+  if (
+    Number.isNaN(normalizedSampleDate.getTime()) ||
+    Number.isNaN(normalizedResultDate.getTime())
+  ) {
+    return {
+      ok: false,
+      message: "Choose valid sample and assay dates for the genotype record.",
+    };
   }
 
   if (normalizedResultDate.getTime() < normalizedSampleDate.getTime()) {
-    return { ok: false, message: "Assay date cannot be earlier than sample collection date." };
+    return {
+      ok: false,
+      message: "Assay date cannot be earlier than sample collection date.",
+    };
   }
 
   const normalizedZygosity = input.zygosity.trim();
@@ -4051,7 +5266,11 @@ export async function recordAnimalGenotype(
   const normalizedConfidence = input.confidence?.trim() || undefined;
   const normalizedProvider = input.provider?.trim() || undefined;
   const normalizedSampleId = input.sampleId?.trim() || undefined;
-  const finalCall = buildFinalGenotypeCall(allele.name, normalizedZygosity, input.status);
+  const finalCall = buildFinalGenotypeCall(
+    allele.name,
+    normalizedZygosity,
+    input.status,
+  );
   const existingRecord = await prisma.genotypingRecord.findFirst({
     where: {
       animalId: animal.id,
@@ -4068,7 +5287,10 @@ export async function recordAnimalGenotype(
 
   if (existingRecord) {
     const preparedAttachment = input.attachment
-      ? await prepareAttachmentUpload(input.attachment, "genotyping-records").catch((error) => {
+      ? await prepareAttachmentUpload(
+          input.attachment,
+          "genotyping-records",
+        ).catch((error) => {
           if (error instanceof Error) {
             return error;
           }
@@ -4083,16 +5305,19 @@ export async function recordAnimalGenotype(
 
     if (preparedAttachment) {
       try {
-        await prisma.$transaction(async (tx) => {
-          await createAttachmentRecord(tx, {
-            actorId: actor.id,
-            labId: animal.owningLabId!,
-            timestamp: new Date(),
-            preparedAttachment,
-            animalId: animal.id,
-            genotypingRecordId: existingRecord.id,
-          });
-        }, { timeout: 15_000, maxWait: 10_000 });
+        await prisma.$transaction(
+          async (tx) => {
+            await createAttachmentRecord(tx, {
+              actorId: actor.id,
+              labId: animal.owningLabId!,
+              timestamp: new Date(),
+              preparedAttachment,
+              animalId: animal.id,
+              genotypingRecordId: existingRecord.id,
+            });
+          },
+          { timeout: 15_000, maxWait: 10_000 },
+        );
       } catch (error) {
         await removeStoredAttachment(preparedAttachment.storageUrl);
         throw error;
@@ -4115,9 +5340,14 @@ export async function recordAnimalGenotype(
       callStatus: input.status,
     },
   ];
-  const genotypeResolved = effectiveAlleles.length > 0 && effectiveAlleles.every((entry) => entry.callStatus === "confirmed");
+  const genotypeResolved =
+    effectiveAlleles.length > 0 &&
+    effectiveAlleles.every((entry) => entry.callStatus === "confirmed");
   const preparedAttachment = input.attachment
-    ? await prepareAttachmentUpload(input.attachment, "genotyping-records").catch((error) => {
+    ? await prepareAttachmentUpload(
+        input.attachment,
+        "genotyping-records",
+      ).catch((error) => {
         if (error instanceof Error) {
           return error;
         }
@@ -4131,92 +5361,98 @@ export async function recordAnimalGenotype(
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.genotypingRecord.create({
-        data: {
-          id: recordId,
-          labId: animal.owningLabId!,
-          animalId: animal.id,
-          sourceType: input.sourceType.trim(),
-          assayType: input.assayType.trim(),
-          sampleId: normalizedSampleId,
-          markerTested: allele.name,
-          resultText: normalizedResultText,
-          sampleDate: normalizedSampleDate,
-          resultDate: normalizedResultDate,
-          operatorId: actor.id,
-          provider: normalizedProvider,
-          verifiedById: input.status === "confirmed" ? actor.id : undefined,
-          finalCall,
-          status: input.status,
-          confidence: normalizedConfidence,
-        },
-      });
-
-      if (preparedAttachment) {
-        await createAttachmentRecord(tx, {
-          actorId: actor.id,
-          labId: animal.owningLabId!,
-          timestamp,
-          preparedAttachment,
-          animalId: animal.id,
-          genotypingRecordId: recordId,
-        });
-      }
-
-      await tx.animalAllele.upsert({
-        where: {
-          animalId_alleleId: {
-            animalId: animal.id,
-            alleleId: allele.id,
-          },
-        },
-        create: {
-          id: createId("animal-allele"),
-          animalId: animal.id,
-          alleleId: allele.id,
-          zygosity: normalizedZygosity,
-          callStatus: input.status,
-        },
-        update: {
-          zygosity: normalizedZygosity,
-          callStatus: input.status,
-        },
-      });
-
-      if (shouldClearPendingGenotypeStatus(animal.experimentalStatus) && genotypeResolved) {
-        await tx.animal.update({
-          where: { id: animal.id },
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.genotypingRecord.create({
           data: {
-            experimentalStatus: "Not assigned",
+            id: recordId,
+            labId: animal.owningLabId!,
+            animalId: animal.id,
+            sourceType: input.sourceType.trim(),
+            assayType: input.assayType.trim(),
+            sampleId: normalizedSampleId,
+            markerTested: allele.name,
+            resultText: normalizedResultText,
+            sampleDate: normalizedSampleDate,
+            resultDate: normalizedResultDate,
+            operatorId: actor.id,
+            provider: normalizedProvider,
+            verifiedById: input.status === "confirmed" ? actor.id : undefined,
+            finalCall,
+            status: input.status,
+            confidence: normalizedConfidence,
           },
         });
-      }
 
-      await tx.auditLog.create({
-        data: {
-          id: createId("audit"),
-          actorId: actor.id,
-          entityType: "genotyping_record",
-          entityId: recordId,
-          action: "create",
-          newValue: {
+        if (preparedAttachment) {
+          await createAttachmentRecord(tx, {
+            actorId: actor.id,
+            labId: animal.owningLabId!,
+            timestamp,
+            preparedAttachment,
+            animalId: animal.id,
+            genotypingRecordId: recordId,
+          });
+        }
+
+        await tx.animalAllele.upsert({
+          where: {
+            animalId_alleleId: {
+              animalId: animal.id,
+              alleleId: allele.id,
+            },
+          },
+          create: {
+            id: createId("animal-allele"),
             animalId: animal.id,
             alleleId: allele.id,
             zygosity: normalizedZygosity,
-            status: input.status,
-            sampleDate: input.sampleDate,
-            resultDate: input.resultDate,
-            sampleId: normalizedSampleId,
-            sourceType: input.sourceType.trim(),
-            assayType: input.assayType.trim(),
-            provider: normalizedProvider,
-            attachmentLabel: preparedAttachment?.label ?? null,
+            callStatus: input.status,
           },
-          timestamp,
-        },
-      });
-    }, { timeout: 15_000, maxWait: 10_000 });
+          update: {
+            zygosity: normalizedZygosity,
+            callStatus: input.status,
+          },
+        });
+
+        if (
+          shouldClearPendingGenotypeStatus(animal.experimentalStatus) &&
+          genotypeResolved
+        ) {
+          await tx.animal.update({
+            where: { id: animal.id },
+            data: {
+              experimentalStatus: "Not assigned",
+            },
+          });
+        }
+
+        await tx.auditLog.create({
+          data: {
+            id: createId("audit"),
+            actorId: actor.id,
+            entityType: "genotyping_record",
+            entityId: recordId,
+            action: "create",
+            newValue: {
+              animalId: animal.id,
+              alleleId: allele.id,
+              zygosity: normalizedZygosity,
+              status: input.status,
+              sampleDate: input.sampleDate,
+              resultDate: input.resultDate,
+              sampleId: normalizedSampleId,
+              sourceType: input.sourceType.trim(),
+              assayType: input.assayType.trim(),
+              provider: normalizedProvider,
+              attachmentLabel: preparedAttachment?.label ?? null,
+            },
+            timestamp,
+          },
+        });
+      },
+      { timeout: 15_000, maxWait: 10_000 },
+    );
   } catch (error) {
     if (preparedAttachment) {
       await removeStoredAttachment(preparedAttachment.storageUrl);
@@ -4237,7 +5473,10 @@ export async function importGenotypeCsvBatch(
   actor: LabActor,
 ): Promise<MutationResult> {
   if (!canRecordGenotype(actor.role)) {
-    return { ok: false, message: "Your role cannot import genotyping results." };
+    return {
+      ok: false,
+      message: "Your role cannot import genotyping results.",
+    };
   }
 
   const parsed = parseGenotypeImportCsv(input.csvText);
@@ -4245,14 +5484,17 @@ export async function importGenotypeCsvBatch(
   if (!parsed.rows.length) {
     return {
       ok: false,
-      message: parsed.errors[0] ?? "No valid genotype rows were found in the uploaded CSV.",
+      message:
+        parsed.errors[0] ??
+        "No valid genotype rows were found in the uploaded CSV.",
     };
   }
 
   if (parsed.rows.length > 250) {
     return {
       ok: false,
-      message: "Limit each batch import to 250 genotype rows so validation and audit remain tractable.",
+      message:
+        "Limit each batch import to 250 genotype rows so validation and audit remain tractable.",
     };
   }
 
@@ -4277,7 +5519,10 @@ export async function importGenotypeCsvBatch(
     }),
   ]);
 
-  const animalsByLookup = new Map<string, { id: string; animalId: string; labId: string }>();
+  const animalsByLookup = new Map<
+    string,
+    { id: string; animalId: string; labId: string }
+  >();
 
   for (const animal of animals) {
     animalsByLookup.set(animal.animalId.toLowerCase(), animal);
@@ -4288,7 +5533,10 @@ export async function importGenotypeCsvBatch(
   const allelesByLookup = new Map<string, { id: string; name: string }>();
 
   for (const allele of alleles) {
-    const keys = new Set([allele.name.toLowerCase(), allele.gene.toLowerCase()]);
+    const keys = new Set([
+      allele.name.toLowerCase(),
+      allele.gene.toLowerCase(),
+    ]);
 
     for (const key of keys) {
       alleleKeyCounts.set(key, (alleleKeyCounts.get(key) ?? 0) + 1);
@@ -4303,21 +5551,27 @@ export async function importGenotypeCsvBatch(
     const animal = animalsByLookup.get(row.animalLookup.toLowerCase());
 
     if (!animal) {
-      errors.push(`Row ${row.rowNumber}: animal '${row.animalLookup}' was not found.`);
+      errors.push(
+        `Row ${row.rowNumber}: animal '${row.animalLookup}' was not found.`,
+      );
       continue;
     }
 
     const alleleLookupKey = row.alleleLookup.toLowerCase();
 
     if ((alleleKeyCounts.get(alleleLookupKey) ?? 0) > 1) {
-      errors.push(`Row ${row.rowNumber}: allele lookup '${row.alleleLookup}' is ambiguous. Use the exact allele name.`);
+      errors.push(
+        `Row ${row.rowNumber}: allele lookup '${row.alleleLookup}' is ambiguous. Use the exact allele name.`,
+      );
       continue;
     }
 
     const allele = allelesByLookup.get(alleleLookupKey);
 
     if (!allele) {
-      errors.push(`Row ${row.rowNumber}: allele '${row.alleleLookup}' was not found.`);
+      errors.push(
+        `Row ${row.rowNumber}: allele '${row.alleleLookup}' was not found.`,
+      );
       continue;
     }
 
@@ -4350,12 +5604,15 @@ export async function importGenotypeCsvBatch(
   if (!successCount) {
     return {
       ok: false,
-      message: errors[0] ?? "The genotype batch import did not create any records.",
+      message:
+        errors[0] ?? "The genotype batch import did not create any records.",
     };
   }
 
   const fileLabel = input.fileName ? ` from ${input.fileName}` : "";
-  const errorSummary = errors.length ? ` ${errors.length} row${errors.length === 1 ? "" : "s"} failed.` : "";
+  const errorSummary = errors.length
+    ? ` ${errors.length} row${errors.length === 1 ? "" : "s"} failed.`
+    : "";
   const firstError = errors.length ? ` First issue: ${errors[0]}` : "";
 
   return {
@@ -4369,11 +5626,17 @@ export async function createSampleRecord(
   actor: LabActor,
 ): Promise<MutationResult> {
   if (!canRecordSample(actor.role)) {
-    return { ok: false, message: "Your role cannot record new sample inventory." };
+    return {
+      ok: false,
+      message: "Your role cannot record new sample inventory.",
+    };
   }
   const normalizedCollectedAt = new Date(input.collectedAt);
   if (Number.isNaN(normalizedCollectedAt.getTime())) {
-    return { ok: false, message: "Choose a valid collection date for the sample record." };
+    return {
+      ok: false,
+      message: "Choose a valid collection date for the sample record.",
+    };
   }
   const normalizedSampleLabel = input.sampleLabel.trim();
   const normalizedSampleType = input.sampleType.trim();
@@ -4381,7 +5644,10 @@ export async function createSampleRecord(
   const normalizedQuantityLabel = input.quantityLabel?.trim() || null;
   const normalizedNotes = input.notes?.trim() || null;
   if (normalizedSampleLabel.length < 3) {
-    return { ok: false, message: "Enter a unique sample label with at least 3 characters." };
+    return {
+      ok: false,
+      message: "Enter a unique sample label with at least 3 characters.",
+    };
   }
   if (normalizedSampleType.length < 2) {
     return { ok: false, message: "Enter a sample type before saving." };
@@ -4402,12 +5668,21 @@ export async function createSampleRecord(
           select: { id: true, animalId: true, owningLabId: true, dob: true },
         }),
         input.projectId
-          ? tx.project.findUnique({ where: { id: input.projectId }, select: { id: true, labId: true } })
+          ? tx.project.findUnique({
+              where: { id: input.projectId },
+              select: { id: true, labId: true },
+            })
           : Promise.resolve(null),
         input.experimentId
           ? tx.experiment.findUnique({
               where: { id: input.experimentId },
-              select: { id: true, labId: true, projectId: true, experimentCode: true, status: true },
+              select: {
+                id: true,
+                labId: true,
+                projectId: true,
+                experimentCode: true,
+                status: true,
+              },
             })
           : Promise.resolve(null),
       ]);
@@ -4416,10 +5691,20 @@ export async function createSampleRecord(
         return { ok: false as const, message: "Animal not found." };
       }
       if (normalizedCollectedAt.getTime() < animal.dob.getTime()) {
-        return { ok: false as const, message: "Sample collection date cannot be earlier than the animal date of birth." };
+        return {
+          ok: false as const,
+          message:
+            "Sample collection date cannot be earlier than the animal date of birth.",
+        };
       }
-      if (input.projectId && (!project || project.labId !== animal.owningLabId)) {
-        return { ok: false as const, message: "Choose a project owned by the animal's lab." };
+      if (
+        input.projectId &&
+        (!project || project.labId !== animal.owningLabId)
+      ) {
+        return {
+          ok: false as const,
+          message: "Choose a project owned by the animal's lab.",
+        };
       }
       if (
         input.experimentId &&
@@ -4427,10 +5712,16 @@ export async function createSampleRecord(
           experiment.labId !== animal.owningLabId ||
           !["planned", "active"].includes(experiment.status))
       ) {
-        return { ok: false as const, message: "Choose an experiment owned by the animal's lab." };
+        return {
+          ok: false as const,
+          message: "Choose an experiment owned by the animal's lab.",
+        };
       }
       if (project && experiment && project.id !== experiment.projectId) {
-        return { ok: false as const, message: "The selected project and experiment must match." };
+        return {
+          ok: false as const,
+          message: "The selected project and experiment must match.",
+        };
       }
 
       const recordId = createId("sample");
@@ -4484,7 +5775,10 @@ export async function createSampleRecord(
       };
     });
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
       const existing = await prisma.sampleRecord.findUnique({
         where: { sampleLabel: normalizedSampleLabel },
         select: {
@@ -4524,7 +5818,9 @@ export async function createSampleRecord(
           {
             animalId: input.animalId,
             labId: existing.animal.owningLabId,
-            projectRef: input.projectId ?? (input.experimentId ? existing.projectId : null),
+            projectRef:
+              input.projectId ??
+              (input.experimentId ? existing.projectId : null),
             experimentId: input.experimentId,
             sampleLabel: normalizedSampleLabel,
             sampleType: normalizedSampleType,
@@ -4542,7 +5838,11 @@ export async function createSampleRecord(
           entityId: existing.id,
         };
       }
-      return { ok: false, message: "Sample label already exists. Use a unique label for this inventory record." };
+      return {
+        ok: false,
+        message:
+          "Sample label already exists. Use a unique label for this inventory record.",
+      };
     }
     throw error;
   }
@@ -4584,19 +5884,30 @@ export async function updateSampleRecord(
       return { ok: false as const, message: "Sample record not found." };
     }
     if (sample.version !== input.expectedVersion) {
-      return { ok: false as const, message: "This biosample changed after you opened it. Refresh and try again." };
+      return {
+        ok: false as const,
+        message:
+          "This biosample changed after you opened it. Refresh and try again.",
+      };
     }
 
     const normalizedStatus = input.status ?? sample.status;
-    const normalizedStorage = input.storageLocation === undefined
-      ? sample.storageLocation
-      : input.storageLocation?.trim() || null;
-    const normalizedQuantity = input.quantityLabel === undefined
-      ? sample.quantityLabel
-      : input.quantityLabel?.trim() || null;
-    const normalizedNotes = input.notes === undefined ? sample.notes : input.notes?.trim() || null;
-    const transitionError = validateBiosampleTransition(sample.status, normalizedStatus);
-    if (transitionError) return { ok: false as const, message: transitionError };
+    const normalizedStorage =
+      input.storageLocation === undefined
+        ? sample.storageLocation
+        : input.storageLocation?.trim() || null;
+    const normalizedQuantity =
+      input.quantityLabel === undefined
+        ? sample.quantityLabel
+        : input.quantityLabel?.trim() || null;
+    const normalizedNotes =
+      input.notes === undefined ? sample.notes : input.notes?.trim() || null;
+    const transitionError = validateBiosampleTransition(
+      sample.status,
+      normalizedStatus,
+    );
+    if (transitionError)
+      return { ok: false as const, message: transitionError };
     const storageError = validateBiosampleStorage({
       status: normalizedStatus,
       storageLocation: normalizedStorage,
@@ -4615,17 +5926,27 @@ export async function updateSampleRecord(
           select: { id: true, labId: true, projectId: true, status: true },
         });
         if (!experiment || experiment.labId !== sample.labId) {
-          return { ok: false as const, message: "Experiment not found for this biosample's lab." };
+          return {
+            ok: false as const,
+            message: "Experiment not found for this biosample's lab.",
+          };
         }
         if (
           experiment.id !== sample.experimentId &&
           experiment.status !== "planned" &&
           experiment.status !== "active"
         ) {
-          return { ok: false as const, message: "Only planned or active experiments can receive a new biosample link." };
+          return {
+            ok: false as const,
+            message:
+              "Only planned or active experiments can receive a new biosample link.",
+          };
         }
         if (projectId && projectId !== experiment.projectId) {
-          return { ok: false as const, message: "The linked experiment must use the biosample's project." };
+          return {
+            ok: false as const,
+            message: "The linked experiment must use the biosample's project.",
+          };
         }
         experimentId = experiment.id;
         projectId ??= experiment.projectId;
@@ -4650,7 +5971,10 @@ export async function updateSampleRecord(
       notes: normalizedNotes,
       version: sample.version + 1,
     };
-    if (canonicalJsonHash(previousValue) === canonicalJsonHash({ ...nextValue, version: sample.version })) {
+    if (
+      canonicalJsonHash(previousValue) ===
+      canonicalJsonHash({ ...nextValue, version: sample.version })
+    ) {
       return {
         ok: true as const,
         message: `Sample ${sample.sampleLabel} is already up to date for ${sample.animal.animalId}.`,
@@ -4672,7 +5996,11 @@ export async function updateSampleRecord(
       },
     });
     if (updated.count !== 1) {
-      return { ok: false as const, message: "This biosample changed after you opened it. Refresh and try again." };
+      return {
+        ok: false as const,
+        message:
+          "This biosample changed after you opened it. Refresh and try again.",
+      };
     }
     await tx.auditLog.create({
       data: {
@@ -4700,7 +6028,10 @@ export async function createCryostorageRecord(
   actor: LabActor,
 ): Promise<MutationResult> {
   if (!canRecordCryostorage(actor.role)) {
-    return { ok: false, message: "Your role cannot record cryostorage inventory." };
+    return {
+      ok: false,
+      message: "Your role cannot record cryostorage inventory.",
+    };
   }
 
   const [strain, project] = await Promise.all([
@@ -4724,17 +6055,26 @@ export async function createCryostorageRecord(
   ]);
 
   if (!strain) {
-    return { ok: false, message: "Choose a valid strain for the cryostorage record." };
+    return {
+      ok: false,
+      message: "Choose a valid strain for the cryostorage record.",
+    };
   }
 
   if (input.projectId && !project) {
-    return { ok: false, message: "Choose a valid project for the cryostorage record." };
+    return {
+      ok: false,
+      message: "Choose a valid project for the cryostorage record.",
+    };
   }
 
   const cryostorageAccess = await getActorLabAccess(actor);
   const cryostorageLabId = project?.labId ?? input.labId ?? actor.activeLabId;
   if (!cryostorageLabId || !canManageLab(cryostorageAccess, cryostorageLabId)) {
-    return { ok: false, message: "Choose a manageable owning lab for the cryostorage record." };
+    return {
+      ok: false,
+      message: "Choose a manageable owning lab for the cryostorage record.",
+    };
   }
 
   const normalizedStoredAt = new Date(input.storedAt);
@@ -4751,7 +6091,10 @@ export async function createCryostorageRecord(
   const normalizedNotes = input.notes?.trim() || undefined;
 
   if (normalizedSampleLabel.length < 3) {
-    return { ok: false, message: "Enter a unique cryostorage label with at least 3 characters." };
+    return {
+      ok: false,
+      message: "Enter a unique cryostorage label with at least 3 characters.",
+    };
   }
 
   if (normalizedMaterialType.length < 2) {
@@ -4768,7 +6111,10 @@ export async function createCryostorageRecord(
   });
 
   if (existingRecord) {
-    if (existingRecord.labId === cryostorageLabId && existingRecord.strainId === strain.id) {
+    if (
+      existingRecord.labId === cryostorageLabId &&
+      existingRecord.strainId === strain.id
+    ) {
       return {
         ok: true,
         message: `Cryostorage record ${normalizedSampleLabel} is already recorded for ${strain.name}.`,
@@ -4776,54 +6122,61 @@ export async function createCryostorageRecord(
       };
     }
 
-    return { ok: false, message: "Cryostorage label already exists. Use a unique label for this stored material." };
+    return {
+      ok: false,
+      message:
+        "Cryostorage label already exists. Use a unique label for this stored material.",
+    };
   }
 
   const recordId = createId("cryo");
   const timestamp = new Date();
 
-  await prisma.$transaction(async (tx) => {
-    await tx.cryostorageRecord.create({
-      data: {
-        id: recordId,
-        labId: cryostorageLabId,
-        strainId: strain.id,
-        projectId: project?.id,
-        sampleLabel: normalizedSampleLabel,
-        materialType: normalizedMaterialType,
-        status: input.status,
-        storedAt: normalizedStoredAt,
-        storageLocation: normalizedStorageLocation,
-        quantityLabel: normalizedQuantityLabel,
-        recoveryNotes: normalizedRecoveryNotes,
-        notes: normalizedNotes,
-        createdById: actor.id,
-      },
-    });
-
-    await tx.auditLog.create({
-      data: {
-        id: createId("audit"),
-        actorId: actor.id,
-        entityType: "cryostorage_record",
-        entityId: recordId,
-        action: "create",
-        newValue: {
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.cryostorageRecord.create({
+        data: {
+          id: recordId,
+          labId: cryostorageLabId,
           strainId: strain.id,
-          projectId: project?.id ?? null,
+          projectId: project?.id,
           sampleLabel: normalizedSampleLabel,
           materialType: normalizedMaterialType,
           status: input.status,
-          storedAt: input.storedAt,
-          storageLocation: normalizedStorageLocation ?? null,
-          quantityLabel: normalizedQuantityLabel ?? null,
-          recoveryNotes: normalizedRecoveryNotes ?? null,
-          notes: normalizedNotes ?? null,
+          storedAt: normalizedStoredAt,
+          storageLocation: normalizedStorageLocation,
+          quantityLabel: normalizedQuantityLabel,
+          recoveryNotes: normalizedRecoveryNotes,
+          notes: normalizedNotes,
+          createdById: actor.id,
         },
-        timestamp,
-      },
-    });
-  }, { timeout: 15_000, maxWait: 10_000 });
+      });
+
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "cryostorage_record",
+          entityId: recordId,
+          action: "create",
+          newValue: {
+            strainId: strain.id,
+            projectId: project?.id ?? null,
+            sampleLabel: normalizedSampleLabel,
+            materialType: normalizedMaterialType,
+            status: input.status,
+            storedAt: input.storedAt,
+            storageLocation: normalizedStorageLocation ?? null,
+            quantityLabel: normalizedQuantityLabel ?? null,
+            recoveryNotes: normalizedRecoveryNotes ?? null,
+            notes: normalizedNotes ?? null,
+          },
+          timestamp,
+        },
+      });
+    },
+    { timeout: 15_000, maxWait: 10_000 },
+  );
 
   return {
     ok: true,
@@ -4837,7 +6190,10 @@ export async function updateCryostorageRecord(
   actor: LabActor,
 ): Promise<MutationResult> {
   if (!canRecordCryostorage(actor.role)) {
-    return { ok: false, message: "Your role cannot update cryostorage inventory." };
+    return {
+      ok: false,
+      message: "Your role cannot update cryostorage inventory.",
+    };
   }
 
   const record = await prisma.cryostorageRecord.findUnique({
@@ -4872,9 +6228,17 @@ export async function updateCryostorageRecord(
   const normalized = {
     status: input.status,
     storageLocation:
-      input.storageLocation === undefined ? undefined : input.storageLocation?.trim() || null,
-    quantityLabel: input.quantityLabel === undefined ? undefined : input.quantityLabel?.trim() || null,
-    recoveryNotes: input.recoveryNotes === undefined ? undefined : input.recoveryNotes?.trim() || null,
+      input.storageLocation === undefined
+        ? undefined
+        : input.storageLocation?.trim() || null,
+    quantityLabel:
+      input.quantityLabel === undefined
+        ? undefined
+        : input.quantityLabel?.trim() || null,
+    recoveryNotes:
+      input.recoveryNotes === undefined
+        ? undefined
+        : input.recoveryNotes?.trim() || null,
     notes: input.notes === undefined ? undefined : input.notes?.trim() || null,
   };
   const updateData: {
@@ -4894,19 +6258,28 @@ export async function updateCryostorageRecord(
     newValue.status = normalized.status;
   }
 
-  if (normalized.storageLocation !== undefined && normalized.storageLocation !== record.storageLocation) {
+  if (
+    normalized.storageLocation !== undefined &&
+    normalized.storageLocation !== record.storageLocation
+  ) {
     updateData.storageLocation = normalized.storageLocation;
     previousValue.storageLocation = record.storageLocation;
     newValue.storageLocation = normalized.storageLocation;
   }
 
-  if (normalized.quantityLabel !== undefined && normalized.quantityLabel !== record.quantityLabel) {
+  if (
+    normalized.quantityLabel !== undefined &&
+    normalized.quantityLabel !== record.quantityLabel
+  ) {
     updateData.quantityLabel = normalized.quantityLabel;
     previousValue.quantityLabel = record.quantityLabel;
     newValue.quantityLabel = normalized.quantityLabel;
   }
 
-  if (normalized.recoveryNotes !== undefined && normalized.recoveryNotes !== record.recoveryNotes) {
+  if (
+    normalized.recoveryNotes !== undefined &&
+    normalized.recoveryNotes !== record.recoveryNotes
+  ) {
     updateData.recoveryNotes = normalized.recoveryNotes;
     previousValue.recoveryNotes = record.recoveryNotes;
     newValue.recoveryNotes = normalized.recoveryNotes;
@@ -4930,41 +6303,61 @@ export async function updateCryostorageRecord(
   const expectedVersion = input.expectedVersion ?? record.version;
 
   if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
-    return { ok: false, message: "Refresh this cryostorage record before saving changes." };
+    return {
+      ok: false,
+      message: "Refresh this cryostorage record before saving changes.",
+    };
   }
   updateData.version = { increment: 1 };
   previousValue.version = record.version;
   newValue.version = expectedVersion + 1;
 
-  const committed = await prisma.$transaction(async (tx) => {
-    const updated = await tx.cryostorageRecord.updateMany({
-      where: { id: record.id, labId: record.labId, version: expectedVersion },
-      data: updateData,
-    });
+  const committed = await prisma
+    .$transaction(
+      async (tx) => {
+        const updated = await tx.cryostorageRecord.updateMany({
+          where: {
+            id: record.id,
+            labId: record.labId,
+            version: expectedVersion,
+          },
+          data: updateData,
+        });
 
-    if (updated.count !== 1) {
-      throw new Error("CRYOSTORAGE_STALE_CONFLICT");
-    }
+        if (updated.count !== 1) {
+          throw new Error("CRYOSTORAGE_STALE_CONFLICT");
+        }
 
-    await tx.auditLog.create({
-      data: {
-        id: createId("audit"),
-        actorId: actor.id,
-        entityType: "cryostorage_record",
-        entityId: record.id,
-        action: "update",
-        previousValue: previousValue as Prisma.InputJsonObject,
-        newValue: newValue as Prisma.InputJsonObject,
-        timestamp,
+        await tx.auditLog.create({
+          data: {
+            id: createId("audit"),
+            actorId: actor.id,
+            entityType: "cryostorage_record",
+            entityId: record.id,
+            action: "update",
+            previousValue: previousValue as Prisma.InputJsonObject,
+            newValue: newValue as Prisma.InputJsonObject,
+            timestamp,
+          },
+        });
       },
+      { timeout: 15_000, maxWait: 10_000 },
+    )
+    .then(() => true)
+    .catch((error: unknown) => {
+      if (
+        error instanceof Error &&
+        error.message === "CRYOSTORAGE_STALE_CONFLICT"
+      )
+        return false;
+      throw error;
     });
-  }, { timeout: 15_000, maxWait: 10_000 }).then(() => true).catch((error: unknown) => {
-    if (error instanceof Error && error.message === "CRYOSTORAGE_STALE_CONFLICT") return false;
-    throw error;
-  });
 
   if (!committed) {
-    return { ok: false, message: "The cryostorage record changed. Refresh before saving." };
+    return {
+      ok: false,
+      message: "The cryostorage record changed. Refresh before saving.",
+    };
   }
 
   return {
@@ -4981,7 +6374,10 @@ export async function updateAnimalLifecycleStatus(
   transaction?: Prisma.TransactionClient,
 ): Promise<MutationResult> {
   if (!canUpdateAnimalLifecycle(actor.role)) {
-    return { ok: false, message: "Your role cannot change terminal lifecycle states." };
+    return {
+      ok: false,
+      message: "Your role cannot change terminal lifecycle states.",
+    };
   }
 
   const normalizedReason = input.reason.trim();
@@ -4990,37 +6386,66 @@ export async function updateAnimalLifecycleStatus(
   const sopAssignmentId = input.sopAssignmentId?.trim() || null;
 
   if (normalizedReason.length < 3) {
-    return { ok: false, message: "Enter a clear reason for the lifecycle change." };
+    return {
+      ok: false,
+      message: "Enter a clear reason for the lifecycle change.",
+    };
   }
-  if (input.targetStatus === "transferred_out" && (!destination || destination.length < 2)) {
-    return { ok: false, message: "Enter the receiving facility or external destination." };
+  if (
+    input.targetStatus === "transferred_out" &&
+    (!destination || destination.length < 2)
+  ) {
+    return {
+      ok: false,
+      message: "Enter the receiving facility or external destination.",
+    };
   }
-  if (input.targetStatus !== "transferred_out" && (destination || transferReference)) {
-    return { ok: false, message: "External destination and transfer reference are only valid for a transferred-out disposition." };
+  if (
+    input.targetStatus !== "transferred_out" &&
+    (destination || transferReference)
+  ) {
+    return {
+      ok: false,
+      message:
+        "External destination and transfer reference are only valid for a transferred-out disposition.",
+    };
   }
   if (input.targetStatus !== "euthanized" && sopAssignmentId) {
-    return { ok: false, message: "An SOP assignment can only be recorded for a euthanasia disposition." };
+    return {
+      ok: false,
+      message:
+        "An SOP assignment can only be recorded for a euthanasia disposition.",
+    };
   }
 
   const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(input.happenedAt);
   const exactDateTime = parseExactLifecycleTimestamp(input.happenedAt);
-  const normalizedDate = input.targetStatus === "euthanized"
-    ? exactDateTime
-    : dateOnly ? new Date(`${input.happenedAt}T00:00:00.000Z`) : null;
+  const normalizedDate =
+    input.targetStatus === "euthanized"
+      ? exactDateTime
+      : dateOnly
+        ? new Date(`${input.happenedAt}T00:00:00.000Z`)
+        : null;
 
   if (!normalizedDate || Number.isNaN(normalizedDate.getTime())) {
     return {
       ok: false,
-      message: input.targetStatus === "euthanized"
-        ? "Choose an exact euthanasia date and time with a timezone."
-        : "Choose a valid lifecycle date.",
+      message:
+        input.targetStatus === "euthanized"
+          ? "Choose an exact euthanasia date and time with a timezone."
+          : "Choose a valid lifecycle date.",
     };
   }
-  if (input.targetStatus !== "euthanized" && normalizedDate.toISOString().slice(0, 10) !== input.happenedAt) {
+  if (
+    input.targetStatus !== "euthanized" &&
+    normalizedDate.toISOString().slice(0, 10) !== input.happenedAt
+  ) {
     return { ok: false, message: "Choose a valid lifecycle date." };
   }
 
-  const operation = async (tx: Prisma.TransactionClient): Promise<MutationResult> => {
+  const operation = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<MutationResult> => {
     const animal = await tx.animal.findUnique({
       where: { id: input.animalId },
       select: {
@@ -5036,7 +6461,9 @@ export async function updateAnimalLifecycleStatus(
         deathReason: true,
         experimentalStatus: true,
         breedingAdults: {
-          where: { breedingSetup: { status: { in: ["planned", "active", "paused"] } } },
+          where: {
+            breedingSetup: { status: { in: ["planned", "active", "paused"] } },
+          },
           select: { breedingSetupId: true },
         },
         experimentAssignments: {
@@ -5058,79 +6485,120 @@ export async function updateAnimalLifecycleStatus(
         },
       },
     });
-    if (!animal || !canManageLab(await getActorLabAccess(actor, tx), animal.owningLabId)) {
+    if (
+      !animal ||
+      !canManageLab(await getActorLabAccess(actor, tx), animal.owningLabId)
+    ) {
       return { ok: false, message: "Animal not found." };
     }
     if (input.targetStatus === "euthanized" && !sopAssignmentId) {
-      return { ok: false, message: "Choose the approved SOP used for euthanasia." };
+      return {
+        ok: false,
+        message: "Choose the approved SOP used for euthanasia.",
+      };
     }
 
-    const sopAssignment = sopAssignmentId ? await tx.sopAssignment.findFirst({
-      where: {
-        id: sopAssignmentId,
-        labId: animal.owningLabId,
-        revokedAt: null,
-        sop: { active: true },
-      },
-      select: {
-        id: true,
-        assignedAt: true,
-        sopId: true,
-        sopVersionId: true,
-        sop: { select: { currentVersionId: true } },
-        sopVersion: {
-          select: {
-            versionNumber: true,
-            contentHash: true,
-            createdAt: true,
-            approval: { select: { decision: true, decidedAt: true } },
+    const sopAssignment = sopAssignmentId
+      ? await tx.sopAssignment.findFirst({
+          where: {
+            id: sopAssignmentId,
+            labId: animal.owningLabId,
+            revokedAt: null,
+            sop: { active: true },
           },
-        },
-      },
-    }) : null;
-    if (sopAssignmentId && (
-      !sopAssignment
-      || sopAssignment.sop.currentVersionId !== sopAssignment.sopVersionId
-      || sopAssignment.sopVersion.approval?.decision !== "approved"
-    )) {
-      return { ok: false, message: "The selected SOP is no longer current, approved, and assigned to this lab." };
+          select: {
+            id: true,
+            assignedAt: true,
+            sopId: true,
+            sopVersionId: true,
+            sop: { select: { currentVersionId: true } },
+            sopVersion: {
+              select: {
+                versionNumber: true,
+                contentHash: true,
+                createdAt: true,
+                approval: { select: { decision: true, decidedAt: true } },
+              },
+            },
+          },
+        })
+      : null;
+    if (
+      sopAssignmentId &&
+      (!sopAssignment ||
+        sopAssignment.sop.currentVersionId !== sopAssignment.sopVersionId ||
+        sopAssignment.sopVersion.approval?.decision !== "approved")
+    ) {
+      return {
+        ok: false,
+        message:
+          "The selected SOP is no longer current, approved, and assigned to this lab.",
+      };
     }
 
     const timestamp = new Date();
     const normalizedDateKey = normalizedDate.toISOString().slice(0, 10);
-    if (sopAssignment && (
-      normalizedDate < sopAssignment.assignedAt
-      || normalizedDate < sopAssignment.sopVersion.createdAt
-      || !sopAssignment.sopVersion.approval?.decidedAt
-      || normalizedDate < sopAssignment.sopVersion.approval.decidedAt
-    )) {
-      return { ok: false, message: "Lifecycle date and time cannot predate the SOP version, approval, or lab assignment." };
+    if (
+      sopAssignment &&
+      (normalizedDate < sopAssignment.assignedAt ||
+        normalizedDate < sopAssignment.sopVersion.createdAt ||
+        !sopAssignment.sopVersion.approval?.decidedAt ||
+        normalizedDate < sopAssignment.sopVersion.approval.decidedAt)
+    ) {
+      return {
+        ok: false,
+        message:
+          "Lifecycle date and time cannot predate the SOP version, approval, or lab assignment.",
+      };
     }
-    if (input.targetStatus === "euthanized" ? normalizedDate > timestamp : normalizedDateKey > timestamp.toISOString().slice(0, 10)) {
+    if (
+      input.targetStatus === "euthanized"
+        ? normalizedDate > timestamp
+        : normalizedDateKey > timestamp.toISOString().slice(0, 10)
+    ) {
       return { ok: false, message: "Lifecycle date cannot be in the future." };
     }
     if (normalizedDateKey < animal.dob.toISOString().slice(0, 10)) {
-      return { ok: false, message: "Lifecycle date cannot be earlier than the animal date of birth." };
+      return {
+        ok: false,
+        message:
+          "Lifecycle date cannot be earlier than the animal date of birth.",
+      };
     }
     const latestOperationalDate = [
       animal.statusEvents[0]?.happenedAt,
       animal.animalMovements[0]?.movedAt,
       ...animal.projectAllocations.map((allocation) => allocation.startedAt),
-    ].filter((date): date is Date => Boolean(date)).sort((left, right) => right.getTime() - left.getTime())[0];
-    if (latestOperationalDate && (
-      input.targetStatus === "euthanized"
+    ]
+      .filter((date): date is Date => Boolean(date))
+      .sort((left, right) => right.getTime() - left.getTime())[0];
+    if (
+      latestOperationalDate &&
+      (input.targetStatus === "euthanized"
         ? normalizedDate < latestOperationalDate
-        : normalizedDateKey < latestOperationalDate.toISOString().slice(0, 10)
-    )) {
-      return { ok: false, message: "Lifecycle date cannot be earlier than the latest recorded animal event." };
+        : normalizedDateKey < latestOperationalDate.toISOString().slice(0, 10))
+    ) {
+      return {
+        ok: false,
+        message:
+          "Lifecycle date cannot be earlier than the latest recorded animal event.",
+      };
     }
 
     if (input.targetStatus === "archived") {
       if (animal.status === "archived") {
-        return { ok: true, message: `${animal.animalId} is already archived.`, entityId: animal.id, resultingVersion: animal.version };
+        return {
+          ok: true,
+          message: `${animal.animalId} is already archived.`,
+          entityId: animal.id,
+          resultingVersion: animal.version,
+        };
       }
       if (animal.outcomeStatus === "alive") {
-        return { ok: false, message: `Archive ${animal.animalId} only after euthanasia, death, or transfer out has been recorded.` };
+        return {
+          ok: false,
+          message: `Archive ${animal.animalId} only after euthanasia, death, or transfer out has been recorded.`,
+        };
       }
     } else if (animal.outcomeStatus !== "alive") {
       if (animal.status === input.targetStatus) {
@@ -5141,7 +6609,10 @@ export async function updateAnimalLifecycleStatus(
           resultingVersion: animal.version,
         };
       }
-      return { ok: false, message: `${animal.animalId} has already been removed from the active colony. Archive it instead.` };
+      return {
+        ok: false,
+        message: `${animal.animalId} has already been removed from the active colony. Archive it instead.`,
+      };
     }
 
     if (animal.breedingAdults.length) {
@@ -5158,7 +6629,9 @@ export async function updateAnimalLifecycleStatus(
     }
 
     const lifecycleOutcome = getLifecycleOutcomeStatus(input.targetStatus);
-    const lifecycleExperimentalStatus = getLifecycleExperimentalStatus(input.targetStatus);
+    const lifecycleExperimentalStatus = getLifecycleExperimentalStatus(
+      input.targetStatus,
+    );
     const closesAllocations = input.targetStatus !== "archived";
     const sourceCageId = animal.currentCageId;
 
@@ -5284,7 +6757,9 @@ export async function updateAnimalLifecycleStatus(
     };
   };
 
-  return transaction ? operation(transaction) : runSerializableTransaction(operation);
+  return transaction
+    ? operation(transaction)
+    : runSerializableTransaction(operation);
 }
 
 export async function executeUpdateAnimalLifecycleCommand(input: {
@@ -5296,13 +6771,17 @@ export async function executeUpdateAnimalLifecycleCommand(input: {
   workflowDraftId: string;
   reviewSnapshotId: string;
 }) {
-  const labId = input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null;
+  const labId =
+    input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null;
   return executeIdempotentCommand({
     actor: input.actor,
     commandType: "animal.lifecycle.update",
     idempotencyKey: input.idempotencyKey,
     requestId: input.requestId,
-    request: { command: input.command, reviewSnapshotId: input.reviewSnapshotId } as unknown as Prisma.InputJsonValue,
+    request: {
+      command: input.command,
+      reviewSnapshotId: input.reviewSnapshotId,
+    } as unknown as Prisma.InputJsonValue,
     requiredCapability: "animals:manage",
     labId,
     workflowDraftId: input.workflowDraftId,
@@ -5314,19 +6793,28 @@ export async function executeUpdateAnimalLifecycleCommand(input: {
         where: { id: input.reviewSnapshotId },
         include: { draft: true },
       });
-      const expectedPayload = { command: input.command, expectedVersion: input.expectedVersion };
+      const expectedPayload = {
+        command: input.command,
+        expectedVersion: input.expectedVersion,
+      };
       if (
-        !snapshot
-        || snapshot.draftId !== input.workflowDraftId
-        || snapshot.createdById !== input.actor.id
-        || snapshot.draft.actorId !== input.actor.id
-        || snapshot.draft.labId !== labId
-        || snapshot.draft.status !== "review"
-        || snapshot.draft.version !== snapshot.draftVersion + 1
-        || canonicalJsonHash(snapshot.payload) !== snapshot.payloadHash
-        || canonicalJsonHash(snapshot.payload) !== canonicalJsonHash(expectedPayload)
+        !snapshot ||
+        snapshot.draftId !== input.workflowDraftId ||
+        snapshot.createdById !== input.actor.id ||
+        snapshot.draft.actorId !== input.actor.id ||
+        snapshot.draft.labId !== labId ||
+        snapshot.draft.status !== "review" ||
+        snapshot.draft.version !== snapshot.draftVersion + 1 ||
+        canonicalJsonHash(snapshot.payload) !== snapshot.payloadHash ||
+        canonicalJsonHash(snapshot.payload) !==
+          canonicalJsonHash(expectedPayload)
       ) {
-        return { ok: false as const, code: "invalid_review", message: "The reviewed lifecycle change is no longer current. Refresh and review it again." };
+        return {
+          ok: false as const,
+          code: "invalid_review",
+          message:
+            "The reviewed lifecycle change is no longer current. Refresh and review it again.",
+        };
       }
       const reserved = await tx.workflowDraft.updateMany({
         where: {
@@ -5339,9 +6827,17 @@ export async function executeUpdateAnimalLifecycleCommand(input: {
         data: { status: "submitted", submittedAt: new Date() },
       });
       if (reserved.count !== 1) {
-        return { ok: false as const, code: "stale_conflict", message: "The lifecycle review changed before it could be submitted." };
+        return {
+          ok: false as const,
+          code: "stale_conflict",
+          message: "The lifecycle review changed before it could be submitted.",
+        };
       }
-      const result = await updateAnimalLifecycleStatus(input.command, input.actor, tx);
+      const result = await updateAnimalLifecycleStatus(
+        input.command,
+        input.actor,
+        tx,
+      );
       if (!result.ok) {
         const restored = await tx.workflowDraft.updateMany({
           where: {
@@ -5352,8 +6848,15 @@ export async function executeUpdateAnimalLifecycleCommand(input: {
           },
           data: { status: "review", submittedAt: null },
         });
-        if (restored.count !== 1) throw new Error("The failed lifecycle review could not be restored atomically.");
-        return { ok: false as const, code: "validation_error", message: result.message };
+        if (restored.count !== 1)
+          throw new Error(
+            "The failed lifecycle review could not be restored atomically.",
+          );
+        return {
+          ok: false as const,
+          code: "validation_error",
+          message: result.message,
+        };
       }
       const committed = await tx.workflowDraft.updateMany({
         where: {
@@ -5365,7 +6868,10 @@ export async function executeUpdateAnimalLifecycleCommand(input: {
         },
         data: { status: "committed", committedAt: new Date() },
       });
-      if (committed.count !== 1) throw new Error("The reviewed lifecycle change could not be committed atomically.");
+      if (committed.count !== 1)
+        throw new Error(
+          "The reviewed lifecycle change could not be committed atomically.",
+        );
       return {
         ok: true as const,
         result: { message: result.message, entityId: result.entityId ?? null },
@@ -5415,9 +6921,10 @@ export async function updateRuleConfig(
       ? parsedValue.value
       : null;
 
-  const facilityCapacityError = rule.key === "cage_max_occupancy"
-    ? validateFacilityCageCapacity(Number(nextFacilityCapacity))
-    : null;
+  const facilityCapacityError =
+    rule.key === "cage_max_occupancy"
+      ? validateFacilityCageCapacity(Number(nextFacilityCapacity))
+      : null;
   if (facilityCapacityError) {
     return { ok: false, message: facilityCapacityError };
   }
@@ -5429,7 +6936,11 @@ export async function updateRuleConfig(
           where: { maxCageOccupancy: { not: nextFacilityCapacity } },
         })) > 0;
 
-  if (sameValue && rule.criticalBlock === input.criticalBlock && !facilityCapacityNeedsSync) {
+  if (
+    sameValue &&
+    rule.criticalBlock === input.criticalBlock &&
+    !facilityCapacityNeedsSync
+  ) {
     return {
       ok: true,
       message: `${rule.label} is already up to date.`,
@@ -5437,47 +6948,50 @@ export async function updateRuleConfig(
     };
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.ruleConfig.update({
-      where: { id: rule.id },
-      data: {
-        value: nextValue as never,
-        criticalBlock: input.criticalBlock,
-      },
-    });
-
-    if (nextFacilityCapacity !== null) {
-      await tx.facility.updateMany({
-        data: { maxCageOccupancy: nextFacilityCapacity },
-      });
-
-      await tx.cage.updateMany({
-        where: { capacityOverride: { gt: nextFacilityCapacity } },
-        data: { capacityOverride: null },
-      });
-    }
-
-    await tx.auditLog.create({
-      data: {
-        id: createId("audit"),
-        actorId: actor.id,
-        entityType: "rule_config",
-        entityId: rule.id,
-        action: "update",
-        previousValue: {
-          key: rule.key,
-          value: rule.value,
-          criticalBlock: rule.criticalBlock,
-        },
-        newValue: {
-          key: rule.key,
-          value: nextValue,
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.ruleConfig.update({
+        where: { id: rule.id },
+        data: {
+          value: nextValue as never,
           criticalBlock: input.criticalBlock,
         },
-        timestamp: new Date(),
-      },
-    });
-  }, { timeout: 15_000, maxWait: 10_000 });
+      });
+
+      if (nextFacilityCapacity !== null) {
+        await tx.facility.updateMany({
+          data: { maxCageOccupancy: nextFacilityCapacity },
+        });
+
+        await tx.cage.updateMany({
+          where: { capacityOverride: { gt: nextFacilityCapacity } },
+          data: { capacityOverride: null },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          id: createId("audit"),
+          actorId: actor.id,
+          entityType: "rule_config",
+          entityId: rule.id,
+          action: "update",
+          previousValue: {
+            key: rule.key,
+            value: rule.value,
+            criticalBlock: rule.criticalBlock,
+          },
+          newValue: {
+            key: rule.key,
+            value: nextValue,
+            criticalBlock: input.criticalBlock,
+          },
+          timestamp: new Date(),
+        },
+      });
+    },
+    { timeout: 15_000, maxWait: 10_000 },
+  );
 
   return {
     ok: true,

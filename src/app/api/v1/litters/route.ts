@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { buildApiErrorResponse, buildMutationResponse, requireApiUser } from "@/lib/api-route";
-import { recordBreedingLitter } from "@/lib/colony-write";
+import { executeRecordBreedingLitterCommand } from "@/lib/colony-write";
 import {
   getBreedingSetupApiRecordById,
   getExistingLitterApiRecord,
@@ -49,23 +49,41 @@ export async function POST(request: Request) {
     });
   }
 
-  const result = await recordBreedingLitter(parsed.data, { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId });
+  const idempotencyKey = request.headers.get("idempotency-key")?.trim();
+  const requestId = request.headers.get("x-request-id")?.trim();
+  if (!idempotencyKey || !requestId) {
+    return buildApiErrorResponse("Idempotency-Key and X-Request-Id headers are required.", 400);
+  }
+  const result = await executeRecordBreedingLitterCommand({
+    command: parsed.data,
+    actor: auth.user,
+    idempotencyKey,
+    requestId,
+    expectedVersion: breedingSetup.version,
+  });
 
   if (!result.ok) {
-    const status = result.message.includes("role cannot")
+    const message = result.message ?? "Litter could not be recorded.";
+    const status = message.includes("role cannot")
       ? 403
-      : result.message.includes("not found")
+      : message.includes("not found")
         ? 404
         : 400;
 
-    return buildApiErrorResponse(result.message, status);
+    return buildApiErrorResponse(message, status);
   }
 
-  if (!result.entityId) {
+  const commandResult = result.result && typeof result.result === "object" && !Array.isArray(result.result)
+    ? result.result as { entityId?: unknown; message?: unknown }
+    : null;
+  const entityId = typeof commandResult?.entityId === "string" ? commandResult.entityId : null;
+  const message = typeof commandResult?.message === "string" ? commandResult.message : "Litter recorded.";
+
+  if (!entityId) {
     return buildApiErrorResponse("Litter was recorded but could not be read back.", 500);
   }
 
-  const record = await getLitterApiRecordById(result.entityId, auth.user);
+  const record = await getLitterApiRecordById(entityId, auth.user);
 
   if (!record) {
     return buildApiErrorResponse("Litter was recorded but could not be read back.", 500);
@@ -74,7 +92,7 @@ export async function POST(request: Request) {
   return buildMutationResponse(record, {
     status: 201,
     created: true,
-    message: result.message,
+    message,
   });
 }
 

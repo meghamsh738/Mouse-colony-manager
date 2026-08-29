@@ -27,6 +27,333 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+const SOURCE_PROTOCOL_ID = "transfer-source-protocol";
+const DESTINATION_PROTOCOL_ID = "transfer-destination-protocol";
+const POLICY_VERSION = "synthetic-fail-closed-v1";
+
+async function seedTransferComplianceFixture(
+  tx: Prisma.TransactionClient,
+  input: {
+    canonicalJson: (value: unknown) => string;
+    canonicalJsonHash: (value: unknown) => string;
+    now: Date;
+  },
+) {
+  const validFrom = new Date(input.now.getTime() - 24 * 60 * 60 * 1_000);
+  const validUntil = new Date(input.now.getTime() + 365 * 24 * 60 * 60 * 1_000);
+  const managers = [
+    { id: "transfer-source-manager", labId: "transfer-lab-source", identityId: "transfer-source-manager-identity", subject: "admin@colony.local" },
+    { id: "transfer-destination-manager", labId: "transfer-lab-destination", identityId: "transfer-destination-manager-identity", subject: "manager@colony.local" },
+  ] as const;
+  const identities = [
+    ...managers,
+    { id: "transfer-cmu", labId: null, identityId: "transfer-cmu-identity", subject: "staff@colony.local" },
+    { id: "transfer-facility", labId: null, identityId: "transfer-facility-identity", subject: "researcher@colony.local" },
+    { id: "transfer-facility-approver", labId: null, identityId: "transfer-facility-approver-identity", subject: "readonly@colony.local" },
+  ] as const;
+
+  const createReceipt = async (receipt: {
+    id: string;
+    actorId: string;
+    labId: string;
+    commandType: string;
+    aggregateType: string;
+    aggregateId: string;
+  }) => {
+    await tx.commandReceipt.create({
+      data: {
+        ...receipt,
+        actorAuthzVersion: 1,
+        idempotencyKey: receipt.id,
+        requestHash: input.canonicalJsonHash({ fixture: receipt.id }),
+        requestId: receipt.id,
+        status: "succeeded",
+        result: { fixture: "lab-transfer-verification" },
+        completedAt: input.now,
+      },
+    });
+  };
+
+  await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+  for (const identity of identities) {
+    await tx.externalIdentityLink.create({
+      data: {
+        id: identity.identityId,
+        userId: identity.id,
+        provider: "synthetic",
+        providerSubject: identity.subject,
+        assurance: "synthetic_mfa",
+        linkedById: "transfer-facility",
+        createdAt: input.now,
+      },
+    });
+    await tx.externalIdentityLifecycleEvent.create({
+      data: {
+        id: `${identity.identityId}-linked`,
+        identityLinkId: identity.identityId,
+        actorId: "transfer-facility",
+        eventType: "linked",
+        assurance: "synthetic_mfa",
+        detail: { fixture: "lab-transfer-verification" },
+        occurredAt: input.now,
+      },
+    });
+  }
+
+  const dutyByUser = new Map<string, { protocolReviewer: string; trainingAdministrator: string }>();
+  for (const [managerIndex, manager] of managers.entries()) {
+    const assignments = {
+      protocolReviewer: `transfer-duty-${managerIndex + 1}-protocol-reviewer`,
+      trainingAdministrator: `transfer-duty-${managerIndex + 1}-training-administrator`,
+    };
+    dutyByUser.set(manager.id, assignments);
+    for (const [dutyIndex, duty] of (["protocol_reviewer", "training_administrator"] as const).entries()) {
+      const requestId = `${assignments[duty === "protocol_reviewer" ? "protocolReviewer" : "trainingAdministrator"]}-request`;
+      const assignmentId = duty === "protocol_reviewer" ? assignments.protocolReviewer : assignments.trainingAdministrator;
+      await tx.facilityDutyRequest.create({
+        data: {
+          id: requestId,
+          requestType: "grant",
+          duty,
+          targetUserId: manager.id,
+          targetAuthzVersion: 1,
+          requestedValidFrom: validFrom,
+          requestedValidUntil: validUntil,
+          status: "approved",
+          reason: `Synthetic transfer verification ${dutyIndex + 1}.`,
+          requestedById: "transfer-facility",
+          requestedByAuthzVersion: 1,
+          requestedAssurance: "synthetic_mfa",
+          requestedIdentityLinkId: "transfer-facility-identity",
+          requestedAuthenticatedAt: input.now,
+          decidedById: "transfer-facility-approver",
+          decidedByAuthzVersion: 1,
+          decidedAssurance: "synthetic_mfa",
+          decidedIdentityLinkId: "transfer-facility-approver-identity",
+          decidedAuthenticatedAt: input.now,
+          decisionReason: "Approved for the guarded transfer verifier.",
+          expiresAt: new Date(input.now.getTime() + 23 * 60 * 60 * 1_000),
+          decidedAt: input.now,
+          createdAt: input.now,
+          version: 2,
+        },
+      });
+      await tx.facilityDutyAssignment.create({
+        data: {
+          id: assignmentId,
+          userId: manager.id,
+          duty,
+          validFrom,
+          validUntil,
+          grantRequestId: requestId,
+          createdAt: input.now,
+        },
+      });
+    }
+  }
+
+  const protocols = [
+    {
+      id: SOURCE_PROTOCOL_ID,
+      labId: "transfer-lab-source",
+      code: "TRANSFER-SOURCE",
+      title: "Synthetic source transfer authorization",
+      creatorId: "transfer-source-manager",
+      reviewerId: "transfer-destination-manager",
+      reviewerIdentityId: "transfer-destination-manager-identity",
+    },
+    {
+      id: DESTINATION_PROTOCOL_ID,
+      labId: "transfer-lab-destination",
+      code: "TRANSFER-DESTINATION",
+      title: "Synthetic destination transfer authorization",
+      creatorId: "transfer-destination-manager",
+      reviewerId: "transfer-source-manager",
+      reviewerIdentityId: "transfer-source-manager-identity",
+    },
+  ] as const;
+  for (const protocol of protocols) {
+    const versionId = `${protocol.id}-v1`;
+    const creationReceiptId = `${protocol.id}-draft-receipt`;
+    const activationReceiptId = `${protocol.id}-activation-receipt`;
+    const reviewerDuty = dutyByUser.get(protocol.reviewerId)?.protocolReviewer;
+    assert(reviewerDuty, "Transfer protocol reviewer duty fixture is missing.");
+    await createReceipt({
+      id: creationReceiptId,
+      actorId: protocol.creatorId,
+      labId: protocol.labId,
+      commandType: "protocol_authorization.draft.create",
+      aggregateType: "protocol_authorization",
+      aggregateId: protocol.id,
+    });
+    await createReceipt({
+      id: activationReceiptId,
+      actorId: protocol.reviewerId,
+      labId: protocol.labId,
+      commandType: "protocol_authorization.activate",
+      aggregateType: "protocol_authorization",
+      aggregateId: protocol.id,
+    });
+    const summary = `${protocol.title} retained verifier fixture.`;
+    const content = {
+      labId: protocol.labId,
+      protocolCode: protocol.code,
+      title: protocol.title,
+      summary,
+      validFrom: validFrom.toISOString(),
+      validUntil: validUntil.toISOString(),
+      approvedAnimalCount: 100,
+      projectIds: [],
+      experimentIds: [],
+      strainIds: ["transfer-strain"],
+      procedureCodes: ["transfer"],
+      personnel: [{ userId: protocol.creatorId, roleLabel: "transfer_coordinator" }],
+      policyVersion: POLICY_VERSION,
+    };
+    await tx.protocolAuthorization.create({
+      data: {
+        id: protocol.id,
+        labId: protocol.labId,
+        protocolCode: protocol.code,
+        title: protocol.title,
+        status: "draft",
+        createdById: protocol.creatorId,
+      },
+    });
+    await tx.protocolAuthorizationVersion.create({
+      data: {
+        id: versionId,
+        authorizationId: protocol.id,
+        versionNumber: 1,
+        contentHash: input.canonicalJsonHash(content),
+        contentPayload: input.canonicalJson(content),
+        policyVersion: POLICY_VERSION,
+        validFrom,
+        validUntil,
+        approvedAnimalCount: 100,
+        summary,
+        createdById: protocol.creatorId,
+        creationCommandReceiptId: creationReceiptId,
+        scopeSealedAt: input.now,
+      },
+    });
+    await tx.protocolStrainBinding.create({ data: { id: `${versionId}-strain`, authorizationVersionId: versionId, labId: protocol.labId, strainId: "transfer-strain" } });
+    await tx.protocolProcedureBinding.create({ data: { id: `${versionId}-procedure`, authorizationVersionId: versionId, labId: protocol.labId, procedureCode: "transfer" } });
+    await tx.protocolPersonnelBinding.create({ data: { id: `${versionId}-personnel`, authorizationVersionId: versionId, labId: protocol.labId, userId: protocol.creatorId, roleLabel: "transfer_coordinator" } });
+    await tx.protocolCountLedger.create({ data: { id: `${versionId}-ledger`, authorizationVersionId: versionId, approvedCount: 100 } });
+    await tx.protocolAuthorization.update({
+      where: { id: protocol.id },
+      data: {
+        currentVersionId: versionId,
+        status: "active",
+        reviewedById: protocol.reviewerId,
+        reviewedByAuthzVersion: 1,
+        reviewedAssurance: "synthetic_mfa",
+        reviewedIdentityLinkId: protocol.reviewerIdentityId,
+        reviewedAuthenticatedAt: input.now,
+        reviewedDutyAssignmentId: reviewerDuty,
+        reviewedDutyAssignmentVersion: 1,
+        reviewedAt: input.now,
+        activatedAt: input.now,
+        statusReason: "Activated for guarded transfer verification.",
+        version: 2,
+      },
+    });
+    await tx.protocolAuthorizationLifecycleEvent.create({
+      data: {
+        id: `${protocol.id}-activation-event`,
+        authorizationId: protocol.id,
+        fromStatus: "draft",
+        toStatus: "active",
+        actorId: protocol.reviewerId,
+        actorAuthzVersion: 1,
+        assurance: "synthetic_mfa",
+        identityLinkId: protocol.reviewerIdentityId,
+        authenticatedAt: input.now,
+        dutyAssignmentId: reviewerDuty,
+        dutyAssignmentVersion: 1,
+        commandReceiptId: activationReceiptId,
+        reason: "Activated for guarded transfer verification.",
+        occurredAt: input.now,
+      },
+    });
+  }
+
+  for (const manager of managers) {
+    const issuer = managers.find((candidate) => candidate.id !== manager.id)!;
+    const trainingDuty = dutyByUser.get(issuer.id)?.trainingAdministrator;
+    assert(trainingDuty, "Transfer competency training duty fixture is missing.");
+    const evidenceId = `${manager.id}-transfer-competency`;
+    const versionId = `${evidenceId}-v1`;
+    const receiptId = `${evidenceId}-receipt`;
+    const note = "Current synthetic transfer competency for retained verification.";
+    const payload = {
+      userId: manager.id,
+      labId: manager.labId,
+      procedureCode: "transfer",
+      evidenceType: "synthetic_training_record",
+      validFrom: validFrom.toISOString(),
+      validUntil: validUntil.toISOString(),
+      protocolVersionId: null,
+      note,
+      versionNumber: 1,
+    };
+    await createReceipt({ id: receiptId, actorId: issuer.id, labId: manager.labId, commandType: "competency_evidence.create", aggregateType: "competency_evidence", aggregateId: evidenceId });
+    await tx.competencyEvidence.create({
+      data: {
+        id: evidenceId,
+        userId: manager.id,
+        labId: manager.labId,
+        procedureCode: "transfer",
+        status: "current",
+        governedById: issuer.id,
+        governedByAuthzVersion: 1,
+        governedAssurance: "synthetic_mfa",
+        governedIdentityLinkId: issuer.identityId,
+        governedAuthenticatedAt: input.now,
+        governedDutyAssignmentId: trainingDuty,
+        governedDutyAssignmentVersion: 1,
+        governedAt: input.now,
+      },
+    });
+    await tx.competencyEvidenceVersion.create({
+      data: {
+        id: versionId,
+        evidenceId,
+        versionNumber: 1,
+        evidenceType: "synthetic_training_record",
+        contentHash: input.canonicalJsonHash(payload),
+        contentPayload: input.canonicalJson(payload),
+        validFrom,
+        validUntil,
+        issuedById: issuer.id,
+        commandReceiptId: receiptId,
+        note,
+      },
+    });
+    await tx.competencyEvidence.update({ where: { id: evidenceId }, data: { currentVersionId: versionId } });
+    await tx.competencyLifecycleEvent.create({
+      data: {
+        id: `${evidenceId}-created-event`,
+        evidenceId,
+        actorId: issuer.id,
+        actorAuthzVersion: 1,
+        assurance: "synthetic_mfa",
+        identityLinkId: issuer.identityId,
+        authenticatedAt: input.now,
+        dutyAssignmentId: trainingDuty,
+        dutyAssignmentVersion: 1,
+        commandReceiptId: receiptId,
+        eventType: "created",
+        evidenceVersion: 1,
+        detail: { fixture: "lab-transfer-verification" },
+        occurredAt: input.now,
+      },
+    });
+  }
+  await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+}
+
 async function expectRejected(operation: () => Promise<unknown>, message: string) {
   try {
     await operation();
@@ -44,11 +371,12 @@ async function main() {
   const schema = `mcm_test_lab_transfer_${Date.now()}_${process.pid}`;
   const directUrl = databaseUrlForSchema(baseUrl, schema, false);
   const runtimeUrl = databaseUrlForSchema(baseUrl, schema, true);
-  const env = { ...process.env, DATABASE_URL: runtimeUrl, DIRECT_DATABASE_URL: directUrl };
+  const env = { ...process.env, DATABASE_URL: runtimeUrl, DIRECT_DATABASE_URL: directUrl, MCM_DEPLOYMENT_PROFILE: "synthetic" };
   await run("npx", ["prisma", "migrate", "deploy"], env);
 
   process.env.DATABASE_URL = runtimeUrl;
   process.env.DIRECT_DATABASE_URL = directUrl;
+  process.env.MCM_DEPLOYMENT_PROFILE = "synthetic";
   const commandFoundation = await import("../src/lib/command-foundation");
   const capabilities = await import("../src/lib/capabilities");
   const transfer = await import("../src/lib/lab-transfer-write");
@@ -64,6 +392,7 @@ async function main() {
     labCode?: string;
     labName?: string;
     membershipRole?: "owner" | "manager" | "staff" | "viewer";
+    identityLinkId?: string;
   }) => {
     const activeMembership = input.role === "lab_user" && input.labId
       ? {
@@ -81,6 +410,12 @@ async function main() {
       databaseRole: input.role,
       canonicalRole: input.role,
       authzVersion: 1,
+      ...(input.identityLinkId ? {
+        authMethod: "synthetic_mfa" as const,
+        assurance: "synthetic_mfa" as const,
+        authenticatedAt: new Date().toISOString(),
+        identityLinkId: input.identityLinkId,
+      } : {}),
       activeLabId: activeMembership?.labId ?? null,
       activeMembership,
       memberships: activeMembership ? [activeMembership] : [],
@@ -88,15 +423,16 @@ async function main() {
     };
   };
 
-  const sourceManager = actor({ id: "transfer-source-manager", email: "source-manager@example.test", role: "lab_user", labId: "transfer-lab-source", labCode: "SRC", labName: "Source Lab", membershipRole: "manager" });
+  const sourceManager = actor({ id: "transfer-source-manager", email: "admin@colony.local", role: "lab_user", labId: "transfer-lab-source", labCode: "SRC", labName: "Source Lab", membershipRole: "manager", identityLinkId: "transfer-source-manager-identity" });
   const sourceStaff = actor({ id: "transfer-source-staff", email: "source-staff@example.test", role: "lab_user", labId: "transfer-lab-source", labCode: "SRC", labName: "Source Lab", membershipRole: "staff" });
-  const destinationManager = actor({ id: "transfer-destination-manager", email: "destination-manager@example.test", role: "lab_user", labId: "transfer-lab-destination", labCode: "DST", labName: "Destination Lab", membershipRole: "manager" });
-  const cmu = actor({ id: "transfer-cmu", email: "cmu@example.test", role: "cmu_staff" });
-  const facility = actor({ id: "transfer-facility", email: "facility@example.test", role: "facility_admin" });
+  const destinationManager = actor({ id: "transfer-destination-manager", email: "manager@colony.local", role: "lab_user", labId: "transfer-lab-destination", labCode: "DST", labName: "Destination Lab", membershipRole: "manager", identityLinkId: "transfer-destination-manager-identity" });
+  const cmu = actor({ id: "transfer-cmu", email: "staff@colony.local", role: "cmu_staff", identityLinkId: "transfer-cmu-identity" });
+  const facility = actor({ id: "transfer-facility", email: "researcher@colony.local", role: "facility_admin", identityLinkId: "transfer-facility-identity" });
+  const facilityApprover = actor({ id: "transfer-facility-approver", email: "readonly@colony.local", role: "facility_admin", identityLinkId: "transfer-facility-approver-identity" });
 
   try {
     await db.user.createMany({
-      data: [sourceManager, sourceStaff, destinationManager, cmu, facility].map((entry) => ({
+      data: [sourceManager, sourceStaff, destinationManager, cmu, facility, facilityApprover].map((entry) => ({
         id: entry.id,
         name: entry.name,
         email: entry.email,
@@ -121,6 +457,11 @@ async function main() {
     await db.room.create({ data: { id: "transfer-room", facilityId: "transfer-facility-record", roomNumber: "T1" } });
     await db.rack.create({ data: { id: "transfer-rack", roomId: "transfer-room", rackNumber: "A" } });
     await db.strain.create({ data: { id: "transfer-strain", name: "Transfer strain" } });
+    await db.$transaction((tx) => seedTransferComplianceFixture(tx, {
+      canonicalJson: commandFoundation.canonicalJson,
+      canonicalJsonHash: commandFoundation.canonicalJsonHash,
+      now: new Date(),
+    }));
     await db.cageChargeCategory.create({ data: { id: "transfer-standard", name: "Standard", code: "STANDARD", dailyRateCents: 125 } });
 
     const cageIds = await db.$transaction((tx) => commandFoundation.allocateFacilityIdentifiers(tx, "cage", 4), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -152,8 +493,84 @@ async function main() {
     });
     await db.project.create({ data: { id: "transfer-project", labId: "transfer-lab-source", projectCode: "TR-PROJ", title: "Transfer project", ownerId: sourceManager.id } });
     await db.animalProjectAllocation.create({ data: { id: "transfer-allocation", animalId: "transfer-animal-cage-1", projectId: "transfer-project", startedAt: new Date("2026-01-10T00:00:00.000Z") } });
-    await db.experiment.create({ data: { id: "transfer-experiment", labId: "transfer-lab-source", experimentCode: "TR-EXP", projectId: "transfer-project", title: "Transfer experiment", ownerId: sourceManager.id, status: "active" } });
+    await db.experiment.create({ data: { id: "transfer-experiment", labId: "transfer-lab-source", experimentCode: "TR-EXP", projectId: "transfer-project", title: "Transfer experiment", ownerId: sourceManager.id, status: "active", protocolAuthorizationId: SOURCE_PROTOCOL_ID } });
     await db.experimentAssignment.create({ data: { id: "transfer-assignment", animalId: "transfer-animal-cage-1", experimentId: "transfer-experiment", status: "active", startDate: new Date("2026-01-11T00:00:00.000Z") } });
+    await db.$transaction(async (tx) => {
+      const receiptId = "transfer-source-assignment-reservation-receipt";
+      const versionId = `${SOURCE_PROTOCOL_ID}-v1`;
+      const ledgerId = `${versionId}-ledger`;
+      const allocationId = "transfer-source-assignment-allocation";
+      const allocationKey = "assignment:transfer-assignment:reservation";
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+      await tx.commandReceipt.create({
+        data: {
+          id: receiptId,
+          actorId: sourceManager.id,
+          actorAuthzVersion: 1,
+          labId: "transfer-lab-source",
+          commandType: "experiment.assignment.reserve_direct",
+          idempotencyKey: receiptId,
+          requestHash: commandFoundation.canonicalJsonHash({ fixture: receiptId }),
+          requestId: receiptId,
+          status: "succeeded",
+          aggregateType: "animal",
+          aggregateId: "transfer-animal-cage-1",
+          result: { fixture: "source-assignment-reservation" },
+          completedAt: new Date(),
+        },
+      });
+      await tx.protocolCountAllocation.create({
+        data: {
+          id: allocationId,
+          ledgerId,
+          authorizationVersionId: versionId,
+          allocationKey,
+          aggregateType: "experiment_assignment",
+          aggregateId: "transfer-assignment",
+          reservedQuantity: 1,
+          createdById: sourceManager.id,
+          createdCommandReceiptId: receiptId,
+        },
+      });
+      await tx.protocolCountAllocationHistory.create({
+        data: {
+          id: `${allocationId}-reserve`,
+          allocationId,
+          ledgerId,
+          authorizationVersionId: versionId,
+          commandReceiptId: receiptId,
+          allocationKey,
+          allocationType: "reserve",
+          quantity: 1,
+          allocationReservedBefore: 0,
+          allocationReservedAfter: 1,
+          allocationConsumedBefore: 0,
+          allocationConsumedAfter: 0,
+          allocationReleasedBefore: 0,
+          allocationReleasedAfter: 0,
+          allocationVersionBefore: 0,
+          allocationVersionAfter: 1,
+          reservedBefore: 0,
+          reservedAfter: 1,
+          consumedBefore: 0,
+          consumedAfter: 0,
+          aggregateType: "experiment_assignment",
+          aggregateId: "transfer-assignment",
+          commandAggregateType: "animal",
+          commandAggregateId: "transfer-animal-cage-1",
+          actorId: sourceManager.id,
+        },
+      });
+      await tx.protocolCountLedger.update({
+        where: { id: ledgerId },
+        data: { reservedCount: 1, version: { increment: 1 } },
+      });
+      await tx.experimentAssignment.update({
+        where: { id: "transfer-assignment" },
+        data: { protocolCountAllocationId: allocationId },
+      });
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+    });
     await db.breedingSetup.create({ data: { id: "transfer-breeding", labId: "transfer-lab-source", startDate: new Date("2026-01-12T00:00:00.000Z"), status: "active", targetGenotype: "verification" } });
     await db.breedingAdult.createMany({
       data: [
@@ -206,7 +623,7 @@ async function main() {
 
     const unauthorized = await transfer.executeRequestLabTransferCommand({
       actor: sourceStaff,
-      command: { subjectType: "cage", sourceCageId: "transfer-cage-source-a", destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Unauthorized request" },
+      command: { subjectType: "cage", sourceCageId: "transfer-cage-source-a", destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Unauthorized request", sourceProtocolAuthorizationId: SOURCE_PROTOCOL_ID },
       idempotencyKey: "transfer-unauthorized-request",
       requestId: "transfer-unauthorized-request",
     });
@@ -214,7 +631,7 @@ async function main() {
 
     const cageRequest = await transfer.executeRequestLabTransferCommand({
       actor: sourceManager,
-      command: { subjectType: "cage", sourceCageId: "transfer-cage-source-a", destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Transfer breeding cage", sourcePrivateNote: "SOURCE PRIVATE NOTE" },
+      command: { subjectType: "cage", sourceCageId: "transfer-cage-source-a", destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Transfer breeding cage", sourcePrivateNote: "SOURCE PRIVATE NOTE", sourceProtocolAuthorizationId: SOURCE_PROTOCOL_ID },
       idempotencyKey: "transfer-cage-request-0001",
       requestId: "transfer-cage-request-0001",
     });
@@ -275,7 +692,7 @@ async function main() {
     const cageRequestVersion = (await db.labTransferRequest.findUniqueOrThrow({ where: { id: cageRequestId } })).version;
     const wrongLabDecision = await transfer.executeDecideLabTransferCommand({
       actor: sourceManager,
-      command: { requestId: cageRequestId, decision: "accept" },
+      command: { requestId: cageRequestId, decision: "accept", destinationProtocolAuthorizationId: DESTINATION_PROTOCOL_ID },
       expectedVersion: cageRequestVersion,
       idempotencyKey: "transfer-wrong-lab-decision",
       requestId: "transfer-wrong-lab-decision",
@@ -283,7 +700,7 @@ async function main() {
     assert(!wrongLabDecision.ok, "Source lab unexpectedly accepted its own transfer request.");
     const cageAccepted = await transfer.executeDecideLabTransferCommand({
       actor: destinationManager,
-      command: { requestId: cageRequestId, decision: "accept", note: "Destination accepts the cage" },
+      command: { requestId: cageRequestId, decision: "accept", note: "Destination accepts the cage", destinationProtocolAuthorizationId: DESTINATION_PROTOCOL_ID },
       expectedVersion: cageRequestVersion,
       idempotencyKey: "transfer-cage-accept-0001",
       requestId: "transfer-cage-accept-0001",
@@ -308,6 +725,68 @@ async function main() {
       requestId: "transfer-cage-cmu-override",
     });
     assert(!cmuOverride.ok && cmuOverride.code === "override_forbidden", "CMU unexpectedly applied a Facility override.");
+    const reservationBeforeOverride = await db.protocolCountAllocation.findUniqueOrThrow({
+      where: { id: "transfer-source-assignment-allocation" },
+    });
+    const destinationBeforeOverride = await db.protocolCountAllocation.findUniqueOrThrow({
+      where: { id: acceptedCageRequest.destinationProtocolCountAllocationId! },
+    });
+    assert(
+      reservationBeforeOverride.status === "open" &&
+        reservationBeforeOverride.releasedQuantity === 0,
+      "A rejected override changed the source assignment reservation.",
+    );
+    assert(
+      destinationBeforeOverride.status === "open" &&
+        destinationBeforeOverride.consumedQuantity === 0,
+      "A rejected override consumed the destination reservation.",
+    );
+
+    await db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+      await tx.experimentAssignment.update({
+        where: { id: "transfer-assignment" },
+        data: { protocolCountAllocationId: null },
+      });
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+    });
+    const inconsistentOverride = await transfer.executeFinalizeLabTransferCommand({
+      actor: facility,
+      command: {
+        requestId: cageRequestId,
+        overrideReason:
+          "Facility attempted settlement with intentionally inconsistent synthetic evidence.",
+      },
+      expectedVersion: acceptedCageRequest.version,
+      idempotencyKey: "transfer-cage-facility-inconsistent",
+      requestId: "transfer-cage-facility-inconsistent",
+    });
+    assert(
+      !inconsistentOverride.ok &&
+        inconsistentOverride.code === "compliance_count_conflict",
+      "Facility override did not fail closed on a missing source allocation link.",
+    );
+    assert(
+      (await db.labTransferRequest.findUniqueOrThrow({ where: { id: cageRequestId } })).status ===
+        "destination_accepted",
+      "A failed source-settlement override changed the transfer lifecycle.",
+    );
+    assert(
+      (await db.protocolCountAllocation.findUniqueOrThrow({
+        where: { id: acceptedCageRequest.destinationProtocolCountAllocationId! },
+      })).status === "open",
+      "A failed source-settlement override did not roll back destination consumption.",
+    );
+    await db.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
+      await tx.experimentAssignment.update({
+        where: { id: "transfer-assignment" },
+        data: {
+          protocolCountAllocationId: "transfer-source-assignment-allocation",
+        },
+      });
+      await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
+    });
     const facilityFinalized = await transfer.executeFinalizeLabTransferCommand({
       actor: facility,
       command: { requestId: cageRequestId, overrideReason: "Facility approved closure of active research relationships." },
@@ -322,6 +801,23 @@ async function main() {
     assert(finalizedCage.chargePeriods.some((period) => period.labId === "transfer-lab-source" && period.endedAt), "Source billing period was not closed.");
     assert(finalizedCage.labTransfers[0]?.requestId === cageRequestId, "Cage transfer history is not linked to the request.");
     assert((await db.experimentAssignment.findUniqueOrThrow({ where: { id: "transfer-assignment" } })).status === "cancelled", "Override did not cancel active experiment assignment.");
+    const settledSourceAllocation = await db.protocolCountAllocation.findUniqueOrThrow({
+      where: { id: "transfer-source-assignment-allocation" },
+    });
+    const settledDestinationAllocation = await db.protocolCountAllocation.findUniqueOrThrow({
+      where: { id: acceptedCageRequest.destinationProtocolCountAllocationId! },
+    });
+    assert(
+      settledSourceAllocation.status === "released" &&
+        settledSourceAllocation.releasedQuantity === 1,
+      "Override did not release the exact source experiment reservation.",
+    );
+    assert(
+      settledDestinationAllocation.status === "consumed" &&
+        settledDestinationAllocation.consumedQuantity ===
+          settledDestinationAllocation.reservedQuantity,
+      "Finalization did not consume the exact destination reservation.",
+    );
     assert((await db.animalProjectAllocation.findUniqueOrThrow({ where: { id: "transfer-allocation" } })).endedAt, "Override did not end project allocation.");
     assert((await db.breedingSetup.findUniqueOrThrow({ where: { id: "transfer-breeding" } })).status === "retired", "Override did not retire breeding setup.");
     const breedingPartner = await db.animal.findUniqueOrThrow({ where: { id: "transfer-animal-partner" } });
@@ -342,7 +838,7 @@ async function main() {
 
     const animalRequest = await transfer.executeRequestLabTransferCommand({
       actor: sourceManager,
-      command: { subjectType: "animals", animalIds: ["transfer-animal-single"], destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Transfer one holding animal", sourcePrivateNote: "ANOTHER PRIVATE NOTE" },
+      command: { subjectType: "animals", animalIds: ["transfer-animal-single"], destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Transfer one holding animal", sourcePrivateNote: "ANOTHER PRIVATE NOTE", sourceProtocolAuthorizationId: SOURCE_PROTOCOL_ID },
       idempotencyKey: "transfer-animal-request-0001",
       requestId: "transfer-animal-request-0001",
     });
@@ -351,7 +847,7 @@ async function main() {
     const animalRequestVersion = (await db.labTransferRequest.findUniqueOrThrow({ where: { id: animalRequestId } })).version;
     const quarantinePlacement = await transfer.executeDecideLabTransferCommand({
       actor: destinationManager,
-      command: { requestId: animalRequestId, decision: "accept", destinationCageId: "transfer-cage-quarantine", note: "Invalid quarantine placement" },
+      command: { requestId: animalRequestId, decision: "accept", destinationCageId: "transfer-cage-quarantine", note: "Invalid quarantine placement", destinationProtocolAuthorizationId: DESTINATION_PROTOCOL_ID },
       expectedVersion: animalRequestVersion,
       idempotencyKey: "transfer-animal-quarantine-placement",
       requestId: "transfer-animal-quarantine-placement",
@@ -359,7 +855,7 @@ async function main() {
     assert(!quarantinePlacement.ok && quarantinePlacement.code === "validation_error", "A routine cross-lab transfer entered a quarantine-status cage.");
     const mixedSexPlacement = await transfer.executeDecideLabTransferCommand({
       actor: destinationManager,
-      command: { requestId: animalRequestId, decision: "accept", destinationCageId: "transfer-cage-destination", note: "Invalid mixed-sex placement" },
+      command: { requestId: animalRequestId, decision: "accept", destinationCageId: "transfer-cage-destination", note: "Invalid mixed-sex placement", destinationProtocolAuthorizationId: DESTINATION_PROTOCOL_ID },
       expectedVersion: animalRequestVersion,
       idempotencyKey: "transfer-animal-mixed-sex-placement",
       requestId: "transfer-animal-mixed-sex-placement",
@@ -368,7 +864,7 @@ async function main() {
     await db.animal.update({ where: { id: "transfer-animal-single" }, data: { sex: "female" } });
     const placementRevision = await transfer.executeReviseLabTransferCommand({
       actor: sourceManager,
-      command: { requestId: animalRequestId, destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Transfer one holding animal", sourcePrivateNote: "ANOTHER PRIVATE NOTE" },
+      command: { requestId: animalRequestId, destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Transfer one holding animal", sourcePrivateNote: "ANOTHER PRIVATE NOTE", sourceProtocolAuthorizationId: SOURCE_PROTOCOL_ID },
       expectedVersion: animalRequestVersion,
       idempotencyKey: "transfer-animal-placement-revision",
       requestId: "transfer-animal-placement-revision",
@@ -377,7 +873,7 @@ async function main() {
     const placementRevisedRequest = await db.labTransferRequest.findUniqueOrThrow({ where: { id: animalRequestId } });
     const animalAccepted = await transfer.executeDecideLabTransferCommand({
       actor: destinationManager,
-      command: { requestId: animalRequestId, decision: "accept", destinationCageId: "transfer-cage-destination", note: "Space confirmed" },
+      command: { requestId: animalRequestId, decision: "accept", destinationCageId: "transfer-cage-destination", note: "Space confirmed", destinationProtocolAuthorizationId: DESTINATION_PROTOCOL_ID },
       expectedVersion: placementRevisedRequest.version,
       idempotencyKey: "transfer-animal-accept-0001",
       requestId: "transfer-animal-accept-0001",
@@ -397,7 +893,7 @@ async function main() {
     await db.cage.update({ where: { id: "transfer-cage-destination" }, data: { status: "active" } });
     const revised = await transfer.executeReviseLabTransferCommand({
       actor: sourceManager,
-      command: { requestId: animalRequestId, destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Transfer one holding animal", sourcePrivateNote: "ANOTHER PRIVATE NOTE" },
+      command: { requestId: animalRequestId, destinationLabId: "transfer-lab-destination", requestedEffectiveAt: today, reason: "Transfer one holding animal", sourcePrivateNote: "ANOTHER PRIVATE NOTE", sourceProtocolAuthorizationId: SOURCE_PROTOCOL_ID },
       expectedVersion: acceptedAnimalRequest.version,
       idempotencyKey: "transfer-animal-revise-0001",
       requestId: "transfer-animal-revise-0001",
@@ -407,7 +903,7 @@ async function main() {
     assert(revisedRequest.status === "requested" && revisedRequest.acceptedPacketVersion === null, "Revision did not clear prior acceptance.");
     const reaccepted = await transfer.executeDecideLabTransferCommand({
       actor: destinationManager,
-      command: { requestId: animalRequestId, decision: "accept", destinationCageId: "transfer-cage-destination", note: "Updated packet accepted" },
+      command: { requestId: animalRequestId, decision: "accept", destinationCageId: "transfer-cage-destination", note: "Updated packet accepted", destinationProtocolAuthorizationId: DESTINATION_PROTOCOL_ID },
       expectedVersion: revisedRequest.version,
       idempotencyKey: "transfer-animal-reaccept-0001",
       requestId: "transfer-animal-reaccept-0001",

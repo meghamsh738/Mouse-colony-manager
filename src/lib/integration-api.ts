@@ -2731,6 +2731,7 @@ const genotypeApiSelect = {
 
 const breedingSetupApiSelect = {
   id: true,
+  version: true,
   labId: true,
   startDate: true,
   status: true,
@@ -3107,6 +3108,7 @@ function formatExperimentAssignmentApiRecord(record: {
 
 function formatBreedingSetupApiRecord(record: {
   id: string;
+  version: number;
   labId: string;
   startDate: Date;
   status: string;
@@ -3144,6 +3146,7 @@ function formatBreedingSetupApiRecord(record: {
 }) {
   return {
     id: record.id,
+    version: record.version,
     labId: record.labId,
     startDate: record.startDate.toISOString().slice(0, 10),
     status: record.status,

@@ -48,6 +48,7 @@ export type Capability =
   | "welfare:manage"
   | "welfare:close"
   | "protocols:read"
+  | "protocols:draft"
   | "protocols:approve"
   | "competencies:read"
   | "competencies:manage"
@@ -108,7 +109,7 @@ const labStaffCapabilities: Capability[] = [
 ];
 
 const labManagerCapabilities: Capability[] = [
-  ...labStaffCapabilities, "transfers:request", "transfers:approve", "approvals:read", "strains:manage", "sops:manage", "sops:approve",
+  ...labStaffCapabilities, "transfers:request", "transfers:approve", "approvals:read", "strains:manage", "sops:manage", "sops:approve", "protocols:draft",
 ];
 
 export function normalizeUserRole(role: UserRole): CanonicalUserRole {

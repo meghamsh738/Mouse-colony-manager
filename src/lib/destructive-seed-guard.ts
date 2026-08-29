@@ -18,9 +18,10 @@ export function destructiveSeedTargetErrors({ allowed, nodeEnv, rawUrl }: Destru
     const localHost = ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname);
     if (!localHost) errors.push("database must use a loopback host");
 
+    const databaseName = url.pathname.replace(/^\//, "");
     const schemaName = url.searchParams.get("schema") ?? "";
-    if (!disposableName.test(schemaName)) {
-      errors.push("schema must contain a test, e2e, or disposable marker");
+    if (![databaseName, schemaName].some((target) => disposableName.test(target))) {
+      errors.push("database name or schema must contain a test, e2e, or disposable marker");
     }
   } catch {
     errors.push("a valid database URL is required");

@@ -112,7 +112,11 @@ function sortJson(value: unknown): unknown {
 }
 
 export function canonicalJsonHash(value: unknown) {
-  return createHash("sha256").update(JSON.stringify(sortJson(value))).digest("hex");
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+export function canonicalJson(value: unknown) {
+  return JSON.stringify(sortJson(value));
 }
 
 export async function allocateFacilityIdentifiers(
@@ -726,10 +730,10 @@ export async function executeIdempotentCommand<T extends Prisma.InputJsonValue>(
       const receiptId = randomUUID();
       const inserted = await tx.$queryRaw<CommandReceipt[]>(Prisma.sql`
         INSERT INTO "CommandReceipt" (
-          id, "actorId", "labId", "workflowDraftId", "commandType", "idempotencyKey",
+          id, "actorId", "actorAuthzVersion", "labId", "workflowDraftId", "commandType", "idempotencyKey",
           "requestHash", "requestId", status, "aggregateType", "aggregateId", "expectedVersion", "startedAt"
         ) VALUES (
-          ${receiptId}, ${input.actor.id}, ${commandLabId}, ${input.workflowDraftId ?? null},
+          ${receiptId}, ${input.actor.id}, ${input.actor.authzVersion}, ${commandLabId}, ${input.workflowDraftId ?? null},
           ${input.commandType}, ${idempotencyKey}, ${requestHash}, ${input.requestId},
           'processing'::"CommandReceiptStatus", ${input.aggregateType ?? null}, ${aggregateId},
           ${input.expectedVersion ?? null}, CURRENT_TIMESTAMP

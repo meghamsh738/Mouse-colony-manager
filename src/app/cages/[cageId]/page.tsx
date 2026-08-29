@@ -211,6 +211,7 @@ export default async function CageDetailPage({ params, searchParams }: { params:
                 <LabTransferRequestForm
                   destinationLabs={transferRequestOptions.destinationLabs}
                   nonce={randomUUID()}
+                  sourceProtocols={transferRequestOptions.sourceProtocols}
                   sourceCageId={snapshot.cage.id}
                   subjectType="cage"
                   today={snapshot.moveForm.defaultDate}

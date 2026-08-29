@@ -15,11 +15,11 @@ describe("health-note notification wiring", () => {
     const implementation = source.slice(start, end === -1 ? undefined : end);
 
     expect(start).toBeGreaterThan(-1);
-    expect(implementation).toContain("await prisma.$transaction(async (tx) =>");
+    expect(implementation).toMatch(/await prisma\.\$transaction\(\s*async \(tx\) =>/);
     expect(implementation).toMatch(
-      /if \(input\.followupRequired \|\| input\.severity === "warning" \|\| input\.severity === "critical"\)/,
+      /if \(\s*input\.followupRequired \|\|\s*input\.severity === "warning" \|\|\s*input\.severity === "critical"\s*\)/,
     );
-    expect(implementation).toContain("await materializeNotificationAlertInTransaction(tx,");
+    expect(implementation).toMatch(/await materializeNotificationAlertInTransaction\(\s*tx,/);
     expect(implementation).toContain('alertType: "welfare_note"');
     expect(implementation).toContain("labId: cage.labId!");
   });

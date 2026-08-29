@@ -35,6 +35,7 @@ export type CageIntakeDraftPayload = {
   litterVersion?: number;
   step: 1 | 2 | 3;
   labId: string;
+  protocolAuthorizationId: string;
   operationDate: string;
   reason: string;
   selectedAnimalIds: string[];
@@ -83,6 +84,7 @@ export const cageIntakeDraftPayloadSchema: z.ZodType<CageIntakeDraftPayload> = z
   litterVersion: z.number().int().positive().optional(),
   step: z.union([z.literal(1), z.literal(2), z.literal(3)]),
   labId: z.string(),
+  protocolAuthorizationId: z.string().default(""),
   operationDate: dateOnlySchema,
   reason: z.string(),
   selectedAnimalIds: z.array(z.string()).max(300),

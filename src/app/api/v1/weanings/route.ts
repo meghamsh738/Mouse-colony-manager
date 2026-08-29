@@ -1,7 +1,8 @@
 import { z } from "zod";
 
 import { buildApiErrorResponse, buildMutationResponse, requireApiUser } from "@/lib/api-route";
-import { weanLitterToCages } from "@/lib/colony-write";
+import { executeWeanLitterCommand } from "@/lib/colony-write";
+import { canonicalJsonHash } from "@/lib/command-foundation";
 import {
   getLitterApiRecordById,
   getWeaningApiRecordByLitterId,
@@ -80,23 +81,29 @@ export async function POST(request: Request) {
     return buildApiErrorResponse("Destination cage not found.", 404);
   }
 
-  const result = await weanLitterToCages(
-    {
-      litterId: parsed.data.litterId,
-      weanDate: parsed.data.weanDate,
-      femaleCount: parsed.data.femaleCount,
-      maleCount: parsed.data.maleCount,
-      femaleCageId: femaleCage?.value.cageId,
-      maleCageId: maleCage?.value.cageId,
-      strainId: strain.value.strainId,
-    },
-    { id: auth.user.id, role: auth.user.role, activeLabId: auth.user.activeLabId },
-  );
+  const command = {
+    litterId: parsed.data.litterId,
+    weanDate: parsed.data.weanDate,
+    femaleCount: parsed.data.femaleCount,
+    maleCount: parsed.data.maleCount,
+    femaleCageId: femaleCage?.value.cageId,
+    maleCageId: maleCage?.value.cageId,
+    strainId: strain.value.strainId,
+  };
+  const idempotencyKey = request.headers.get("idempotency-key")?.trim()
+    || canonicalJsonHash({ actorId: auth.user.id, command });
+  const result = await executeWeanLitterCommand({
+    actor: auth.user,
+    command,
+    idempotencyKey,
+    requestId: request.headers.get("x-request-id")?.trim() || idempotencyKey,
+  });
 
   if (!result.ok) {
     if (
-      result.message.includes("already has a recorded weaning outcome") ||
-      result.message.includes("already has linked progeny records")
+      result.code === "compliance_count_conflict" ||
+      result.message?.includes("already has a recorded weaning outcome") ||
+      result.message?.includes("already has linked progeny records")
     ) {
       const existingRecord = await getWeaningApiRecordByLitterId(parsed.data.litterId, auth.user);
 
@@ -109,29 +116,41 @@ export async function POST(request: Request) {
       }
     }
 
-    const status = result.message.includes("role cannot")
+    const message = result.message ?? "Litter weaning could not be recorded.";
+    const status = message.includes("role cannot") || result.code === "forbidden"
       ? 403
-      : result.message.includes("not found")
+      : message.includes("not found")
         ? 404
+        : result.code === "idempotency_conflict" || result.code === "command_in_progress"
+          ? 409
         : 400;
 
-    return buildApiErrorResponse(result.message, status);
+    return buildApiErrorResponse(message, status);
   }
 
-  if (!result.entityId) {
+  const commandResult = result.result && typeof result.result === "object" && !Array.isArray(result.result)
+    ? result.result as { entityId?: unknown; message?: unknown }
+    : null;
+  const entityId = typeof commandResult?.entityId === "string" ? commandResult.entityId : null;
+  const message = typeof commandResult?.message === "string"
+    ? commandResult.message
+    : "Litter weaning recorded.";
+  if (!entityId) {
     return buildApiErrorResponse("Litter weaning was recorded but could not be read back.", 500);
   }
 
-  const record = await getWeaningApiRecordByLitterId(result.entityId, auth.user);
+  const record = await getWeaningApiRecordByLitterId(entityId, auth.user);
 
   if (!record) {
     return buildApiErrorResponse("Litter weaning was recorded but could not be read back.", 500);
   }
 
   return buildMutationResponse(record, {
-    status: 201,
-    created: true,
-    message: result.message,
+    status: result.replayed ? 200 : 201,
+    created: !result.replayed,
+    message: result.replayed
+      ? `${parsed.data.litterId} already matches the submitted weaning outcome.`
+      : message,
   });
 }
 

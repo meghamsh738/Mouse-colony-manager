@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { clearStoredAttachments } from "../src/lib/attachment-storage";
 import { assertDestructiveSeedAllowed } from "../src/lib/destructive-seed-guard";
 import { seedColonyData } from "./seed-data";
+import { seedDemoComplianceFixture } from "./seed-demo-compliance";
 import { hashPassword } from "../src/lib/password";
 import { prisma } from "../src/lib/prisma";
 
@@ -147,6 +148,21 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     await tx.$executeRawUnsafe("SET LOCAL mcm.allow_destructive_seed = 'true'");
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'");
     await tx.sopDocument.updateMany({ data: { currentVersionId: null } });
+    await tx.$executeRawUnsafe('DELETE FROM "ComplianceEvidenceSnapshot"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolCountAllocationHistory"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolCountAllocation"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolCountLedger"');
+    await tx.$executeRawUnsafe('DELETE FROM "CompetencyLifecycleEvent"');
+    await tx.$executeRawUnsafe('DELETE FROM "CompetencyEvidenceVersion"');
+    await tx.$executeRawUnsafe('DELETE FROM "CompetencyEvidence"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolAuthorizationLifecycleEvent"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolPersonnelBinding"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolProcedureBinding"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolStrainBinding"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolExperimentBinding"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolProjectBinding"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolAuthorizationVersion"');
+    await tx.$executeRawUnsafe('DELETE FROM "ProtocolAuthorization"');
     // Duty requests and assignments intentionally bind each other in both
     // directions. Clear the guarded disposable fixture atomically while FK
     // triggers are disabled, after assertDestructiveSeedAllowed has passed.
@@ -155,11 +171,14 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     await tx.$executeRawUnsafe('DELETE FROM "FacilityDutyAssignment"');
     await tx.$executeRawUnsafe('DELETE FROM "FacilityDutyRequest"');
     await tx.$executeRawUnsafe('DELETE FROM "ExternalIdentityLink"');
+    await tx.$executeRawUnsafe('DELETE FROM "AnimalStatusEvent"');
+    await tx.$executeRawUnsafe('DELETE FROM "AuditLog"');
     await tx.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'");
   });
 
   await prisma.$transaction([
     prisma.$executeRawUnsafe("SET LOCAL mcm.allow_destructive_seed = 'true'"),
+    prisma.$executeRawUnsafe("SET LOCAL session_replication_role = 'replica'"),
     prisma.strainDirectoryRequestEvent.deleteMany(),
     prisma.strainDirectoryRequest.deleteMany(),
     prisma.strainDirectoryListing.deleteMany(),
@@ -168,11 +187,9 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     prisma.outboxMessage.deleteMany(),
     prisma.procedureOccurrence.deleteMany(),
     prisma.procedurePlan.deleteMany(),
-    prisma.animalStatusEvent.deleteMany(),
     prisma.cryostorageOperation.deleteMany(),
     prisma.cryostorageRequestEvent.deleteMany(),
     prisma.cryostorageRequest.deleteMany(),
-    prisma.auditLog.deleteMany(),
     prisma.commandReceipt.deleteMany(),
     prisma.sopAcknowledgement.deleteMany(),
     prisma.sopAssignment.deleteMany(),
@@ -237,6 +254,7 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     prisma.room.deleteMany(),
     prisma.facility.deleteMany(),
     prisma.user.deleteMany(),
+    prisma.$executeRawUnsafe("SET LOCAL session_replication_role = 'origin'"),
   ]);
 
   await prisma.user.createMany({
@@ -451,6 +469,7 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
       timestamp: new Date(log.timestamp),
     })),
   });
+  await prisma.$transaction(seedDemoComplianceFixture);
   if (options.clearAttachments !== false) {
     await clearStoredAttachments();
   }

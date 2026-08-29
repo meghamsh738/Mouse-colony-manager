@@ -114,12 +114,13 @@ describe("procedure operations migration", () => {
   it("deletes procedure and lifecycle children before restricted SOP parents during disposable reseeding", async () => {
     const source = await readFile(path.join(process.cwd(), "prisma/seed-database.ts"), "utf8");
     const sopAssignmentDelete = source.indexOf("prisma.sopAssignment.deleteMany()");
+    const animalStatusDelete = source.indexOf('DELETE FROM "AnimalStatusEvent"');
 
     expect(source.indexOf("prisma.procedureOccurrence.deleteMany()")).toBeGreaterThan(-1);
     expect(source.indexOf("prisma.procedurePlan.deleteMany()")).toBeGreaterThan(-1);
-    expect(source.indexOf("prisma.animalStatusEvent.deleteMany()")).toBeGreaterThan(-1);
+    expect(animalStatusDelete).toBeGreaterThan(-1);
     expect(source.indexOf("prisma.procedureOccurrence.deleteMany()")).toBeLessThan(sopAssignmentDelete);
     expect(source.indexOf("prisma.procedurePlan.deleteMany()")).toBeLessThan(sopAssignmentDelete);
-    expect(source.indexOf("prisma.animalStatusEvent.deleteMany()")).toBeLessThan(sopAssignmentDelete);
+    expect(animalStatusDelete).toBeLessThan(sopAssignmentDelete);
   });
 });

@@ -184,6 +184,7 @@ export function CageIntakeWizard({
     "";
   const [step, setStep] = useState<1 | 2 | 3>(restored?.step ?? 1);
   const [labId, setLabId] = useState(restored?.labId ?? defaultLabId);
+  const [protocolAuthorizationId, setProtocolAuthorizationId] = useState(restored?.protocolAuthorizationId ?? "");
   const [operationDate, setOperationDate] = useState(
     restored?.operationDate ?? (mode === "wean" ? options.litter?.suggestedWeanDate ?? today : today),
   );
@@ -221,6 +222,16 @@ export function CageIntakeWizard({
   const selectedFacility = options.facilities.find((facility) => facility.id === selectedRoom?.facilityId);
   const facilityLimit = selectedFacility?.maxCageOccupancy ?? 6;
   const strainById = useMemo(() => new Map(options.strains.map((strain) => [strain.id, strain.name])), [options.strains]);
+  const requiredProtocolStrainIds = useMemo(() => {
+    if (mode === "wean") return weanStrainId ? [weanStrainId] : [];
+    if (mode === "purchase") return [...new Set(purchaseRows.map((row) => row.strainId).filter(Boolean))];
+    return [];
+  }, [mode, purchaseRows, weanStrainId]);
+  const protocolOptions = useMemo(() => options.protocols.filter((protocol) => (
+    protocol.labId === labId
+    && requiredProtocolStrainIds.every((strainId) => protocol.strainIds.includes(strainId))
+  )), [labId, options.protocols, requiredProtocolStrainIds]);
+  const hasValidProtocolSelection = protocolOptions.some((protocol) => protocol.id === protocolAuthorizationId);
   const assignmentCounts = useMemo(() => {
     return Object.values(assignments).reduce<Record<string, number>>((counts, destination) => {
       counts[destination] = (counts[destination] ?? 0) + 1;
@@ -265,6 +276,8 @@ export function CageIntakeWizard({
       ? reason.trim().length >= 3
       : mode === "wean"
         ? Boolean(
+            hasValidProtocolSelection
+            &&
             options.litter
             && !options.litter.alreadyWeaned
             && femaleCount + maleCount > 0
@@ -272,6 +285,8 @@ export function CageIntakeWizard({
             && weanStrainId
           )
         : Boolean(
+            hasValidProtocolSelection
+            &&
             vendor.trim().length >= 2 &&
             orderReference.trim().length >= 2 &&
             purchaseRows.length &&
@@ -404,6 +419,7 @@ export function CageIntakeWizard({
         }
       : mode === "wean"
         ? {
+            protocolAuthorizationId,
             litterId: options.litter?.id ?? "",
             weanDate: operationDate,
             strainId: weanStrainId,
@@ -415,6 +431,7 @@ export function CageIntakeWizard({
             cages: activeCages,
           }
         : {
+            protocolAuthorizationId,
             labId,
             vendor,
             orderReference,
@@ -439,6 +456,7 @@ export function CageIntakeWizard({
     litterVersion: options.litter?.version,
     step,
     labId,
+    protocolAuthorizationId,
     operationDate,
     reason,
     selectedAnimalIds,
@@ -499,7 +517,7 @@ export function CageIntakeWizard({
           <div className="worksheet-filter-grid intake-source-grid">
             <label>
               <span>Owning lab</span>
-              <select value={labId} onChange={(event) => setLabId(event.target.value)}>
+              <select value={labId} onChange={(event) => { setLabId(event.target.value); setProtocolAuthorizationId(""); }}>
                 {options.labs.map((lab) => <option key={lab.id} value={lab.id}>{lab.code} · {lab.name}</option>)}
               </select>
             </label>
@@ -514,6 +532,21 @@ export function CageIntakeWizard({
               </label>
             ) : null}
           </div>
+
+          {mode === "wean" || mode === "purchase" ? <div className="mt-4 space-y-3">
+            <div className={protocolOptions.length ? "rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950" : "rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"}>
+              {protocolOptions.length
+                ? "Choose the active intake authorization covering this lab and every selected strain. The server verifies that you are a named intake operator with current competency before saving."
+                : "No matching intake authorization is active for this lab and strain selection. Intake is blocked until an independent reviewer activates a suitable protocol and your competency is current."}
+            </div>
+            <label className="block space-y-2 text-sm">
+              <span className="text-[var(--muted)]">Intake protocol</span>
+              <select className="h-11 w-full rounded-md border border-[var(--line)] bg-white px-3" name="protocolAuthorizationId" required value={protocolAuthorizationId} onChange={(event) => setProtocolAuthorizationId(event.target.value)}>
+                <option value="">Choose active protocol</option>
+                {protocolOptions.map((protocol) => <option key={protocol.id} value={protocol.id}>{protocol.label} · expires {protocol.validUntil.slice(0, 10)}</option>)}
+              </select>
+            </label>
+          </div> : null}
 
           {mode === "new" ? (
             <div className="intake-record-list">
@@ -697,6 +730,7 @@ export function CageIntakeWizard({
             <div><span>Workflow</span><strong>{modeItems.find((item) => item.mode === mode)?.label}</strong></div>
             <div><span>Date</span><strong>{formatDate(operationDate)}</strong></div>
             <div><span>Lab</span><strong>{options.labs.find((lab) => lab.id === labId)?.code}</strong></div>
+            {mode === "wean" || mode === "purchase" ? <div className="md:col-span-2"><span>Verified protocol</span><strong>{options.protocols.find((protocol) => protocol.id === protocolAuthorizationId)?.label ?? "Not selected"}</strong></div> : null}
             <div><span>New cages</span><strong>{activeCages.length}</strong></div>
             <div><span>Existing destinations</span><strong>{existingDestinationCount}</strong></div>
             <div><span>Charging</span><strong>{activeCages.length ? `${activeCages.length} new charge ${activeCages.length === 1 ? "period" : "periods"}` : "No new charge period"}</strong></div>

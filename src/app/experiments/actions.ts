@@ -22,6 +22,7 @@ import { requireUser } from "@/lib/session";
 const experimentDetailsSchema = z.object({
   labId: z.string().trim().optional(),
   projectId: z.string().trim().min(1),
+  protocolAuthorizationId: z.string().trim().optional(),
   experimentCode: z.string().trim().min(2).max(40),
   title: z.string().trim().min(3).max(160),
   plannedStartAt: z.string().trim().optional(),
@@ -42,6 +43,7 @@ function experimentDetailsFromForm(formData: FormData) {
   return {
     labId: formData.get("labId") || undefined,
     projectId: formData.get("projectId"),
+    protocolAuthorizationId: formData.get("protocolAuthorizationId") || undefined,
     experimentCode: formData.get("experimentCode"),
     title: formData.get("title"),
     plannedStartAt: formData.get("plannedStartAt") || undefined,

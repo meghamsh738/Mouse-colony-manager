@@ -8,8 +8,9 @@ import {
   executeCreateBreedingSetupCommand,
   executeRecordBreedingLitterCommand,
   executeTransitionBreedingSetupCommand,
-  weanLitterToCages,
+  executeWeanLitterCommand,
 } from "@/lib/colony-write";
+import { canonicalJsonHash } from "@/lib/command-foundation";
 import { initialFormActionState, type FormActionState } from "@/lib/form-state";
 import { requireUser } from "@/lib/session";
 
@@ -21,6 +22,7 @@ const createBreedingSchema = z.object({
   targetSex: z.enum(["male", "female", "unknown"]).optional(),
   notes: z.string().trim().max(400).optional(),
   allowOverride: z.boolean().optional(),
+  protocolAuthorizationId: z.string().trim().min(1),
   idempotencyKey: z.string().trim().min(16),
   requestId: z.string().trim().min(16),
 });
@@ -69,6 +71,7 @@ export async function createBreedingAction(
     targetSex: formData.get("targetSex") || undefined,
     notes: formData.get("notes") || undefined,
     allowOverride: formData.get("allowOverride") === "on",
+    protocolAuthorizationId: formData.get("protocolAuthorizationId"),
     idempotencyKey: formData.get("idempotencyKey"),
     requestId: formData.get("requestId"),
   });
@@ -76,7 +79,7 @@ export async function createBreedingAction(
   if (!parsed.success) {
     return {
       status: "error",
-      message: "Choose a sire and dam, then set a valid start date and target genotype.",
+      message: "Choose a sire, dam, and active breeding protocol, then set a valid start date and target genotype.",
     };
   }
 
@@ -215,7 +218,17 @@ export async function weanLitterAction(
     };
   }
 
-  const result = await weanLitterToCages(parsed.data, { id: user.id, role: user.role, activeLabId: user.activeLabId });
+  const idempotencyKey = canonicalJsonHash({
+    actorId: user.id,
+    commandType: "breeding.wean_litter",
+    command: parsed.data,
+  });
+  const result = await executeWeanLitterCommand({
+    actor: user,
+    command: parsed.data,
+    idempotencyKey,
+    requestId: idempotencyKey,
+  });
 
   if (!result.ok) {
     return {
@@ -233,6 +246,13 @@ export async function weanLitterAction(
 
   return {
     status: "success",
-    message: result.message,
+    message:
+      result.result &&
+      typeof result.result === "object" &&
+      !Array.isArray(result.result) &&
+      "message" in result.result &&
+      typeof result.result.message === "string"
+        ? result.result.message
+        : "Litter weaning recorded.",
   };
 }

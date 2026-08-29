@@ -10,6 +10,20 @@ vi.mock("@/lib/command-foundation", () => ({
   staleConflict: commandMocks.staleConflict,
 }));
 
+vi.mock("@/lib/protocol-compliance", () => ({
+  withComplianceWriteScope: vi.fn(async (_tx, _input, operation) => operation({
+    ok: true,
+    protocolAuthorizationId: "protocol-1",
+    protocolVersionId: "protocol-version-1",
+    evidenceSnapshotId: "evidence-1",
+    ledgerId: "ledger-1",
+    allocationId: "protocol-allocation-1",
+    allocations: [],
+  })),
+  withM13MutationSavepoint: vi.fn(async (_tx, operation) => operation()),
+  releaseProtocolReservation: vi.fn(async () => ({ ok: true })),
+}));
+
 import {
   executeDeletePlannedExperimentAssignmentCommand,
   executeDemoteExperimentAssignmentsCommand,

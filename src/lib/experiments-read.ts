@@ -21,6 +21,7 @@ export type ExperimentOverviewItem = {
   status: string;
   projectCode: string;
   projectId: string;
+  protocolAuthorizationId: string | null;
   version: number;
   visibility: "full" | "operational";
   ownerContact: string;
@@ -458,6 +459,7 @@ type ExperimentOverviewProjection = {
   title: string;
   status: string;
   version: number;
+  protocolAuthorizationId: string | null;
   plannedStartAt: Date | null;
   plannedEndAt: Date | null;
   operationalContact: string | null;
@@ -511,6 +513,7 @@ export async function getExperimentOverviewView(actor: LabActor = GLOBAL_READ_AC
           title: true,
           status: true,
           version: true,
+          protocolAuthorizationId: true,
           plannedStartAt: true,
           plannedEndAt: true,
           operationalContact: true,
@@ -566,6 +569,7 @@ export async function getExperimentOverviewView(actor: LabActor = GLOBAL_READ_AC
           title: true,
           status: true,
           version: true,
+          protocolAuthorizationId: true,
           plannedStartAt: true,
           plannedEndAt: true,
           operationalContact: true,
@@ -661,6 +665,7 @@ export async function getExperimentOverviewView(actor: LabActor = GLOBAL_READ_AC
     status: experiment.status,
     projectCode: experiment.project.projectCode,
     projectId: experiment.project.id,
+    protocolAuthorizationId: experiment.protocolAuthorizationId,
     version: experiment.version,
     visibility: full ? "full" : "operational",
     ownerContact: experiment.owner.name ?? experiment.owner.email,

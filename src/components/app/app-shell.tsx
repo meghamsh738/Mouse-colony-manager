@@ -69,6 +69,7 @@ const navigationIcons: Record<NavigationItemId, LucideIcon> = {
   labs: Building2,
   users: Users,
   duties: ShieldCheck,
+  compliance: ShieldCheck,
   system: Wrench,
 };
 

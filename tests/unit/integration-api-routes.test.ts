@@ -13,6 +13,10 @@ import {
   executeDecideSopVersionCommand,
 } from "@/lib/sop-write";
 import { seedDatabase } from "../../prisma/seed-database";
+import {
+  DEMO_ADMIN_IDENTITY_LINK_ID,
+  DEMO_PROTOCOL_AUTHORIZATION_ID,
+} from "../../prisma/seed-demo-compliance";
 
 const { authMock } = vi.hoisted(() => ({
   authMock: vi.fn(),
@@ -33,6 +37,10 @@ function authenticatedSession() {
       name: "Colony Admin",
       role: "admin" as const,
       authzVersion: 1,
+      authMethod: "synthetic_mfa" as const,
+      assurance: "synthetic_mfa" as const,
+      authenticatedAt: new Date().toISOString(),
+      identityLinkId: DEMO_ADMIN_IDENTITY_LINK_ID,
     },
   };
 }
@@ -67,10 +75,14 @@ async function createApiWeaningCage() {
   });
 }
 
-function systemActor(input: {
+async function systemActor(input: {
   id: string;
   role: "facility_admin" | "cmu_staff";
-}): ResolvedActor {
+}): Promise<ResolvedActor> {
+  const user = await prisma.user.findUniqueOrThrow({
+    where: { id: input.id },
+    select: { authzVersion: true },
+  });
   return {
     id: input.id,
     email: input.role === "facility_admin" ? SEEDED_DEV_EMAILS.admin : SEEDED_DEV_EMAILS.manager,
@@ -78,7 +90,7 @@ function systemActor(input: {
     role: input.role === "facility_admin" ? "admin" : "colony_manager",
     databaseRole: input.role,
     canonicalRole: input.role,
-    authzVersion: 1,
+    authzVersion: user.authzVersion,
     activeLabId: null,
     activeMembership: null,
     memberships: [],
@@ -87,8 +99,10 @@ function systemActor(input: {
 }
 
 async function createApiEuthanasiaSopAssignment() {
-  const cmu = systemActor({ id: "user-manager", role: "cmu_staff" });
-  const facility = systemActor({ id: "user-admin", role: "facility_admin" });
+  const [cmu, facility] = await Promise.all([
+    systemActor({ id: "user-manager", role: "cmu_staff" }),
+    systemActor({ id: "user-admin", role: "facility_admin" }),
+  ]);
   const created = await executeCreateSopCommand({
     actor: cmu,
     command: {
@@ -170,9 +184,65 @@ async function exactTimestampAfterSopAssignment(assignmentId: string) {
 
 describe("integration API routes", () => {
   beforeEach(async () => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("MCM_DEPLOYMENT_PROFILE", "synthetic");
     authMock.mockReset();
     await seedDatabase();
   }, 120_000);
+
+  it("seeds a complete synthetic compliance contract for legacy workflow scenarios", async () => {
+    const [identity, protocol, competencies, allocation, breeding, experiments] = await Promise.all([
+      prisma.externalIdentityLink.findUnique({ where: { id: DEMO_ADMIN_IDENTITY_LINK_ID } }),
+      prisma.protocolAuthorization.findUnique({
+        where: { id: DEMO_PROTOCOL_AUTHORIZATION_ID },
+        include: { currentVersion: { include: { countLedger: true } } },
+      }),
+      prisma.competencyEvidence.findMany({
+        where: { userId: "user-admin", labId: "lab-microglia", status: "current" },
+        select: { procedureCode: true, currentVersionId: true },
+      }),
+      prisma.protocolCountAllocation.findUnique({
+        where: { id: "demo-litter-001-allocation" },
+        include: { history: true },
+      }),
+      prisma.breedingSetup.findUnique({ where: { id: "breeding-001" }, select: { protocolAuthorizationId: true } }),
+      prisma.experiment.findMany({
+        where: { id: { in: ["experiment-001", "experiment-002"] } },
+        select: { id: true, protocolAuthorizationId: true },
+      }),
+    ]);
+
+    expect(identity).toMatchObject({
+      userId: "user-admin",
+      provider: "synthetic",
+      providerSubject: SEEDED_DEV_EMAILS.admin,
+      assurance: "synthetic_mfa",
+      active: true,
+      revokedAt: null,
+    });
+    expect(protocol).toMatchObject({
+      status: "active",
+      labId: "lab-microglia",
+      currentVersion: { approvedAnimalCount: 250, countLedger: { reservedCount: 8, consumedCount: 0 } },
+    });
+    expect(competencies).toEqual(expect.arrayContaining([
+      expect.objectContaining({ procedureCode: "animal-use", currentVersionId: expect.any(String) }),
+      expect.objectContaining({ procedureCode: "breeding", currentVersionId: expect.any(String) }),
+      expect.objectContaining({ procedureCode: "intake", currentVersionId: expect.any(String) }),
+    ]));
+    expect(allocation).toMatchObject({
+      aggregateType: "litter",
+      aggregateId: "litter-001",
+      reservedQuantity: 8,
+      consumedQuantity: 0,
+      releasedQuantity: 0,
+      status: "open",
+      history: [expect.objectContaining({ allocationType: "reserve", quantity: 8 })],
+    });
+    expect(breeding?.protocolAuthorizationId).toBe(DEMO_PROTOCOL_AUTHORIZATION_ID);
+    expect(experiments).toHaveLength(2);
+    expect(experiments.every((experiment) => experiment.protocolAuthorizationId === DEMO_PROTOCOL_AUTHORIZATION_ID)).toBe(true);
+  });
 
   it("rejects unauthenticated list requests", async () => {
     authMock.mockResolvedValue(null);
@@ -987,6 +1057,7 @@ describe("integration API routes", () => {
           damCode: "CM-24002",
           startDate: "2026-04-18",
           targetGenotype: "CreER maintenance API",
+          protocolAuthorizationId: DEMO_PROTOCOL_AUTHORIZATION_ID,
           targetSex: "female",
           notes: "Created by the authenticated breeding integration route test.",
           allowOverride: true,
@@ -1042,6 +1113,7 @@ describe("integration API routes", () => {
       damCode: "CM-24002",
       startDate: "2026-04-18",
       targetGenotype: "CreER maintenance API",
+      protocolAuthorizationId: DEMO_PROTOCOL_AUTHORIZATION_ID,
       targetSex: "female",
       notes: "Repeated by the breeding integration route test.",
       allowOverride: true,
@@ -1083,6 +1155,7 @@ describe("integration API routes", () => {
     const response = await POST(
       new Request("http://localhost:3000/api/v1/litters", {
         method: "POST",
+        headers: commandHeaders("litter-create"),
         body: JSON.stringify({
           breedingSetupId: "breeding-001",
           birthDate: "2026-04-12",
@@ -1102,7 +1175,7 @@ describe("integration API routes", () => {
       meta: { created: boolean; message: string };
     };
 
-    expect(response.status).toBe(201);
+    expect(response.status, JSON.stringify(payload)).toBe(201);
     expect(payload.meta.created).toBe(true);
     expect(payload.meta.message).toContain("Litter recorded for breeding-001");
     expect(payload.data).toMatchObject({
@@ -1142,16 +1215,19 @@ describe("integration API routes", () => {
       litterSizeBirth: 6,
       notes: "Repeated by the litter integration route test.",
     };
+    const headers = commandHeaders("repeat-litter-create");
 
     await POST(
       new Request("http://localhost:3000/api/v1/litters", {
         method: "POST",
+        headers,
         body: JSON.stringify(requestBody),
       }),
     );
     const response = await POST(
       new Request("http://localhost:3000/api/v1/litters", {
         method: "POST",
+        headers,
         body: JSON.stringify(requestBody),
       }),
     );
@@ -1160,7 +1236,7 @@ describe("integration API routes", () => {
       meta: { created: boolean; message: string };
     };
 
-    expect(response.status).toBe(200);
+    expect(response.status, JSON.stringify(payload)).toBe(200);
     expect(payload.meta.created).toBe(false);
     expect(payload.meta.message).toContain("already matches the submitted litter record");
     expect(payload.data.breedingSetupId).toBe("breeding-001");
@@ -1180,6 +1256,7 @@ describe("integration API routes", () => {
           damCode: "CM-24002",
           startDate: "2026-04-18",
           targetGenotype: "Weaning route verification",
+          protocolAuthorizationId: DEMO_PROTOCOL_AUTHORIZATION_ID,
           allowOverride: true,
         }),
       }),
@@ -1190,6 +1267,7 @@ describe("integration API routes", () => {
     const litterResponse = await createLitter(
       new Request("http://localhost:3000/api/v1/litters", {
         method: "POST",
+        headers: commandHeaders("weaning-litter-create"),
         body: JSON.stringify({
           breedingSetupId: breedingPayload.data.id,
           birthDate: "2026-04-20",
@@ -1275,6 +1353,7 @@ describe("integration API routes", () => {
           damCode: "CM-24002",
           startDate: "2026-04-18",
           targetGenotype: "Repeated weaning verification",
+          protocolAuthorizationId: DEMO_PROTOCOL_AUTHORIZATION_ID,
           allowOverride: true,
         }),
       }),
@@ -1285,6 +1364,7 @@ describe("integration API routes", () => {
     const litterResponse = await createLitter(
       new Request("http://localhost:3000/api/v1/litters", {
         method: "POST",
+        headers: commandHeaders("repeat-weaning-litter-create"),
         body: JSON.stringify({
           breedingSetupId: breedingPayload.data.id,
           birthDate: "2026-04-20",

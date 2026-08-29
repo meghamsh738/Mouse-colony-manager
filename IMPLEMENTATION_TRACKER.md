@@ -17,12 +17,12 @@ This is the source of truth for the role-scoped redesign in the `codex/empty-col
 
 | Item | State | Evidence / note |
 | --- | --- | --- |
-| Active Codex goal | In progress | M11 documentation reconciliation and M12 independent-duty/identity contracts are Verified; M13 protocol authorization and competency gates are next, while real-data M9 and production rollout remain explicitly Deferred |
+| Active Codex goal | In progress | M11–M13 are Verified through protocol authorization and competency gates; M14 veterinary and welfare case management is next, while real-data M9 and production rollout remain explicitly Deferred |
 | Target worktree | Verified | `.runtime-data/worktrees/empty-colony`, branch `codex/empty-colony` |
 | Existing dirty work preserved | Verified | No reset, checkout, or unrelated reversion performed |
 | Architecture reviews 1-4 | Verified | Roles/privacy, workflows, data/migration, role-specific UI |
 | Canonical role foundation | Verified | `it_head`, `facility_admin`, `cmu_staff`, `lab_user` plus migration compatibility values; role/access suites pass |
-| Capability navigation | Verified | Central capability/navigation registries and all 84 protected entry points pass final manifest and role QA |
+| Capability navigation | Verified | Central capability/navigation registries and all 86 protected entry points pass final manifest and role QA |
 | Empty profiles | Verified | IT, Facility Admin, CMU, Lab 1, and Lab 2 onboarding profiles; production switch remains blocked |
 | Foundation checks | Verified | Prisma validate, TypeScript, lint, 17 focused tests, build, diff check |
 | Independent foundation review | Verified | Milestone 0 independent re-review returned with no blockers |
@@ -258,9 +258,30 @@ Fresh PostgreSQL 16 target `mcm_test_m12_20260829_r3`, schema `mcm_test_m12`, re
 
 The code gate passed 114 database-free files / 556 tests, 10 focused M12 files / 92 tests, Prisma format/generate/validate, TypeScript, ESLint with the same five pre-existing administration warnings, all 84 authorization-manifest entries, a 52-route production build, and `git diff --check`. Background Playwright QA passed at 1440×1000 and 390×844 with no document overflow or console errors; Facility Admin saw the complete duty workspace and a Lab User direct request was denied. Evidence is under `output/playwright/m12-duties-20260829/`. Independent high-risk re-review returned `ship` after the original session-revocation, durable-assurance, capability-scope, and live-trigger-test blockers were corrected. Real OIDC/SAML adapters, institutional MFA/provisioning, access-review policy, and break-glass remain external deployment decisions and fail closed locally.
 
+## Milestone 13: Protocol Authorization And Competency Gates
+
+**Milestone status: Verified**
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| M13-01 | Add immutable lab-scoped protocol versions and exact animal-count allocations | Verified |
+| M13-02 | Require independent protocol review, current approval, and competency evidence | Verified |
+| M13-03 | Enforce exact transactional gates across intake, breeding, weaning, procedures, experiments, and transfer | Verified |
+| M13-04 | Settle allocations on cancellation and transfer while keeping rollback and replay fail closed | Verified |
+| M13-05 | Provide privacy-minimized compliance administration and guarded synthetic role QA | Verified |
+| M13-06 | Pass migration, database, full-role, responsive browser, and independent high-risk review gates | Verified |
+
+Migration `0038_protocol_authorization_competency` adds immutable protocol versions, independent review and activation, scoped competency evidence, current authorization projections, exact allocation/count history, and command-bound PostgreSQL guards. Its SHA-256 checksum is `ab436a28abb16227fd855912b9be8b099885210c967271559b7ba2f0690ee959`.
+
+Every operational path now checks the same current evidence before it writes: actor authority, approved active protocol version, permitted procedure or purpose, lab scope, competency, target animal, and remaining allocation. Web and API weaning both use the governed litter command. Experiment completion rejects unsettled reservations; cancellation atomically releases them. A Facility Admin transfer override can release a source experiment allocation only inside the exact receipt-bound transfer finalization, after exhaustive source-assignment checks, and the transaction rolls back on any mismatch. Direct or malformed root writes, stale snapshots, forged bindings, missing allocations, over-consumption, and unsafe replay are rejected by the database as well as the application.
+
+Fresh PostgreSQL 16 target `mcm_test_m13_final_20260829_r8` replayed all 38 migrations, including the receipt-reuse sealing regression. Retained role-QA target `mcm_test_m13_role_qa_20260829_r1` contains only guarded synthetic protocol, competency, breeding, and experiment examples. The final gate passed 118 database-free files / 574 tests, 12 guarded database files / 173 tests, Prisma validation, TypeScript, ESLint with the same five pre-existing administration warnings, all 86 authorization-manifest entries, a 53-entry production build, and `git diff --check`. The older integration API suite now declares its guarded synthetic deployment profile inside the test, so its elevated identity expectations no longer depend on caller-shell state. The build first failed because the invoking shell lacked the required production `AUTH_SECRET`; it passed with a command-only synthetic value that was not stored.
+
+Background Playwright passed 16/16 full-role scenarios and 6/6 focused M13 compliance scenarios across desktop and mobile. Evidence covers independent reviewer versus training-administrator controls, lab-owner draft creation, only active in-scope operational selections, lab-viewer mutation denial, and no horizontal overflow. Independent high-risk re-review returned `SHIP` after stale receipt reuse, legacy weaning bypass, transfer/cancellation allocation settlement, experiment completion normalization, and stranded procedure-plan findings were corrected with live regressions. Institutional protocol/licence rules, training curricula, competency durations, and authority mappings remain external validation requirements; this repository evidence does not claim institutional approval.
+
 ## Required Gate For Every Milestone
 
-The checked list below records the latest full application gate through M12. Documentation-only M11 used its focused evidence; M12 records its complete code, database, browser, and independent-review evidence above. Subsequent milestones must record their own applicable checks before they can be marked Verified.
+The checked list below records the latest full application gate through M13. Documentation-only M11 used its focused evidence; M12 and M13 record their complete code, database, browser, and independent-review evidence above. Subsequent milestones must record their own applicable checks before they can be marked Verified.
 
 - [x] Focused unit and integration tests pass.
 - [x] `npm run prisma:validate` passes when schema is affected.

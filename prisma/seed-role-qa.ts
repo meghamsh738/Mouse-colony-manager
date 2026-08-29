@@ -5,6 +5,7 @@ import { prisma } from "../src/lib/prisma";
 import type { UserRole } from "../src/lib/types";
 import { seedDatabase } from "./seed-database";
 import { seedDutyQaFixture } from "./seed-duty-qa";
+import { seedProtocolQaFixture } from "./seed-protocol-qa";
 
 const roleQaUsers: Array<{ id: string; name: string; email: string; role: UserRole }> = [
   { id: "user-it-head-qa", name: "QA IT Head", email: SEEDED_ROLE_QA_EMAILS.itHead, role: "it_head" },
@@ -19,6 +20,8 @@ const roleQaUsers: Array<{ id: string; name: string; email: string; role: UserRo
 ];
 
 const roleQaMemberships = [
+  { id: "lab-member-qa-admin1-micro", labId: "lab-microglia", userId: "user-facility-admin-qa", role: "viewer" as const },
+  { id: "lab-member-qa-admin2-micro", labId: "lab-microglia", userId: "user-facility-admin-approver-qa", role: "viewer" as const },
   { id: "lab-member-qa-owner-micro", labId: "lab-microglia", userId: "user-lab-owner-qa", role: "owner" as const },
   { id: "lab-member-qa-manager-micro", labId: "lab-microglia", userId: "user-lab-manager-qa", role: "manager" as const },
   { id: "lab-member-qa-staff-micro", labId: "lab-microglia", userId: "user-lab-staff-qa", role: "staff" as const },
@@ -55,6 +58,10 @@ export async function seedRoleQaDatabase() {
       { userId: "user-facility-admin-approver-qa", subject: SEEDED_ROLE_QA_EMAILS.facilityAdminApprover },
       { userId: "user-veterinarian-qa", subject: SEEDED_ROLE_QA_EMAILS.veterinarian },
       { userId: "user-cmu-staff-qa", subject: SEEDED_ROLE_QA_EMAILS.cmuStaff },
+      { userId: "user-lab-owner-qa", subject: SEEDED_ROLE_QA_EMAILS.labOwner },
+      { userId: "user-lab-manager-qa", subject: SEEDED_ROLE_QA_EMAILS.labManager },
+      { userId: "user-lab-staff-qa", subject: SEEDED_ROLE_QA_EMAILS.labStaff },
     ],
   }));
+  await prisma.$transaction((tx) => seedProtocolQaFixture(tx));
 }

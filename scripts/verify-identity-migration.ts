@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 
 import { Client } from "pg";
 
@@ -17,14 +17,14 @@ const PRE_IDENTITY_MIGRATIONS = [
   "0009_same_lab_integrity",
 ] as const;
 const ALL_IDENTITY_MIGRATIONS = [...PRE_IDENTITY_MIGRATIONS, "0010_command_identity_foundation"] as const;
-const CURRENT_MIGRATIONS = [
-  ...ALL_IDENTITY_MIGRATIONS,
-  "0011_cage_capacity_hard_limit",
-  "0012_active_ownership_trigger_dispatch",
-  "0013_quarantine_case_state_machine",
-  "0014_cage_closure_billing_cutoff",
-  "0015_cross_lab_transfer_state_machine",
-] as const;
+
+async function currentMigrations() {
+  const entries = await readdir("prisma/migrations", { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && /^\d{4}_.+/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
+}
 
 function databaseUrlForSchema(rawUrl: string, schema: string) {
   const url = new URL(rawUrl);
@@ -45,6 +45,18 @@ function pgConnectionUrl(rawUrl: string) {
     "pool_timeout",
     "socket_timeout",
   ]) url.searchParams.delete(parameter);
+  return url.toString();
+}
+
+function productionLikeVerificationUrl(rawUrl: string) {
+  const url = new URL(rawUrl);
+  const databaseName = decodeURIComponent(url.pathname.replace(/^\//, ""));
+  if (/(^|_)(test|e2e|disposable)($|_)/i.test(databaseName)) {
+    // The retained verification cluster is local and disposable, but this one
+    // probe must run in a database whose name does not activate the seed bypass.
+    // It still creates only a uniquely named, isolated verification schema.
+    url.pathname = "/postgres";
+  }
   return url.toString();
 }
 
@@ -186,7 +198,7 @@ async function verifyNumericAliasBackfill(baseUrl: string) {
 
 async function verifyBootstrapRefusesAssignments(baseUrl: string) {
   const schema = `mcm_test_empty_assignment_${Date.now()}_${process.pid}`;
-  const client = await openMigrationSchema(baseUrl, schema, CURRENT_MIGRATIONS);
+  const client = await openMigrationSchema(baseUrl, schema, await currentMigrations());
   try {
     await client.query(`
       INSERT INTO "FacilityIdentifierAssignment" (id, "entityType", "sequenceValue", "displayId", "entityId")
@@ -255,7 +267,9 @@ async function main() {
 
   const aliasSchema = await verifyNumericAliasBackfill(baseUrl);
   const bootstrapSchema = await verifyBootstrapRefusesAssignments(baseUrl);
-  const immutableSchema = await verifyProductionLikeImmutability(baseUrl);
+  const immutableSchema = await verifyProductionLikeImmutability(
+    productionLikeVerificationUrl(baseUrl),
+  );
   console.log(`Identity migration safety passed in retained schemas ${aliasSchema}, ${bootstrapSchema}, and ${immutableSchema}.`);
   console.log("No verification schema was deleted.");
 }

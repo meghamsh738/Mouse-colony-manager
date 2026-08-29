@@ -244,6 +244,7 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
                   animalIds={[snapshot.animal.id]}
                   destinationLabs={transferRequestOptions.destinationLabs}
                   nonce={randomUUID()}
+                  sourceProtocols={transferRequestOptions.sourceProtocols}
                   subjectType="animals"
                   today={snapshot.defaultLifecycleDate}
                 />

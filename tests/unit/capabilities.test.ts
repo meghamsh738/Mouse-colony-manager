@@ -45,7 +45,7 @@ describe("role capability foundation", () => {
     expect(actorHasCapability(dutyOnly, "billing:manage")).toBe(false);
     expect(actorHasCapability(dutyOnly, "sops:approve")).toBe(false);
     expect(actorHasCapability(dutyOnly, "animals:read")).toBe(false);
-    expect(getNavigationForActor(dutyOnly).map((item) => item.id)).toEqual(["dashboard"]);
+    expect(getNavigationForActor(dutyOnly).map((item) => item.id)).toEqual(["dashboard", "compliance"]);
   });
 
   it("keeps every duty mapping inside the duty-only vocabulary", () => {

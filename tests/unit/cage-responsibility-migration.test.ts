@@ -53,9 +53,15 @@ describe("cage responsibility migration", () => {
     ]);
 
     expect(transferSource).toContain("endActiveCageResponsibilities(tx");
-    expect(transferSource.indexOf("endActiveCageResponsibilities(tx")).toBeLessThan(transferSource.indexOf("data: { labId: request.destinationLabId"));
+    const transferEndIndex = transferSource.indexOf("endActiveCageResponsibilities(tx");
+    expect(transferEndIndex).toBeLessThan(
+      transferSource.indexOf("labId: request.destinationLabId", transferEndIndex),
+    );
     expect(closureSource).toContain("endActiveCageResponsibilities(input.tx");
-    expect(closureSource.indexOf("endActiveCageResponsibilities(input.tx")).toBeLessThan(closureSource.indexOf('data: { active: false, status: "closed"'));
+    const closureEndIndex = closureSource.indexOf("endActiveCageResponsibilities(input.tx");
+    expect(closureEndIndex).toBeLessThan(
+      closureSource.indexOf('active: false, status: "closed"', closureEndIndex),
+    );
     expect(seedSource.indexOf("prisma.cageUserAssignment.deleteMany()")).toBeLessThan(seedSource.indexOf("prisma.cage.deleteMany()"));
   });
 });

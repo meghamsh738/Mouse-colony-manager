@@ -26,6 +26,7 @@ const transferRequestSchema = z.object({
   requestedEffectiveAt: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
   reason: z.string().trim().min(3).max(600),
   sourcePrivateNote: z.string().trim().max(1_000).optional(),
+  sourceProtocolAuthorizationId: z.string().trim().min(1),
   ...identitySchema,
 });
 
@@ -34,6 +35,7 @@ const decisionSchema = z.object({
   decision: z.enum(["accept", "reject"]),
   destinationCageId: z.string().trim().optional(),
   note: z.string().trim().max(600).optional(),
+  destinationProtocolAuthorizationId: z.string().trim().optional(),
   expectedVersion: z.coerce.number().int().min(1),
   ...identitySchema,
 });
@@ -44,6 +46,7 @@ const revisionSchema = z.object({
   requestedEffectiveAt: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/),
   reason: z.string().trim().min(3).max(600),
   sourcePrivateNote: z.string().trim().max(1_000).optional(),
+  sourceProtocolAuthorizationId: z.string().trim().min(1),
   expectedVersion: z.coerce.number().int().min(1),
   ...identitySchema,
 });
@@ -83,7 +86,7 @@ function revalidateTransfers() {
 export async function requestLabTransferAction(_: FormActionState, formData: FormData): Promise<FormActionState> {
   const actor = await requireUser({ capability: "transfers:request" });
   const parsed = transferRequestSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { status: "error", message: "Choose a destination lab, transfer date, and reason." };
+  if (!parsed.success) return { status: "error", message: "Choose an active source protocol, destination lab, transfer date, and reason." };
   let animalIds: string[] = [];
   if (parsed.data.subjectType === "animals") {
     try {
@@ -108,7 +111,9 @@ export async function requestLabTransferAction(_: FormActionState, formData: For
 export async function decideLabTransferAction(_: FormActionState, formData: FormData): Promise<FormActionState> {
   const actor = await requireUser({ capability: "transfers:approve" });
   const parsed = decisionSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { status: "error", message: "Choose a decision and complete the required transfer fields." };
+  if (!parsed.success || (parsed.data.decision === "accept" && !parsed.data.destinationProtocolAuthorizationId)) {
+    return { status: "error", message: "Choose an active destination protocol before accepting the transfer." };
+  }
   const { transferRequestId, expectedVersion, idempotencyKey, requestId, ...command } = parsed.data;
   const result = await executeDecideLabTransferCommand({
     actor,
@@ -124,7 +129,7 @@ export async function decideLabTransferAction(_: FormActionState, formData: Form
 export async function reviseLabTransferAction(_: FormActionState, formData: FormData): Promise<FormActionState> {
   const actor = await requireUser({ capability: "transfers:request" });
   const parsed = revisionSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { status: "error", message: "Review the destination, date, and reason." };
+  if (!parsed.success) return { status: "error", message: "Review the active source protocol, destination, date, and reason." };
   const { transferRequestId, expectedVersion, idempotencyKey, requestId, ...command } = parsed.data;
   const result = await executeReviseLabTransferCommand({
     actor,
@@ -168,4 +173,3 @@ export async function finalizeLabTransferAction(_: FormActionState, formData: Fo
   if (result.ok) revalidateTransfers();
   return resultFeedback(result, "Transfer could not be finalized.");
 }
-

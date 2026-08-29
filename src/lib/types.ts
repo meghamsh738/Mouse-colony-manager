@@ -9,11 +9,13 @@ export type UserRole =
   | "researcher"
   | "read_only";
 
-export type CanonicalUserRole = "it_head" | "facility_admin" | "cmu_staff" | "lab_user";
+export type CanonicalUserRole =
+  "it_head" | "facility_admin" | "cmu_staff" | "lab_user";
 
 export type LabMembershipRole = "owner" | "manager" | "staff" | "viewer";
 export type InvitationStatus = "pending" | "accepted" | "revoked" | "expired";
-export type PrivilegedRoleChangeStatus = "pending" | "approved" | "rejected" | "expired";
+export type PrivilegedRoleChangeStatus =
+  "pending" | "approved" | "rejected" | "expired";
 export type FacilityDuty =
   | "designated_veterinarian"
   | "welfare_officer"
@@ -21,18 +23,14 @@ export type FacilityDuty =
   | "training_administrator"
   | "billing_administrator"
   | "data_steward";
-export type IdentityAssuranceLevel = "password" | "mfa" | "phishing_resistant" | "synthetic_mfa";
+export type IdentityAssuranceLevel =
+  "password" | "mfa" | "phishing_resistant" | "synthetic_mfa";
 export type InvoiceStatus = "draft" | "finalized" | "void";
 
 export type Sex = "male" | "female" | "unknown";
 
 export type CageStatus =
-  | "active"
-  | "breeding"
-  | "quarantine"
-  | "experiment"
-  | "retired"
-  | "closed";
+  "active" | "breeding" | "quarantine" | "experiment" | "retired" | "closed";
 
 export type AnimalStatus =
   | "planned"
@@ -50,20 +48,12 @@ export type AnimalStatus =
   | "archived";
 
 export type OutcomeStatus =
-  | "alive"
-  | "euthanized"
-  | "dead"
-  | "transferred"
-  | "missing";
+  "alive" | "euthanized" | "dead" | "transferred" | "missing";
 
 export type ExperimentStatus = "planned" | "active" | "completed" | "cancelled";
 
 export type AssignmentStatus =
-  | "planned"
-  | "reserved"
-  | "active"
-  | "completed"
-  | "cancelled";
+  "planned" | "reserved" | "active" | "completed" | "cancelled";
 
 export type HealthNoteType =
   | "routine_welfare"
@@ -80,10 +70,14 @@ export type HealthNoteType =
 
 export type AlertSeverity = "info" | "warning" | "critical";
 export type AlertStatus = "open" | "acknowledged" | "resolved";
-export type GenotypeCallStatus = "pending" | "provisional" | "confirmed" | "conflict";
-export type SampleStatus = "collected" | "stored" | "allocated" | "consumed" | "discarded";
-export type CryostorageStatus = "stored" | "reserved" | "recovered" | "depleted" | "discarded";
-export type BreedingStatus = "planned" | "active" | "paused" | "retired" | "failed";
+export type GenotypeCallStatus =
+  "pending" | "provisional" | "confirmed" | "conflict";
+export type SampleStatus =
+  "collected" | "stored" | "allocated" | "consumed" | "discarded";
+export type CryostorageStatus =
+  "stored" | "reserved" | "recovered" | "depleted" | "discarded";
+export type BreedingStatus =
+  "planned" | "active" | "paused" | "retired" | "failed";
 export type AnimalIntakeDisposition = "holding" | "quarantine";
 export type BreedingAdultRole = "sire" | "dam" | "support";
 export type RuleCategory =
@@ -234,8 +228,7 @@ export interface AnimalIntakeBatch {
 }
 
 export type CageDestinationRef =
-  | { kind: "existing"; cageId: string }
-  | { kind: "new"; clientId: string };
+  { kind: "existing"; cageId: string } | { kind: "new"; clientId: string };
 
 export interface CageDraft {
   clientId: string;
@@ -257,6 +250,7 @@ export interface AnimalAssignmentDraft {
 }
 
 export interface CageAssignmentPlan {
+  protocolAuthorizationId?: string;
   cages: CageDraft[];
   assignments: AnimalAssignmentDraft[];
   movedAt: string;
@@ -288,6 +282,13 @@ export interface IntakeCageOption {
 
 export interface CageIntakeOptionsView {
   labs: LabOption[];
+  protocols: Array<{
+    id: string;
+    labId: string;
+    label: string;
+    validUntil: string;
+    strainIds: string[];
+  }>;
   facilities: Array<{
     id: string;
     name: string;
@@ -598,7 +599,8 @@ export interface RuleConfig {
 export interface Alert {
   id: string;
   labId?: string | null;
-  entityType: "animal" | "cage" | "litter" | "experiment" | "project" | "invoice";
+  entityType:
+    "animal" | "cage" | "litter" | "experiment" | "project" | "invoice";
   entityId: string;
   alertType: string;
   severity: AlertSeverity;
