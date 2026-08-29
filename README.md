@@ -29,11 +29,19 @@ npx prisma dev -d -n colony-maintenance
 npm run db:prepare
 ```
 
-4. For a new empty instance, bootstrap configuration and the five development profiles:
+4. For a new empty instance, first point both Prisma URLs at a loopback database or schema whose name includes `empty`, `test`, `e2e`, or `disposable`. The example below uses the currently documented local port; replace `51522` if `prisma dev` printed a different port. Then bootstrap configuration and the five empty-profile identities. The bootstrap is intentionally opt-in and requires a fresh local password of at least 12 characters plus a unique instance identifier of at least 24 characters:
 
 ```bash
+export DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:51522/template1?schema=mcm_empty_local&sslmode=disable'
+export DIRECT_DATABASE_URL="$DATABASE_URL"
+export EMPTY_COLONY_BOOTSTRAP=true
+export EMPTY_PROFILE_SWITCHER=true
+export EMPTY_ADMIN_PASSWORD="$(openssl rand -base64 24)"
+export EMPTY_PROFILE_INSTANCE_ID="$(openssl rand -hex 24)"
 npm run db:prepare:empty
 ```
+
+Keep the generated password in the current shell or an approved local secret store; do not commit it. The empty-profile identities are `it.head@colony.local`, `admin@colony.local`, `cmu.staff@colony.local`, `lab1.user@colony.local`, and `lab2.user@colony.local`, and all use the operator-supplied `EMPTY_ADMIN_PASSWORD` for this disposable instance.
 
 The destructive demo seed is intentionally separate. It requires a loopback database whose database name or schema contains `test`, `e2e`, or `disposable`:
 
@@ -77,9 +85,9 @@ Set `NOTIFICATION_EMAIL_API_TOKEN` in the runtime environment if the provider en
 
 For Resend, Mailgun, SES, or an institutional SMTP bridge, put a small HTTPS adapter in front of the provider if its native API shape differs from the payload above. That keeps provider-specific credentials and transforms outside the app database.
 
-## Seeded Accounts
+## Destructive Demo Seed Accounts
 
-All seeded dev users use the password `colony123`.
+These identities belong only to the separate destructive demo seed (`npm run db:prepare:demo`). They are not the empty-profile bootstrap identities above. All destructive demo users use the fixed local-only password `colony123`; never distribute or use these credentials outside a guarded disposable environment.
 
 - `admin@colony.local`
 - `manager@colony.local`
@@ -160,7 +168,7 @@ suite.
 
 The runtime app path is fully Postgres-backed through Prisma. The remaining seed fixtures now live under [`prisma/seed-data.ts`](./prisma/seed-data.ts), and runtime application code no longer imports the full colony seed dataset.
 
-The legacy runtime history remains in [`TODO.md`](./TODO.md). The role-scoped redesign is tracked in [`IMPLEMENTATION_TRACKER.md`](./IMPLEMENTATION_TRACKER.md), with server entry points inventoried in [`AUTHORIZATION_MANIFEST.md`](./AUTHORIZATION_MANIFEST.md).
+The historical pre-redesign runtime log remains in [`TODO.md`](./TODO.md) for provenance only; it is not a current backlog or source of truth. Current milestone status is tracked in [`IMPLEMENTATION_TRACKER.md`](./IMPLEMENTATION_TRACKER.md), the Pro-review remediation boundary is recorded in [`docs/PRODUCT_READINESS_REMEDIATION.md`](./docs/PRODUCT_READINESS_REMEDIATION.md), and server entry points are inventoried in [`AUTHORIZATION_MANIFEST.md`](./AUTHORIZATION_MANIFEST.md).
 
 ## Verification
 

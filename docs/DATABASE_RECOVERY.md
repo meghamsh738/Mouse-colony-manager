@@ -86,11 +86,11 @@ Create the source and empty restore databases explicitly, bind both Prisma URLs 
 
 ```bash
 export PG_BIN_DIR='/Applications/Postgres.app/Contents/Versions/16/bin'
-"$PG_BIN_DIR/createdb" --host=127.0.0.1 --port=51422 --username=postgres --template=template0 mcm_test_m9_source
-"$PG_BIN_DIR/createdb" --host=127.0.0.1 --port=51422 --username=postgres --template=template0 mcm_test_m9_restore
+"$PG_BIN_DIR/createdb" --host=127.0.0.1 --port=51522 --username=postgres --template=template0 mcm_test_m9_source
+"$PG_BIN_DIR/createdb" --host=127.0.0.1 --port=51522 --username=postgres --template=template0 mcm_test_m9_restore
 
-export MCM_REHEARSAL_SOURCE_URL='postgresql://postgres@127.0.0.1:51422/mcm_test_m9_source?schema=mcm_test_populated&sslmode=disable'
-export MCM_REHEARSAL_RESTORE_URL='postgresql://postgres@127.0.0.1:51422/mcm_test_m9_restore?schema=mcm_test_populated&sslmode=disable'
+export MCM_REHEARSAL_SOURCE_URL='postgresql://postgres@127.0.0.1:51522/mcm_test_m9_source?schema=mcm_test_populated&sslmode=disable'
+export MCM_REHEARSAL_RESTORE_URL='postgresql://postgres@127.0.0.1:51522/mcm_test_m9_restore?schema=mcm_test_populated&sslmode=disable'
 export DATABASE_URL="$MCM_REHEARSAL_SOURCE_URL"
 export DIRECT_DATABASE_URL="$MCM_REHEARSAL_SOURCE_URL"
 export MCM_REHEARSAL_ADMIN_PASSWORD="$(openssl rand -base64 24)"
@@ -98,7 +98,7 @@ npm run db:migrate
 npm run db:seed:rehearsal
 unset MCM_REHEARSAL_ADMIN_PASSWORD
 
-"$PG_BIN_DIR/psql" 'postgresql://postgres@127.0.0.1:51422/mcm_test_m9_source?sslmode=disable' \
+"$PG_BIN_DIR/psql" 'postgresql://postgres@127.0.0.1:51522/mcm_test_m9_source?sslmode=disable' \
   -X -v ON_ERROR_STOP=1 \
   -c 'ALTER DATABASE mcm_test_m9_source SET default_transaction_read_only=on'
 

@@ -1,4 +1,6 @@
-# Colony Maintenance Tracker
+# Legacy Colony Maintenance Tracker (Historical)
+
+> **Historical record only.** This file captures the pre-role-redesign implementation log as it stood in May 2026. Its “In Progress” and “Next” sections are not current work instructions. Use [`IMPLEMENTATION_TRACKER.md`](./IMPLEMENTATION_TRACKER.md) for current milestone status and [`docs/PRODUCT_READINESS_REMEDIATION.md`](./docs/PRODUCT_READINESS_REMEDIATION.md) for the approved Pro-review roadmap.
 
 Last updated: 2026-05-18
 

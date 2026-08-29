@@ -1,8 +1,8 @@
 # Resume Checkpoint
 
-Recorded: 2026-08-13
+Recorded: 2026-08-29
 
-Last verified: 2026-08-23
+Last verified: 2026-08-29 (M11 documentation reconciliation); M12 implementation started 2026-08-29
 
 ## Workspace
 
@@ -14,6 +14,7 @@ Last verified: 2026-08-23
 
 ## Practical State
 
+- Milestone 11 is Verified. The completed ChatGPT Pro assessment is archived exactly at [`docs/reviews/2026-08-29-chatgpt-pro-product-review.md`](./docs/reviews/2026-08-29-chatgpt-pro-product-review.md), and its repository-specific synthetic-release boundary and M11–M20 delivery order are recorded in [`docs/PRODUCT_READINESS_REMEDIATION.md`](./docs/PRODUCT_READINESS_REMEDIATION.md). Milestone 12 independent-duty and identity-contract implementation is now active.
 - The Mouse Colony Manager's locally completable product milestones are finished and verified. Role-scoped workflows, the unit-wide privacy-safe Strain Directory, bounded inventories and histories, the scheduler-ready outbox worker, and the synthetic performance harness passed final review and acceptance on clean commit `a032202d09e6ccee0be1386b20aae9b93b7b3b89`.
 - This does **not** mean the app is deployed to production. Hosting region, budget/operator, recovery objectives, institutional identity/domain, email provider, private object storage, and a synthetic staging candidate still require owner decisions.
 - Milestone 9 production-shaped restore/cutover work is Deferred because the user has no real colony database. The guarded synthetic restore rehearsal remains available; do not request or invent production data.
