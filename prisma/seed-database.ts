@@ -163,6 +163,10 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     await tx.$executeRawUnsafe('DELETE FROM "ProtocolProjectBinding"');
     await tx.$executeRawUnsafe('DELETE FROM "ProtocolAuthorizationVersion"');
     await tx.$executeRawUnsafe('DELETE FROM "ProtocolAuthorization"');
+    await tx.$executeRawUnsafe('DELETE FROM "CorrectionLifecycleEvent"');
+    await tx.$executeRawUnsafe('DELETE FROM "CorrectionReconciliation"');
+    await tx.$executeRawUnsafe('DELETE FROM "CorrectionSupersession"');
+    await tx.$executeRawUnsafe('DELETE FROM "CorrectionRequest"');
     // Duty requests and assignments intentionally bind each other in both
     // directions. Clear the guarded disposable fixture atomically while FK
     // triggers are disabled, after assertDestructiveSeedAllowed has passed.
@@ -196,6 +200,10 @@ export async function seedDatabase(options: { clearAttachments?: boolean } = {})
     prisma.welfareTreatmentOrder.deleteMany(),
     prisma.welfareObservation.deleteMany(),
     prisma.welfareCase.deleteMany(),
+    prisma.correctionLifecycleEvent.deleteMany(),
+    prisma.correctionReconciliation.deleteMany(),
+    prisma.correctionSupersession.deleteMany(),
+    prisma.correctionRequest.deleteMany(),
     prisma.commandReceipt.deleteMany(),
     prisma.sopAcknowledgement.deleteMany(),
     prisma.sopAssignment.deleteMany(),

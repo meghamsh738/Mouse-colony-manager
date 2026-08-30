@@ -81,6 +81,7 @@ export type WorkbookOverviewSheet = {
     ageDays: number;
     litterSize: number;
     href: string;
+    correction: { requestId: string; appliedAt: string } | null;
   }>;
   activeWork: Array<{
     id: string;
@@ -136,6 +137,7 @@ export type WorkbookLitterRow = {
   born: number;
   weaned: number | null;
   progeny: Array<{ id: string; animalId: string; sex: string; status: string }>;
+  correction: { requestId: string; appliedAt: string } | null;
 };
 
 export type WorkbookBreedingRow = {
@@ -205,6 +207,7 @@ export type WorkbookBiosampleRow = {
   storage: string;
   quantity: string;
   notes: string;
+  correction?: { requestId: string; appliedAt: string } | null;
 };
 
 export type WorkbookBiosamplesSheet = {
@@ -474,6 +477,7 @@ async function getOverviewSheet(actor: WorkbookActor, state: WorkbookState): Pro
       ageDays: differenceInDays(today, new Date(litter.birthDate)),
       litterSize: litter.litterSizeBirth,
       href: `/cages/intake?mode=wean&litterId=${encodeURIComponent(litter.id)}`,
+      correction: litter.correction,
     })))
     .filter((litter) => litter.ageDays >= weaningDueDays);
   const capacityAlerts = cages
@@ -668,6 +672,7 @@ async function getBreedingSheet(actor: LabActor, state: WorkbookState): Promise<
       born: litter.litterSizeBirth,
       weaned: litter.litterSizeWean,
       progeny: litter.progeny,
+      correction: litter.correction,
     }));
     return {
       id: setup.id,
@@ -794,8 +799,12 @@ async function getBiosamplesSheet(actor: LabActor, state: WorkbookState): Promis
     storage: record.storageLocation ?? "—",
     quantity: record.quantityLabel ?? "—",
     notes: record.notes ?? "—",
+    correction: record.correction ?? null,
   }));
-  rows = rows.filter((row) => textMatches(state.search, Object.values(row)));
+  rows = rows.filter((row) => textMatches(state.search, [
+    row.sampleLabel, row.type, row.status, row.animalId, row.labAnimalId, row.collectedAt,
+    row.project, row.experiment, row.storage, row.quantity, row.notes, row.correction?.requestId,
+  ]));
   const selectors: Record<string, (row: WorkbookBiosampleRow) => string | number> = {
     collectedAt: (row) => row.collectedAtSort,
     label: (row) => row.sampleLabel,

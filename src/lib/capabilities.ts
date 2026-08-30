@@ -53,6 +53,7 @@ export type Capability =
   | "competencies:read"
   | "competencies:manage"
   | "billing:govern"
+  | "corrections:request"
   | "corrections:read"
   | "corrections:approve"
   | "labs:manage"
@@ -85,7 +86,7 @@ const facilityAdminCapabilities = new Set<Capability>([
   "forecast:read", "sops:read", "sops:manage", "sops:approve", "billing:read", "billing:generate",
   "billing:finalize", "billing:manage", "notifications:read", "approvals:read", "workbook:read", "users:manage",
   "duties:read", "duties:manage", "labs:manage", "rules:manage", "audit:domain", "notifications:deliver",
-  "migrations:manage",
+  "migrations:manage", "corrections:request", "corrections:read",
 ]);
 
 const cmuCapabilities = new Set<Capability>([
@@ -95,6 +96,7 @@ const cmuCapabilities = new Set<Capability>([
   "strains:discover",
   "sops:manage", "billing:read", "billing:generate", "billing:finalize", "notifications:read", "approvals:read", "workbook:read",
   "notifications:deliver",
+  "corrections:request", "corrections:read",
 ]);
 
 const labReadCapabilities: Capability[] = [
@@ -105,7 +107,7 @@ const labReadCapabilities: Capability[] = [
 
 const labStaffCapabilities: Capability[] = [
   ...labReadCapabilities, "animals:manage", "cages:manage", "quarantine:manage", "breeding:manage",
-  "biosamples:manage", "cryostorage:request", "experiments:manage", "procedures:plan",
+  "biosamples:manage", "cryostorage:request", "experiments:manage", "procedures:plan", "corrections:request", "corrections:read",
 ];
 
 const labManagerCapabilities: Capability[] = [

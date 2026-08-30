@@ -178,7 +178,7 @@ export function BreedingWorksheet({
                   <td>{formatDate(breeding.startDate)}</td>
                   <td>{breeding.ageDays} d</td>
                   <td>{getLitterStatus(breeding)}</td>
-                  <td>{breeding.litter?.litterSizeBirth ?? "-"}</td>
+                  <td>{breeding.litter?.litterSizeBirth ?? "-"}{breeding.litter?.correction ? <span className="block text-xs font-semibold text-emerald-800" data-testid={`litter-correction-${breeding.litter.id}`}>Corrected · {breeding.litter.correction.requestId.slice(0, 12)}</span> : null}</td>
                   <td>{breeding.litter?.litterSizeWean ?? "-"}</td>
                   <td>{breeding.litter?.progenyCount ?? 0}</td>
                   <td className="whitespace-nowrap">{getNextAction(breeding)}</td>
@@ -221,6 +221,7 @@ export function BreedingWorksheet({
                 <Field label="Start" value={formatDate(breeding.startDate)} />
                 <Field label="Litter" value={getLitterStatus(breeding)} />
                 <Field label="Birth size" value={breeding.litter?.litterSizeBirth ?? "-"} />
+                {breeding.litter?.correction ? <Field label="Correction" value={`Request ${breeding.litter.correction.requestId.slice(0, 12)}`} /> : null}
                 <Field label="Wean size" value={breeding.litter?.litterSizeWean ?? "-"} />
                 <Field label="Progeny" value={breeding.litter?.progenyCount ?? 0} />
               </dl>

@@ -27,6 +27,7 @@ import {
   ClipboardCheck,
   Dna,
   HeartPulse,
+  FilePenLine,
   type LucideIcon,
 } from "lucide-react";
 
@@ -55,6 +56,7 @@ const navigationIcons: Record<NavigationItemId, LucideIcon> = {
   cages: Boxes,
   quarantine: ShieldAlert,
   welfare: HeartPulse,
+  corrections: FilePenLine,
   breeding: Activity,
   experiments: FlaskConical,
   procedures: Wrench,

@@ -17,12 +17,12 @@ This is the source of truth for the role-scoped redesign in the `codex/empty-col
 
 | Item | State | Evidence / note |
 | --- | --- | --- |
-| Active Codex goal | In progress | M11–M14 are Verified through veterinary and welfare case management; M15 controlled corrections and immutable history is next, while real-data M9 and production rollout remain explicitly Deferred |
+| Active Codex goal | In progress | M11–M15 are Verified through controlled corrections and immutable history; M16 safe intake, census, quarantine, and transfer reconciliation is next, while real-data M9 and production rollout remain explicitly Deferred |
 | Target worktree | Verified | `.runtime-data/worktrees/empty-colony`, branch `codex/empty-colony` |
 | Existing dirty work preserved | Verified | No reset, checkout, or unrelated reversion performed |
 | Architecture reviews 1-4 | Verified | Roles/privacy, workflows, data/migration, role-specific UI |
 | Canonical role foundation | Verified | `it_head`, `facility_admin`, `cmu_staff`, `lab_user` plus migration compatibility values; role/access suites pass |
-| Capability navigation | Verified | Central capability/navigation registries and all 88 protected entry points pass final manifest and role QA |
+| Capability navigation | Verified | Central capability/navigation registries and all 90 protected entry points pass final manifest and role QA |
 | Empty profiles | Verified | IT, Facility Admin, CMU, Lab 1, and Lab 2 onboarding profiles; production switch remains blocked |
 | Foundation checks | Verified | Prisma validate, TypeScript, lint, 17 focused tests, build, diff check |
 | Independent foundation review | Verified | Milestone 0 independent re-review returned with no blockers |
@@ -300,9 +300,30 @@ Fresh retained target `mcm_test_m14_full_20260830_r19` replayed all 39 migration
 
 Independent high-risk review returned `SHIP` after command-hash compatibility, migration atomicity, duty-history, cancellation, immutable evidence, exact command/event/state/audit pairing, direct-write sealing, and self-contained database-test findings were repaired with live regressions. This milestone is a synthetic operational coordinator marked `synthetic-fail-closed-v1`; it is not an institutionally validated clinical record. Clinical terminology, severity policy, formulary, service levels, retention, emergency paging, and designated-veterinarian validation remain external requirements.
 
+## Milestone 15: Controlled Corrections And Immutable History
+
+**Milestone status: Verified**
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| M15-01 | Add domain-specific correction requests, lifecycle evidence, supersessions, and reconciliation records without rewriting originals | Verified |
+| M15-02 | Require current domain authority plus an independent current Data Steward with fresh synthetic MFA evidence | Verified |
+| M15-03 | Apply safe metadata supersessions to authorized operational views, reports, APIs, and Workbook while blocking structural or physical corrections | Verified |
+| M15-04 | Bind request, decision, lifecycle, supersession, reconciliation, and audit evidence to exact command receipts and current authority | Verified |
+| M15-05 | Keep corrected-field masks explicit so unrelated source updates remain visible and corrected fields fail closed against later rewrites | Verified |
+| M15-06 | Pass clean migration/seed, full regression, responsive browser, and independent high-risk review gates | Verified |
+
+Migration `0040_controlled_corrections` adds lab-scoped correction requests, immutable lifecycle events, one applied supersession per target, and exact downstream reconciliation evidence. Its SHA-256 checksum is `407c0973d4ef02db137812cb39970600d8f49bf95beb46f6695c774e64097f5c`. Requesters must still hold the domain's current operational capability; approval requires an independent current Data Steward duty, current identity link, fresh synthetic MFA evidence, and an exact authorization snapshot.
+
+The milestone deliberately supports metadata supersession only. Litter birth date/notes, animal movement time/reason, animal lifecycle time/reason, cross-lab transfer requested time/reason, procedure occurrence time/outcome note, and biosample collection time/notes can be governed without changing the original evidence row. Birth counts, weaning counts, animal status, cage endpoints, ownership/custody, procedure status, biosample identity/location/quantity, and other structural or physical changes are machine-readably blocked and cannot be approved. Applied correction masks come only from immutable proposed fields; ordinary updates to unrelated source fields remain visible, while later writes to a corrected mutable field fail atomically at the database boundary. Authorized operational projections show the effective value with a correction reference instead of silently rewriting history.
+
+Fresh PostgreSQL 16 target `mcm_test_m15_mask_20260830_r1_child`, schema `mcm_test_m15_mask_r1_child`, replayed all 40 migrations. The final gate passed 124 database-free files / 605 tests, 17 guarded database files / 196 tests, 13 focused live projection/safety tests, Prisma validation/generation, TypeScript, all 90 authorization-manifest entries, ESLint with the same five pre-existing administration warnings, a 55-entry production build, migration replay/schema parity/empty bootstrap, and `git diff --check`. Focused Playwright passed 2/2 across desktop Chromium and mobile, covering requester, Data Steward, viewer denial, successful projection, and responsive behavior.
+
+Independent high-risk review returned `SHIP` after three fix-first rounds closed operational-projection gaps, reverse evidence pairing, durable actor/duty/identity parity, test isolation, dashboard/intake timing, biosample database-side search/order/pagination, post-transfer history, and stale uncorrected-field overlays. The boundary is marked `synthetic-controlled-metadata-supersession-v1`; it is not an electronic-record or institutional correction-policy claim.
+
 ## Required Gate For Every Milestone
 
-The checked list below records the latest full application gate through M14. Documentation-only M11 used its focused evidence; M12 through M14 record their complete code, database, browser, and independent-review evidence above. Subsequent milestones must record their own applicable checks before they can be marked Verified.
+The checked list below records the latest full application gate through M15. Documentation-only M11 used its focused evidence; M12 through M15 record their complete code, database, browser, and independent-review evidence above. Subsequent milestones must record their own applicable checks before they can be marked Verified.
 
 - [x] Focused unit and integration tests pass.
 - [x] `npm run prisma:validate` passes when schema is affected.

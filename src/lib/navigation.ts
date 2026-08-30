@@ -8,6 +8,7 @@ export type NavigationItemId =
   | "cages"
   | "quarantine"
   | "welfare"
+  | "corrections"
   | "breeding"
   | "experiments"
   | "procedures"
@@ -43,6 +44,7 @@ export const navigationRegistry: NavigationItem[] = [
   { id: "cages", href: "/cages", label: "Cages", group: "Colony", capability: "cages:read", mobilePrimary: true },
   { id: "quarantine", href: "/quarantine", label: "Quarantine", group: "Colony", capability: "quarantine:read" },
   { id: "welfare", href: "/welfare", label: "Welfare cases", group: "Facility", capability: "welfare:read" },
+  { id: "corrections", href: "/corrections", label: "Controlled corrections", group: "Facility", capability: "corrections:read" },
   { id: "breeding", href: "/breeding", label: "Breeding", group: "Research", capability: "breeding:read" },
   { id: "experiments", href: "/experiments", label: "Experiments", group: "Research", capability: "experiments:read" },
   { id: "procedures", href: "/procedures", label: "Procedures", group: "Research", capability: "procedures:operational" },

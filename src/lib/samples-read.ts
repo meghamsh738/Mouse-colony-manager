@@ -1,5 +1,6 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
+import { correctedNullableString, correctedString, correctionMarker, getAppliedCorrectionProjectionMap } from "@/lib/correction-read";
 import { prisma } from "@/lib/prisma";
 import { getActorReadLabAccess, type LabActor } from "@/lib/lab-access";
 import type { SampleInventoryItem } from "@/lib/types";
@@ -185,9 +186,86 @@ function buildSampleInventoryWhere(
 
 type SampleInventoryListOptions = {
   where?: Prisma.SampleRecordWhereInput;
-  skip?: number;
-  take?: number;
+  orderedIds?: string[];
 };
+
+function effectiveSampleConditions(
+  access: Awaited<ReturnType<typeof getActorReadLabAccess>>,
+  query: SampleInventoryQuery,
+) {
+  const conditions: Prisma.Sql[] = [
+    Prisma.sql`(sample."projectId" IS NULL OR project."labId" = sample."labId")`,
+    Prisma.sql`(sample."experimentId" IS NULL OR experiment."labId" = sample."labId")`,
+  ];
+  if (!access.canViewAll) {
+    conditions.push(access.memberLabIds.length
+      ? Prisma.sql`sample."labId" IN (${Prisma.join(access.memberLabIds)})`
+      : Prisma.sql`FALSE`);
+  }
+  if (query.status !== "all") conditions.push(Prisma.sql`sample.status::text = ${query.status}`);
+  if (query.sampleType !== "all") conditions.push(Prisma.sql`sample."sampleType" = ${query.sampleType}`);
+  if (query.experimentId === "none") conditions.push(Prisma.sql`sample."experimentId" IS NULL`);
+  else if (query.experimentId !== "all") conditions.push(Prisma.sql`sample."experimentId" = ${query.experimentId}`);
+  if (query.search) {
+    const pattern = `%${query.search}%`;
+    conditions.push(Prisma.sql`(
+      sample."sampleLabel" ILIKE ${pattern}
+      OR sample."sampleType" ILIKE ${pattern}
+      OR animal."animalId" ILIKE ${pattern}
+      OR animal."labId" ILIKE ${pattern}
+      OR project."projectCode" ILIKE ${pattern}
+      OR experiment."experimentCode" ILIKE ${pattern}
+      OR sample."storageLocation" ILIKE ${pattern}
+      OR sample."quantityLabel" ILIKE ${pattern}
+      OR (CASE WHEN correction_request.id IS NOT NULL AND correction_request."proposedCorrection" ? 'notes'
+          THEN correction."effectiveProjection" ->> 'notes' ELSE sample.notes END) ILIKE ${pattern}
+    )`);
+  }
+  return Prisma.join(conditions, " AND ");
+}
+
+function effectiveSampleFromSql() {
+  return Prisma.sql`
+    FROM "SampleRecord" sample
+    JOIN "Animal" animal ON animal.id = sample."animalId"
+    LEFT JOIN "Project" project ON project.id = sample."projectId"
+    LEFT JOIN "Experiment" experiment ON experiment.id = sample."experimentId"
+    LEFT JOIN "CorrectionSupersession" correction
+      ON correction.domain = 'biosample'::"CorrectionDomain"
+      AND correction."targetEntityId" = sample.id
+      AND correction."labId" = sample."labId"
+    LEFT JOIN "CorrectionRequest" correction_request
+      ON correction_request.id = correction."requestId"
+      AND correction_request.status = 'applied'::"CorrectionRequestStatus"
+  `;
+}
+
+async function getEffectiveSamplePageSelection(
+  access: Awaited<ReturnType<typeof getActorReadLabAccess>>,
+  query: SampleInventoryQuery,
+) {
+  const where = effectiveSampleConditions(access, query);
+  const from = effectiveSampleFromSql();
+  const offset = (query.page - 1) * query.pageSize;
+  const [countRows, idRows] = await Promise.all([
+    prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+      SELECT COUNT(*)::bigint AS count ${from} WHERE ${where}
+    `),
+    prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT sample.id ${from}
+      WHERE ${where}
+      ORDER BY
+        (CASE WHEN correction_request.id IS NOT NULL
+          AND correction_request."proposedCorrection" ? 'collectedAt'
+          THEN (correction."effectiveProjection" ->> 'collectedAt')::timestamptz
+          ELSE sample."collectedAt" END) DESC,
+        sample."createdAt" DESC,
+        sample.id ASC
+      LIMIT ${query.pageSize} OFFSET ${offset}
+    `),
+  ]);
+  return { totalCount: Number(countRows[0]?.count ?? 0), ids: idRows.map((row) => row.id) };
+}
 
 async function getSampleInventoryItems(
   actor: LabActor,
@@ -198,8 +276,6 @@ async function getSampleInventoryItems(
   const records = await prisma.sampleRecord.findMany({
     where: options.where ?? buildSampleInventoryWhere(access),
     orderBy: [{ collectedAt: "desc" }, { createdAt: "desc" }, { id: "asc" }],
-    ...(options.skip ? { skip: options.skip } : {}),
-    ...(options.take ? { take: options.take } : {}),
     select: {
       id: true,
       labId: true,
@@ -211,6 +287,7 @@ async function getSampleInventoryItems(
       quantityLabel: true,
       notes: true,
       version: true,
+      createdAt: true,
       animal: {
         select: {
           id: true,
@@ -233,19 +310,25 @@ async function getSampleInventoryItems(
       },
     },
   });
+  const corrections = await getAppliedCorrectionProjectionMap(
+    "biosample",
+    records.map((record) => ({ id: record.id, labIds: [record.labId] })),
+  );
 
-  return records
+  const projected = records
     .filter(
       (record) =>
         (!record.project || record.labId === record.project.labId) &&
         (!record.experiment || record.labId === record.experiment.labId),
     )
-    .map((record) => ({
+    .map((record) => {
+    const correction = corrections.get(record.id);
+    return {
     id: record.id,
     sampleLabel: record.sampleLabel,
     sampleType: record.sampleType,
     status: record.status,
-    collectedAt: record.collectedAt.toISOString(),
+    collectedAt: correctedString(correction, "collectedAt", record.collectedAt.toISOString()),
     animalId: record.animal.id,
     animalCode: record.animal.animalId,
     animalLabCode: record.animal.labId,
@@ -255,9 +338,23 @@ async function getSampleInventoryItems(
     experimentCode: record.experiment?.experimentCode ?? null,
     storageLocation: record.storageLocation ?? null,
     quantityLabel: record.quantityLabel ?? null,
-    notes: record.notes ?? null,
+    notes: correctedNullableString(correction, "notes", record.notes),
     version: record.version,
-    }));
+    correction: correctionMarker(correction),
+    };
+    });
+  if (options.orderedIds) {
+    const order = new Map(options.orderedIds.map((id, index) => [id, index]));
+    return projected.sort((left, right) => (order.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (order.get(right.id) ?? Number.MAX_SAFE_INTEGER));
+  }
+  const createdAtById = new Map(records.map((record) => [record.id, record.createdAt?.getTime() ?? 0]));
+  return projected.sort((left, right) => {
+    const byCollectedAt = new Date(right.collectedAt).getTime() - new Date(left.collectedAt).getTime();
+    if (byCollectedAt) return byCollectedAt;
+    const leftCreated = createdAtById.get(left.id) ?? 0;
+    const rightCreated = createdAtById.get(right.id) ?? 0;
+    return rightCreated - leftCreated || left.id.localeCompare(right.id);
+  });
 }
 
 export async function getSampleInventoryView(actor: LabActor): Promise<SampleInventoryItem[]> {
@@ -270,12 +367,9 @@ export async function getSampleInventoryPageView(
 ): Promise<SampleInventoryPageView> {
   const query = normalizeSampleInventoryQuery(rawQuery);
   const access = await getActorReadLabAccess(actor);
-  const where = buildSampleInventoryWhere(access, query);
   const scopeWhere = buildSampleInventoryWhere(access);
-  const skip = (query.page - 1) * query.pageSize;
-  const [totalCount, items, typeRows] = await Promise.all([
-    prisma.sampleRecord.count({ where }),
-    getSampleInventoryItems(actor, { where, skip, take: query.pageSize }, access),
+  const [selection, typeRows] = await Promise.all([
+    getEffectiveSamplePageSelection(access, query),
     prisma.sampleRecord.findMany({
       where: scopeWhere,
       distinct: ["sampleType"],
@@ -283,6 +377,10 @@ export async function getSampleInventoryPageView(
       select: { sampleType: true },
     }),
   ]);
+  const items = selection.ids.length
+    ? await getSampleInventoryItems(actor, { where: { id: { in: selection.ids } }, orderedIds: selection.ids }, access)
+    : [];
+  const totalCount = selection.totalCount;
 
   return {
     items,

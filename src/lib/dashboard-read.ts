@@ -1,6 +1,7 @@
 import { compareDesc, differenceInDays } from "date-fns";
 
 import { getBreedingSuggestionSummaryView as getUnscopedBreedingSuggestionSummaryView } from "@/lib/breeding-read";
+import { correctedString, correctionMarker, getAppliedCorrectionProjectionMap } from "@/lib/correction-read";
 import { getActorLabAccess, type LabActor } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
 import type { Alert } from "@/lib/types";
@@ -214,6 +215,18 @@ async function getDashboardData(actor?: LabActor) {
       orderBy: { generatedAt: "desc" },
     }),
   ]);
+  const litterCorrections = await getAppliedCorrectionProjectionMap(
+    "litter_birth",
+    litters.map((litter) => ({ id: litter.id, labIds: [litter.breedingSetup.labId] })),
+  );
+  const effectiveLitters = litters.map((litter) => {
+    const correction = litterCorrections.get(litter.id);
+    return {
+      ...litter,
+      birthDate: new Date(correctedString(correction, "birthDate", litter.birthDate.toISOString())),
+      correction: correctionMarker(correction),
+    };
+  });
 
   const ruleAlerts: DashboardAlert[] = [];
 
@@ -322,7 +335,7 @@ async function getDashboardData(actor?: LabActor) {
     }
   }
 
-  for (const litter of litters) {
+  for (const litter of effectiveLitters) {
     const litterAge = differenceInDays(new Date(rules.today), litter.birthDate);
 
     if (litterAge > rules.weaningDueDays) {
@@ -426,7 +439,7 @@ async function getDashboardData(actor?: LabActor) {
   return {
     rules,
     animals,
-    litters,
+    litters: effectiveLitters,
     cages,
     alerts: [...normalizedManualAlerts, ...ruleAlerts].sort((left, right) =>
       compareDesc(new Date(left.generatedAt), new Date(right.generatedAt)),
@@ -484,6 +497,7 @@ function buildDashboardHighlightsView({ rules, animals, litters, cages, alerts }
       litterId: litter.id,
       dueDate: formatDate(new Date(litter.birthDate.getTime() + rules.weaningDueDays * 86_400_000)),
       breedingId: litter.breedingSetupId,
+      correction: litter.correction,
     })),
     breeders: animals
       .filter((animal) => animal.status === "breeding")

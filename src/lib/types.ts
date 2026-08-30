@@ -319,6 +319,7 @@ export interface CageIntakeOptionsView {
     weaningDueDays: number;
     suggestedWeanDate: string;
     alreadyWeaned: boolean;
+    correction: { requestId: string; appliedAt: string } | null;
   } | null;
 }
 
@@ -1035,6 +1036,7 @@ export interface SampleInventoryItem {
   quantityLabel?: string | null;
   notes?: string | null;
   version: number;
+  correction?: { requestId: string; appliedAt: string } | null;
 }
 
 export interface CryostorageInventoryItem {

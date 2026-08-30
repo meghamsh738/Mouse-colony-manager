@@ -527,6 +527,30 @@ enum WelfareCaseEventType {
   cancelled
 }
 
+enum CorrectionDomain {
+  litter_birth
+  litter_weaning
+  animal_move
+  animal_lifecycle
+  cross_lab_transfer
+  procedure_occurrence
+  biosample
+}
+
+enum CorrectionRequestStatus {
+  pending
+  applied
+  rejected
+  blocked
+}
+
+enum CorrectionEventType {
+  requested
+  blocked
+  applied
+  rejected
+}
+
 model User {
   id                             String                                @id
   name                           String
@@ -630,6 +654,10 @@ model User {
   welfareEscalationsAcknowledged WelfareEscalation[]                   @relation("WelfareEscalationAcknowledger")
   welfareEscalationsResolved     WelfareEscalation[]                   @relation("WelfareEscalationResolver")
   welfareCaseEvents              WelfareCaseLifecycleEvent[]           @relation("WelfareCaseEventActor")
+  correctionRequestsCreated      CorrectionRequest[]                   @relation("CorrectionRequester")
+  correctionRequestsDecided      CorrectionRequest[]                   @relation("CorrectionDecisionActor")
+  correctionEvents               CorrectionLifecycleEvent[]            @relation("CorrectionEventActor")
+  correctionSupersessionsApplied CorrectionSupersession[]              @relation("CorrectionSupersessionActor")
 }
 
 model Lab {
@@ -701,6 +729,10 @@ model Lab {
   welfareAdministrations     WelfareAdministrationAttempt[]
   welfareEscalations         WelfareEscalation[]
   welfareCaseEvents          WelfareCaseLifecycleEvent[]
+  correctionRequests         CorrectionRequest[]
+  correctionEvents           CorrectionLifecycleEvent[]
+  correctionSupersessions    CorrectionSupersession[]
+  correctionReconciliations  CorrectionReconciliation[]
 }
 
 model SopDocument {
@@ -936,6 +968,8 @@ model FacilityDutyAssignment {
   protocolGovernanceStates   ProtocolAuthorization[]               @relation("ProtocolAuthorizationDutyEvidence")
   competencyGovernanceStates CompetencyEvidence[]                  @relation("CompetencyDutyEvidence")
   welfareCaseEvents          WelfareCaseLifecycleEvent[]
+  correctionRequestsDecided  CorrectionRequest[]                   @relation("CorrectionDecisionDuty")
+  correctionEvents           CorrectionLifecycleEvent[]
 
   @@unique([id, version])
   @@index([userId, duty, validFrom, validUntil], map: "FacilityDutyAssignment_userId_duty_validity_idx")
@@ -983,6 +1017,9 @@ model ExternalIdentityLink {
   protocolGovernanceStates   ProtocolAuthorization[]               @relation("ProtocolAuthorizationIdentityEvidence")
   competencyGovernanceStates CompetencyEvidence[]                  @relation("CompetencyIdentityEvidence")
   welfareCaseEvents          WelfareCaseLifecycleEvent[]
+  correctionRequestsCreated  CorrectionRequest[]                   @relation("CorrectionRequesterIdentity")
+  correctionRequestsDecided  CorrectionRequest[]                   @relation("CorrectionDeciderIdentity")
+  correctionEvents           CorrectionLifecycleEvent[]
 
   @@unique([provider, providerSubject], map: "ExternalIdentityLink_provider_subject_key")
   @@unique([userId, provider], map: "ExternalIdentityLink_user_provider_key")
@@ -2384,6 +2421,132 @@ model WelfareCaseLifecycleEvent {
   @@index([actorId, occurredAt])
 }
 
+model CorrectionRequest {
+  id                           String                     @id
+  labId                        String
+  domain                       CorrectionDomain
+  targetEntityType             String
+  targetEntityId               String
+  targetVersion                Int?
+  sourceEventAt                DateTime                   @db.Timestamptz(6)
+  reason                       String
+  originalSnapshot             Json
+  proposedCorrection           Json
+  status                       CorrectionRequestStatus    @default(pending)
+  blockCode                    String?
+  blockDetail                  Json?
+  policyMarker                 String                     @default("synthetic-controlled-metadata-supersession-v1")
+  requestedById                String
+  requesterAuthzVersion        Int
+  requesterAssurance           IdentityAssuranceLevel
+  requesterIdentityLinkId      String?
+  requesterAuthenticatedAt     DateTime                   @db.Timestamptz(6)
+  requestCommandReceiptId      String                     @unique
+  requestedAt                  DateTime                   @default(now()) @db.Timestamptz(6)
+  decidedById                  String?
+  deciderAuthzVersion          Int?
+  deciderAssurance             IdentityAssuranceLevel?
+  deciderDutyAssignmentId      String?
+  deciderDutyAssignmentVersion Int?
+  deciderIdentityLinkId        String?
+  deciderAuthenticatedAt       DateTime?                  @db.Timestamptz(6)
+  decisionCommandReceiptId     String?                    @unique
+  decisionReason               String?
+  decidedAt                    DateTime?                  @db.Timestamptz(6)
+  version                      Int                        @default(1)
+  createdAt                    DateTime                   @default(now()) @db.Timestamptz(6)
+  updatedAt                    DateTime                   @updatedAt @db.Timestamptz(6)
+  lab                          Lab                        @relation(fields: [labId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionRequest_labId_fkey")
+  requestedBy                  User                       @relation("CorrectionRequester", fields: [requestedById], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionRequest_requestedById_fkey")
+  decidedBy                    User?                      @relation("CorrectionDecisionActor", fields: [decidedById], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionRequest_decidedById_fkey")
+  requesterIdentityLink        ExternalIdentityLink?      @relation("CorrectionRequesterIdentity", fields: [requesterIdentityLinkId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionRequest_requestIdentity_fkey")
+  deciderIdentityLink          ExternalIdentityLink?      @relation("CorrectionDeciderIdentity", fields: [deciderIdentityLinkId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionRequest_deciderIdentity_fkey")
+  deciderDutyAssignment        FacilityDutyAssignment?    @relation("CorrectionDecisionDuty", fields: [deciderDutyAssignmentId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionRequest_deciderDuty_fkey")
+  requestCommandReceipt        CommandReceipt             @relation("CorrectionRequestReceipt", fields: [requestCommandReceiptId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionRequest_requestReceipt_fkey")
+  decisionCommandReceipt       CommandReceipt?            @relation("CorrectionDecisionReceipt", fields: [decisionCommandReceiptId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionRequest_decisionReceipt_fkey")
+  lifecycleEvents              CorrectionLifecycleEvent[]
+  supersession                 CorrectionSupersession?
+  reconciliation               CorrectionReconciliation?
+
+  @@unique([id, labId])
+  @@index([labId, status, requestedAt], map: "CorrectionRequest_lab_status_requested_idx")
+  @@index([status, requestedAt], map: "CorrectionRequest_status_requested_idx")
+  @@index([domain, targetEntityId], map: "CorrectionRequest_target_idx")
+  @@index([requestedById, requestedAt], map: "CorrectionRequest_requester_idx")
+}
+
+model CorrectionLifecycleEvent {
+  id                    String                   @id
+  requestId             String
+  labId                 String
+  eventType             CorrectionEventType
+  fromStatus            CorrectionRequestStatus?
+  toStatus              CorrectionRequestStatus
+  actorId               String
+  actorAuthzVersion     Int
+  assurance             IdentityAssuranceLevel
+  dutyAssignmentId      String?
+  dutyAssignmentVersion Int?
+  identityLinkId        String?
+  authenticatedAt       DateTime                 @db.Timestamptz(6)
+  commandReceiptId      String                   @unique
+  detail                Json?
+  occurredAt            DateTime                 @default(now()) @db.Timestamptz(6)
+  request               CorrectionRequest        @relation(fields: [requestId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionLifecycleEvent_request_fkey")
+  lab                   Lab                      @relation(fields: [labId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionLifecycleEvent_lab_fkey")
+  actor                 User                     @relation("CorrectionEventActor", fields: [actorId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionLifecycleEvent_actor_fkey")
+  dutyAssignment        FacilityDutyAssignment?  @relation(fields: [dutyAssignmentId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionLifecycleEvent_duty_fkey")
+  identityLink          ExternalIdentityLink?    @relation(fields: [identityLinkId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionLifecycleEvent_identity_fkey")
+  commandReceipt        CommandReceipt           @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionLifecycleEvent_receipt_fkey")
+
+  @@index([requestId, occurredAt], map: "CorrectionLifecycleEvent_request_idx")
+  @@index([labId, occurredAt], map: "CorrectionLifecycleEvent_lab_idx")
+  @@index([actorId, occurredAt], map: "CorrectionLifecycleEvent_actor_idx")
+}
+
+model CorrectionSupersession {
+  id                  String            @id
+  requestId           String            @unique
+  labId               String
+  domain              CorrectionDomain
+  targetEntityType    String
+  targetEntityId      String
+  originalSnapshot    Json
+  effectiveProjection Json
+  sourceEventAt       DateTime          @db.Timestamptz(6)
+  appliedAt           DateTime          @db.Timestamptz(6)
+  appliedById         String
+  commandReceiptId    String            @unique
+  createdAt           DateTime          @default(now()) @db.Timestamptz(6)
+  request             CorrectionRequest @relation(fields: [requestId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionSupersession_request_fkey")
+  lab                 Lab               @relation(fields: [labId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionSupersession_lab_fkey")
+  appliedBy           User              @relation("CorrectionSupersessionActor", fields: [appliedById], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionSupersession_actor_fkey")
+  commandReceipt      CommandReceipt    @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionSupersession_receipt_fkey")
+
+  @@unique([requestId, labId])
+  @@unique([domain, targetEntityId])
+  @@index([domain, targetEntityId, appliedAt], map: "CorrectionSupersession_target_idx")
+  @@index([labId, appliedAt], map: "CorrectionSupersession_lab_idx")
+}
+
+model CorrectionReconciliation {
+  id                       String            @id
+  requestId                String            @unique
+  labId                    String
+  downstreamRecords        Json
+  result                   Json
+  physicalMutationRequired Boolean           @default(false)
+  reconciledAt             DateTime          @db.Timestamptz(6)
+  commandReceiptId         String            @unique
+  createdAt                DateTime          @default(now()) @db.Timestamptz(6)
+  request                  CorrectionRequest @relation(fields: [requestId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionReconciliation_request_fkey")
+  lab                      Lab               @relation(fields: [labId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionReconciliation_lab_fkey")
+  commandReceipt           CommandReceipt    @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "CorrectionReconciliation_receipt_fkey")
+
+  @@unique([requestId, labId])
+  @@index([labId, reconciledAt], map: "CorrectionReconciliation_lab_idx")
+}
+
 model HealthNote {
   id               String         @id
   labId            String
@@ -3071,6 +3234,11 @@ model CommandReceipt {
   welfareOrdersLastMutation      WelfareTreatmentOrder[]              @relation("WelfareOrderLastReceipt")
   welfareEscalationsOpened       WelfareEscalation[]                  @relation("WelfareEscalationOpenReceipt")
   welfareEscalationsLastMutation WelfareEscalation[]                  @relation("WelfareEscalationLastReceipt")
+  correctionRequestsSubmitted    CorrectionRequest[]                  @relation("CorrectionRequestReceipt")
+  correctionRequestsDecided      CorrectionRequest[]                  @relation("CorrectionDecisionReceipt")
+  correctionEvents               CorrectionLifecycleEvent[]
+  correctionSupersessions        CorrectionSupersession[]
+  correctionReconciliations      CorrectionReconciliation[]
 
   @@unique([actorId, commandType, idempotencyKey])
   @@index([requestId])

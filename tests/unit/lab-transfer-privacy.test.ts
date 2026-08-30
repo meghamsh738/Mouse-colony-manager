@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   breedingFindMany: vi.fn(),
   cageFindMany: vi.fn(),
   protocolFindMany: vi.fn(),
+  correctionFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -20,6 +21,7 @@ vi.mock("@/lib/prisma", () => ({
     breedingAdult: { findMany: mocks.breedingFindMany },
     cage: { findMany: mocks.cageFindMany },
     protocolAuthorization: { findMany: mocks.protocolFindMany },
+    correctionSupersession: { findMany: mocks.correctionFindMany },
   },
 }));
 
@@ -124,6 +126,7 @@ describe("lab transfer packet privacy", () => {
     mocks.breedingFindMany.mockResolvedValue([]);
     mocks.cageFindMany.mockResolvedValue([]);
     mocks.protocolFindMany.mockResolvedValue([]);
+    mocks.correctionFindMany.mockResolvedValue([]);
   });
 
   it("shows the allowlisted operational packet but hides the source-private note from the destination lab", async () => {

@@ -164,7 +164,7 @@ export default async function DashboardPage() {
                 <Link className="dashboard-data-row" href="/breeding" key={item.litterId}>
                   <span className="dashboard-row-id">{item.litterId}</span>
                   <span className="dashboard-row-value">Due {item.dueDate}</span>
-                  <span className="dashboard-row-meta">Breeding {item.breedingId}</span>
+                  <span className="dashboard-row-meta" data-testid={item.correction ? `dashboard-litter-correction-${item.litterId}` : undefined}>Breeding {item.breedingId}{item.correction ? ` · corrected ${item.correction.requestId.slice(0, 12)}` : ""}</span>
                   <ArrowRight className="h-4 w-4 shrink-0 text-[var(--muted)]" aria-hidden="true" />
                 </Link>
               ))

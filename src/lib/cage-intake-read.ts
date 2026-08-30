@@ -1,9 +1,10 @@
-import { addDays, differenceInDays } from "date-fns";
+import { differenceInDays } from "date-fns";
 import type { Prisma } from "@prisma/client";
 
 import { getCageCapacityState } from "@/lib/cage-capacity";
 import { parseCageIntakeDraftPayload } from "@/lib/cage-intake-draft";
 import { getWorkflowDraftForActor } from "@/lib/command-foundation";
+import { correctedString, correctionMarker, getAppliedCorrectionProjectionMap } from "@/lib/correction-read";
 import { getActorLabAccess, type LabActor } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
 import type { CageIntakeOptionsView } from "@/lib/types";
@@ -158,6 +159,7 @@ export async function getCageIntakeOptionsView(
           birthDate: true,
           litterSizeBirth: true,
           litterSizeWean: true,
+          breedingSetup: { select: { labId: true } },
           _count: { select: { litterAnimals: true } },
         },
       }),
@@ -169,6 +171,12 @@ export async function getCageIntakeOptionsView(
 
   const referenceDate = getReferenceDate();
   const weaningDueDays = Number(weaningRule?.value ?? 21) || 21;
+  const litterCorrection = litter
+    ? (await getAppliedCorrectionProjectionMap("litter_birth", [{ id: litter.id, labIds: [litter.breedingSetup.labId] }])).get(litter.id)
+    : undefined;
+  const effectiveLitterBirthDate = litter
+    ? new Date(correctedString(litterCorrection, "birthDate", litter.birthDate.toISOString()))
+    : null;
 
   return {
     labs,
@@ -239,16 +247,17 @@ export async function getCageIntakeOptionsView(
           ]
         : [],
     ),
-    litter: litter
+    litter: litter && effectiveLitterBirthDate
       ? {
           id: litter.id,
           version: litter.version,
-          birthDate: litter.birthDate.toISOString(),
+          birthDate: effectiveLitterBirthDate.toISOString(),
           litterSizeBirth: litter.litterSizeBirth,
-          daysOld: differenceInDays(referenceDate, litter.birthDate),
+          daysOld: differenceInDays(referenceDate, effectiveLitterBirthDate),
           weaningDueDays,
-          suggestedWeanDate: addDays(litter.birthDate, weaningDueDays).toISOString().slice(0, 10),
+          suggestedWeanDate: new Date(effectiveLitterBirthDate.getTime() + weaningDueDays * 86_400_000).toISOString().slice(0, 10),
           alreadyWeaned: litter.litterSizeWean !== null || litter._count.litterAnimals > 0,
+          correction: correctionMarker(litterCorrection),
         }
       : null,
   };

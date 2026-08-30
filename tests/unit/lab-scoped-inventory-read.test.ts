@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   sampleFindMany: vi.fn(),
   strainFindMany: vi.fn(),
   cryostorageFindMany: vi.fn(),
+  correctionFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/lab-access", () => ({
@@ -26,6 +27,7 @@ vi.mock("@/lib/prisma", () => ({
     sampleRecord: { findMany: mocks.sampleFindMany },
     strain: { findMany: mocks.strainFindMany },
     cryostorageRecord: { findMany: mocks.cryostorageFindMany },
+    correctionSupersession: { findMany: mocks.correctionFindMany },
   },
 }));
 
@@ -45,6 +47,7 @@ describe("lab-scoped sample and cryostorage reads", () => {
     mocks.sampleFindMany.mockResolvedValue([]);
     mocks.strainFindMany.mockResolvedValue([]);
     mocks.cryostorageFindMany.mockResolvedValue([]);
+    mocks.correctionFindMany.mockResolvedValue([]);
     mocks.getActorLabAccess.mockImplementation(async (actor: typeof labActor | typeof globalActor) => ({
       canViewAll: actor.role === "admin",
       memberLabIds: actor.role === "admin" ? [] : ["lab-a"],

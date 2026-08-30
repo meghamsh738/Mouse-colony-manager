@@ -7,6 +7,7 @@ import { seedDatabase } from "./seed-database";
 import { seedDutyQaFixture } from "./seed-duty-qa";
 import { seedProtocolQaFixture } from "./seed-protocol-qa";
 import { seedWelfareQaFixture } from "./seed-welfare-qa";
+import { seedCorrectionQaFixture } from "./seed-correction-qa";
 
 const roleQaUsers: Array<{ id: string; name: string; email: string; role: UserRole }> = [
   { id: "user-it-head-qa", name: "QA IT Head", email: SEEDED_ROLE_QA_EMAILS.itHead, role: "it_head" },
@@ -69,6 +70,7 @@ export async function seedRoleQaDatabase(options: { clearAttachments?: boolean }
   process.env.MCM_DEPLOYMENT_PROFILE = "synthetic";
   try {
     await seedWelfareQaFixture();
+    await seedCorrectionQaFixture();
   } finally {
     if (previousProfile === undefined) delete process.env.MCM_DEPLOYMENT_PROFILE;
     else process.env.MCM_DEPLOYMENT_PROFILE = previousProfile;

@@ -446,6 +446,7 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
                         {record.quantityLabel ? <span>{record.quantityLabel}</span> : null}
                       </div>
                       {record.notes ? <p className="mt-3 text-sm leading-6 text-[var(--ink)]">{record.notes}</p> : null}
+                      {record.correction ? <p className="mt-2 text-xs font-medium text-emerald-800" data-testid={`sample-correction-${record.id}`}>Corrected metadata · request {record.correction.requestId.slice(0, 12)}</p> : null}
                     </article>
                   ))
                 ) : (
@@ -466,6 +467,7 @@ export default async function AnimalDetailPage({ params, searchParams }: { param
                       <p className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">{formatDate(event.date)}</p>
                     </div>
                     <p className="mt-2 text-sm text-[var(--muted)]">{event.description}</p>
+                    {event.correction ? <p className="mt-2 text-xs font-medium text-emerald-800" data-testid={`timeline-correction-${event.id}`}>Corrected metadata · request {event.correction.requestId.slice(0, 12)}</p> : null}
                   </article>
                 ))}
               </div>

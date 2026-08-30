@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   experimentFindMany: vi.fn(),
   cryostorageCount: vi.fn(),
   cryostorageFindMany: vi.fn(),
+  correctionFindMany: vi.fn(),
+  queryRaw: vi.fn(),
 }));
 
 vi.mock("@/lib/lab-access", () => ({
@@ -18,6 +20,8 @@ vi.mock("@/lib/prisma", () => ({
     sampleRecord: { count: mocks.sampleCount, findMany: mocks.sampleFindMany },
     experiment: { findMany: mocks.experimentFindMany },
     cryostorageRecord: { count: mocks.cryostorageCount, findMany: mocks.cryostorageFindMany },
+    correctionSupersession: { findMany: mocks.correctionFindMany },
+    $queryRaw: mocks.queryRaw,
   },
 }));
 
@@ -86,6 +90,8 @@ describe("sample and cryostorage inventory pagination", () => {
         : [sampleRow],
     );
     mocks.cryostorageCount.mockResolvedValue(205);
+    mocks.correctionFindMany.mockResolvedValue([]);
+    mocks.queryRaw.mockResolvedValue([]);
     mocks.cryostorageFindMany.mockImplementation(async (query: { distinct?: unknown; select?: Record<string, unknown> }) => {
       if (query.distinct) return [{ strain: { id: "strain-a", name: "C57BL/6J" } }];
       if (query.select && !query.select.lab) {
@@ -133,6 +139,9 @@ describe("sample and cryostorage inventory pagination", () => {
   });
 
   it("filters the authorized whole biosample dataset before stable pagination", async () => {
+    mocks.queryRaw
+      .mockResolvedValueOnce([{ count: BigInt(205) }])
+      .mockResolvedValueOnce([{ id: "sample-a" }]);
     const page = await getSampleInventoryPageView(actor, {
       experimentId: "experiment-a",
       page: "2",
@@ -141,25 +150,20 @@ describe("sample and cryostorage inventory pagination", () => {
       search: "PROJECT-A",
       status: "stored",
     });
-    const countQuery = mocks.sampleCount.mock.calls[0]?.[0];
-    const listQuery = mocks.sampleFindMany.mock.calls.map(([query]) => query).find((query) => query.take);
+    const countSql = mocks.queryRaw.mock.calls[0]?.[0] as { strings: string[]; values: unknown[] };
+    const pageSql = mocks.queryRaw.mock.calls[1]?.[0] as { strings: string[]; values: unknown[] };
+    const listQuery = mocks.sampleFindMany.mock.calls.map(([query]) => query).find((query) => query.where?.id?.in);
 
     expect(page).toMatchObject({ page: 2, pageCount: 3, pageSize: 100, totalCount: 205, sampleTypes: ["DNA"] });
-    expect(countQuery.where).toMatchObject({
-      experimentId: "experiment-a",
-      labId: { in: ["lab-a"] },
-      sampleType: "DNA",
-      status: "stored",
-    });
-    expect(countQuery.where.OR).toEqual(expect.arrayContaining([
-      { sampleLabel: { contains: "PROJECT-A", mode: "insensitive" } },
-      { project: { projectCode: { contains: "PROJECT-A", mode: "insensitive" } } },
-    ]));
+    expect(countSql.strings.join("")).toContain('correction."effectiveProjection" ->> \'notes\'');
+    expect(countSql.values).toEqual(expect.arrayContaining(["lab-a", "stored", "DNA", "experiment-a", "%PROJECT-A%"]));
+    expect(countSql.strings.join("")).toContain('correction_request."proposedCorrection" ? \'notes\'');
+    expect(pageSql.strings.join("")).toContain('correction_request."proposedCorrection" ? \'collectedAt\'');
+    expect(pageSql.strings.join("")).toContain('correction."effectiveProjection" ->> \'collectedAt\'');
+    expect(pageSql.values).toEqual(expect.arrayContaining([100]));
     expect(listQuery).toMatchObject({
       orderBy: [{ collectedAt: "desc" }, { createdAt: "desc" }, { id: "asc" }],
-      skip: 100,
-      take: 100,
-      where: countQuery.where,
+      where: { id: { in: ["sample-a"] } },
     });
   });
 

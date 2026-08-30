@@ -89,6 +89,7 @@ export function SampleTable({
             {info.row.original.quantityLabel ? (
               <p className="text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{info.row.original.quantityLabel}</p>
             ) : null}
+            {info.row.original.correction ? <p className="text-xs font-medium text-emerald-800" data-testid={`sample-correction-${info.row.original.id}`}>Corrected metadata · {info.row.original.correction.requestId.slice(0, 12)}</p> : null}
           </div>
         ),
       }),
@@ -249,6 +250,7 @@ export function SampleTable({
                   {sample.quantityLabel ? (
                     <p className="mt-1 text-xs uppercase tracking-[0.12em] text-[var(--muted)]">{sample.quantityLabel}</p>
                   ) : null}
+                  {sample.correction ? <p className="mt-1 text-xs font-medium text-emerald-800" data-testid={`sample-correction-mobile-${sample.id}`}>Corrected metadata · {sample.correction.requestId.slice(0, 12)}</p> : null}
                 </div>
                 <div className="action-row justify-end">
                   <Badge variant={statusVariant(sample.status)}>{sample.status}</Badge>

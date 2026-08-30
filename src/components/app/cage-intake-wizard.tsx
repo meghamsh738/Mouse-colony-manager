@@ -577,6 +577,7 @@ export function CageIntakeWizard({
                 <div><span>Age</span><strong>{options.litter.daysOld} days</strong></div>
                 <div><span>Birth count</span><strong>{options.litter.litterSizeBirth}</strong></div>
                 <div><span>Due</span><strong>{options.litter.weaningDueDays} days</strong></div>
+                {options.litter.correction ? <div data-testid={`intake-litter-correction-${options.litter.id}`}><span>Correction</span><strong>{options.litter.correction.requestId.slice(0, 12)}</strong></div> : null}
               </div>
             ) : <p className="empty-row">Open this workflow from a litter row in Breeding.</p>
           ) : null}

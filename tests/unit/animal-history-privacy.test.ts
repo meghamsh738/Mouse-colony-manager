@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   genotypingRecordFindFirst: vi.fn(),
   alleleFindMany: vi.fn(),
   projectFindMany: vi.fn(),
+  correctionFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/lab-access", () => ({
@@ -33,6 +34,7 @@ vi.mock("@/lib/prisma", () => ({
     genotypingRecord: { findFirst: mocks.genotypingRecordFindFirst },
     allele: { findMany: mocks.alleleFindMany },
     project: { findMany: mocks.projectFindMany },
+    correctionSupersession: { findMany: mocks.correctionFindMany },
   },
 }));
 
@@ -107,6 +109,7 @@ const transferredAnimal = {
   genotypingRecords: [sourceGenotype],
   sampleRecords: [],
   statusEvents: [],
+  animalMovements: [],
 };
 
 const sourceAlert = {
@@ -143,6 +146,7 @@ describe("transferred animal history privacy", () => {
     mocks.genotypingRecordFindFirst.mockResolvedValue(null);
     mocks.alleleFindMany.mockResolvedValue([]);
     mocks.projectFindMany.mockResolvedValue([]);
+    mocks.correctionFindMany.mockResolvedValue([]);
   });
 
   it("filters source-lab notes, genotype history, and alerts from the destination lab list", async () => {

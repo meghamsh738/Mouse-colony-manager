@@ -5,6 +5,7 @@ import {
   parseStrainFertilityProfiles,
   type StrainFertilityProfile,
 } from "@/lib/fertility-rules";
+import { correctedNullableString, correctedString, correctionMarker, getAppliedCorrectionProjectionMap } from "@/lib/correction-read";
 import { getActorLabAccess, labScopedWhere, type LabActor } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
 import type { BreedingStatus, BreedingSuggestion } from "@/lib/types";
@@ -50,6 +51,7 @@ export type BreedingOverviewItem = {
         litterSizeWean?: number;
         notes?: string;
         progenyCount: number;
+        correction: { requestId: string; appliedAt: string } | null;
       }
     | null;
   litters: Array<{
@@ -59,6 +61,7 @@ export type BreedingOverviewItem = {
     litterSizeWean: number | null;
     notes: string | null;
     progeny: Array<{ id: string; animalId: string; sex: string; status: string }>;
+    correction: { requestId: string; appliedAt: string } | null;
   }>;
   ageDays: number;
 };
@@ -361,8 +364,22 @@ export async function getBreedingOverviewView(actor: LabActor): Promise<Breeding
     },
   });
 
+  const litterCorrections = await getAppliedCorrectionProjectionMap(
+    "litter_birth",
+    breedings.flatMap((breeding) => breeding.litters.map((litter) => ({ id: litter.id, labIds: [breeding.labId] }))),
+  );
+
   return breedings.map((breeding) => {
-    const latestLitter = breeding.litters[0] ?? null;
+    const correctedLitters = breeding.litters.map((litter) => {
+      const correction = litterCorrections.get(litter.id);
+      return {
+        ...litter,
+        birthDate: correctedString(correction, "birthDate", litter.birthDate.toISOString()),
+        notes: correctedNullableString(correction, "notes", litter.notes),
+        correction: correctionMarker(correction),
+      };
+    }).sort((left, right) => new Date(right.birthDate).getTime() - new Date(left.birthDate).getTime());
+    const latestLitter = correctedLitters[0] ?? null;
 
     return {
       id: breeding.id,
@@ -386,20 +403,22 @@ export async function getBreedingOverviewView(actor: LabActor): Promise<Breeding
       litter: latestLitter
         ? {
             id: latestLitter.id,
-            birthDate: latestLitter.birthDate.toISOString(),
+            birthDate: latestLitter.birthDate,
             litterSizeBirth: latestLitter.litterSizeBirth,
             litterSizeWean: latestLitter.litterSizeWean ?? undefined,
             notes: latestLitter.notes ?? undefined,
             progenyCount: latestLitter.litterAnimals.length,
+            correction: latestLitter.correction,
           }
         : null,
-      litters: breeding.litters.map((litter) => ({
+      litters: correctedLitters.map((litter) => ({
         id: litter.id,
-        birthDate: litter.birthDate.toISOString(),
+        birthDate: litter.birthDate,
         litterSizeBirth: litter.litterSizeBirth,
         litterSizeWean: litter.litterSizeWean,
         notes: litter.notes,
         progeny: litter.litterAnimals.map(({ animal }) => animal),
+        correction: litter.correction,
       })),
       ageDays: differenceInDays(new Date(referenceDate), breeding.startDate),
     };

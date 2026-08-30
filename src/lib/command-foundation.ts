@@ -552,6 +552,7 @@ const VERSIONED_AGGREGATE_TABLES = {
   notification_recipient: true,
   notification_preference: true,
   welfare_case: true,
+  correction_request: true,
   workflow_draft: true,
 } as const;
 
@@ -673,6 +674,11 @@ export async function getAggregateVersion(
       }))?.version ?? null;
     case "welfare_case":
       return (await tx.welfareCase.findFirst({
+        where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
+    case "correction_request":
+      return (await tx.correctionRequest.findFirst({
         where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
         select: { version: true },
       }))?.version ?? null;

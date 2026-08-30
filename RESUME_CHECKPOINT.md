@@ -2,7 +2,7 @@
 
 Recorded: 2026-08-30
 
-Last verified: 2026-08-30 (M14 veterinary and welfare case management); M15 is next
+Last verified: 2026-08-30 (M15 controlled corrections and immutable history); M16 is next
 
 ## Workspace
 
@@ -14,7 +14,7 @@ Last verified: 2026-08-30 (M14 veterinary and welfare case management); M15 is n
 
 ## Practical State
 
-- Milestones 11 through 14 are Verified. The completed ChatGPT Pro assessment is archived exactly at [`docs/reviews/2026-08-29-chatgpt-pro-product-review.md`](./docs/reviews/2026-08-29-chatgpt-pro-product-review.md), and its repository-specific synthetic-release boundary and M11–M20 delivery order are recorded in [`docs/PRODUCT_READINESS_REMEDIATION.md`](./docs/PRODUCT_READINESS_REMEDIATION.md). M12 added independently approved, time-bounded facility duties and fail-closed identity contracts. M13 added immutable protocol versions, independent authorization review, competency evidence, and exact transactional allocation gates. M14 added privacy-minimized veterinary/welfare cases with exact command, lifecycle, and audit evidence. M15 controlled corrections and immutable history is next.
+- Milestones 11 through 15 are Verified. The completed ChatGPT Pro assessment is archived exactly at [`docs/reviews/2026-08-29-chatgpt-pro-product-review.md`](./docs/reviews/2026-08-29-chatgpt-pro-product-review.md), and its repository-specific synthetic-release boundary and M11–M20 delivery order are recorded in [`docs/PRODUCT_READINESS_REMEDIATION.md`](./docs/PRODUCT_READINESS_REMEDIATION.md). M12 added independently approved, time-bounded facility duties and fail-closed identity contracts. M13 added immutable protocol versions, independent authorization review, competency evidence, and exact transactional allocation gates. M14 added privacy-minimized veterinary/welfare cases with exact command, lifecycle, and audit evidence. M15 added independently approved metadata supersessions, immutable originals, exact reconciliation evidence, and corrected operational projections. M16 safe intake, census, quarantine, and transfer reconciliation is next.
 - The Mouse Colony Manager's locally completable product milestones are finished and verified. Role-scoped workflows, the unit-wide privacy-safe Strain Directory, bounded inventories and histories, the scheduler-ready outbox worker, and the synthetic performance harness passed final review and acceptance on clean commit `a032202d09e6ccee0be1386b20aae9b93b7b3b89`.
 - This does **not** mean the app is deployed to production. Hosting region, budget/operator, recovery objectives, institutional identity/domain, email provider, private object storage, and a synthetic staging candidate still require owner decisions.
 - Milestone 9 production-shaped restore/cutover work is Deferred because the user has no real colony database. The guarded synthetic restore rehearsal remains available; do not request or invent production data.
@@ -55,6 +55,14 @@ Last verified: 2026-08-30 (M14 veterinary and welfare case management); M15 is n
 - The guarded synthetic role-QA fixture adds one bounded welfare example. Existing health notes and quarantine records stay separate; individual clinical detail is not added to colony, directory, dashboard, or Workbook projections.
 - The visible `synthetic-fail-closed-v1` marker makes the boundary explicit. Clinical terminology, formulary, service levels, retention, emergency paging, and institutional veterinary validation remain outside this repository milestone.
 
+## Completed Milestone 15 Work
+
+- Migration `0040_controlled_corrections` adds lab-scoped correction requests, immutable lifecycle evidence, one supersession per target, downstream reconciliation, exact command-receipt/audit parity, and guarded maker-checker decisions.
+- A requester must retain the target domain's current authority. Only an independent current Data Steward with a current identity link and fresh synthetic MFA evidence can approve or reject; stale, self-decided, cross-lab, or mismatched commands fail closed.
+- Safe metadata supersessions are available for litter birth, movement, lifecycle, transfer, procedure occurrence, and biosample evidence. Structural birth/weaning counts, animal status, cage endpoints, custody, procedure status, biosample identity/location/quantity, and other physical changes are blocked rather than inferred or rewritten.
+- Applied masks come from immutable proposed fields. Ordinary updates to uncorrected fields remain visible, while later attempts to rewrite a corrected mutable field fail atomically. Authorized dashboard, intake, breeding, animal history, transfer, procedure, sample, API, and Workbook views display effective values with correction references; unauthorized records remain undiscoverable.
+- The visible `synthetic-controlled-metadata-supersession-v1` marker makes the bounded policy explicit. This is not an institutional correction policy, regulated electronic-record claim, or authorization to alter real colony evidence.
+
 ## Preserved Disposable Evidence
 
 - A PostgreSQL 16 listener used for current M12 work is loopback-only at `127.0.0.1:51523`, using the external runtime data directory. The prior retained evidence listener at `51522` and its databases must not be reused destructively.
@@ -65,6 +73,8 @@ Last verified: 2026-08-30 (M14 veterinary and welfare case management); M15 is n
 - M14 clean seed and focused safety target: database/schema `mcm_test_m14_full_20260830_r19`; all 39 migrations, guarded role-QA seed with the deployment profile unset, and focused workflow/safety tests passed.
 - M14 full regression target: database/schema `mcm_test_m14_full_20260830_r23`; all 14 guarded database files / 180 tests passed.
 - M14 browser target: database/schema `mcm_test_m14_e2e_20260830_r24`; Desktop Chrome and Pixel 7 welfare acceptance both passed. Do not record its ephemeral local QA password.
+- M15 final migration/regression target: database `mcm_test_m15_mask_20260830_r1_child`, schema `mcm_test_m15_mask_r1_child`; all 40 migrations, 17 guarded database files / 196 tests, and 13 focused live mask/projection/safety tests passed.
+- M15 focused browser evidence used a fresh disposable target and passed 2/2 desktop Chromium and mobile correction workflows. Do not record its ephemeral local QA password.
 - The 2026-08-23 performance follow-up target is database `mcm_test_m10_load_perf_20260823_r1`, schema `mcm_test_m10_load_perf`; it contains only the guarded synthetic maximum-scale fixture and must not be destructively reused.
 - Final role/browser QA target: database `mcm_test_final_20260812_r1`, schema `mcm_test_final`.
 - Load target: database `mcm_test_m10_load_20260812_r1`, schema `mcm_test_m10_load`; exact 9,999 animals, 2,000 cages, and 50 synthetic load identities (55 users including the base seed).
@@ -90,12 +100,13 @@ Last verified: 2026-08-30 (M14 veterinary and welfare case management); M15 is n
 - M12 passed 114 database-free files / 556 tests, 10 focused files / 92 tests, 9 guarded database files / 155 tests, all 37 migrations, Prisma validation/generation, TypeScript, ESLint with five pre-existing warnings, the 84-entry authorization manifest, a 52-route production build, and diff checks. Playwright duty QA passed at 1440×1000 and 390×844 with no overflow or console errors, and Lab User direct access was denied. Independent re-review returned `ship` after all P0/P1 findings were corrected.
 - M13 passed all 38 migrations, 118 database-free files / 574 tests, 12 guarded database files / 173 tests, the 86-entry authorization manifest, TypeScript, Prisma validation, ESLint with the same five pre-existing warnings, a 53-entry production build, and diff checks. Playwright passed 16/16 full-role scenarios and 6/6 focused compliance scenarios across desktop and mobile, including unauthorized mutation denial and horizontal-overflow checks. Independent high-risk re-review returned `SHIP` after all P0/P1 findings were corrected.
 - M14 passed all 39 migrations, 121 database-free files / 592 tests, 14 guarded database files / 180 tests, the 88-entry authorization manifest, TypeScript, Prisma validation/generation, ESLint with the same five pre-existing warnings, a 54-entry production build, and diff checks. Focused Playwright passed 2/2 across Desktop Chrome and Pixel 7, including veterinarian detail, welfare-officer redaction, authoritative subject selection, no-duty denial, and horizontal-overflow checks. Independent high-risk re-review returned `SHIP` after all P0/P1 command/event/audit parity and test-isolation findings were corrected.
+- M15 passed all 40 migrations, 124 database-free files / 605 tests, 17 guarded database files / 196 tests, 13 focused live projection/safety tests, the 90-entry authorization manifest, TypeScript, Prisma validation/generation, ESLint with the same five pre-existing warnings, a 55-entry production build, migration replay/schema parity/empty bootstrap, and diff checks. Focused Playwright passed 2/2 across desktop Chromium and mobile, including requester/Data Steward/viewer boundaries and responsive behavior. Independent high-risk re-review returned `SHIP` after all P0/P1 projection, evidence-pairing, test-isolation, corrected search/order/pagination, transfer-history, and stale-field-mask findings were corrected.
 
 ## Safe Resume Order
 
 1. Read this file, `IMPLEMENTATION_TRACKER.md`, `docs/HOSTING_DECISION.md`, `docs/M10_LOAD_TEST.md`, and `docs/OUTBOX_WORKER_RUNBOOK.md`.
 2. Confirm the external drive, branch, and loopback PostgreSQL target before running anything. Never point destructive seeds or probes at a retained/shared/remote target.
-3. If continuing M15 development, create a new uniquely named `mcm_test_m15_*` database and schema instead of overwriting M14 or earlier preserved evidence.
+3. If continuing M16 development, create a new uniquely named `mcm_test_m16_*` database and schema instead of overwriting M15 or earlier preserved evidence.
 4. If preparing deployment, first obtain the owner decisions listed in the hosting record. Externalize attachment storage, configure a provider/scheduler/secret store, and run the identical synthetic snapshot three times in approved staging.
 5. Do not select a hosting vendor/tier or call the app production-ready until object-storage authorization, worker recovery, encrypted backup restore, data residency, cost, and recovery objectives pass the staging gate.
 6. When real colony data eventually exists, resume Milestone 9 through the documented sanitized production-shaped restore rehearsal; until then it remains Deferred.

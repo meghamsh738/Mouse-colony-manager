@@ -199,18 +199,41 @@ describe.sequential("identity governance", () => {
     governanceEntityIds.push(demoteTemporaryHead.entityId);
     expect((await approvePrivilegedRoleChange(demoteTemporaryHead.entityId, approver)).ok).toBe(true);
 
-    const requested = await requestPrivilegedRoleChange({
-      targetUserId: ids.itHead,
-      requestedRole: "cmu_staff",
-      reason: "Exercise final-account protection",
-    }, requester);
-    expect(requested.ok).toBe(true);
-    if (!requested.ok) return;
-    governanceEntityIds.push(requested.entityId);
+    // Other database-integration files may leave synthetic IT Head fixtures in
+    // this shared disposable schema. Isolate the invariant under test and then
+    // restore those fixtures so suite order cannot change the result.
+    const otherActiveHeads = await prisma.user.findMany({
+      where: { role: "it_head", active: true, id: { not: ids.itHead } },
+      select: { id: true },
+    });
+    if (otherActiveHeads.length) {
+      await prisma.user.updateMany({
+        where: { id: { in: otherActiveHeads.map((user) => user.id) } },
+        data: { active: false },
+      });
+    }
 
-    const result = await approvePrivilegedRoleChange(requested.entityId, approver);
-    expect(result).toMatchObject({ ok: false });
-    expect(result.message).toContain("final it head");
+    try {
+      const requested = await requestPrivilegedRoleChange({
+        targetUserId: ids.itHead,
+        requestedRole: "cmu_staff",
+        reason: "Exercise final-account protection",
+      }, requester);
+      expect(requested.ok).toBe(true);
+      if (!requested.ok) return;
+      governanceEntityIds.push(requested.entityId);
+
+      const result = await approvePrivilegedRoleChange(requested.entityId, approver);
+      expect(result).toMatchObject({ ok: false });
+      expect(result.message).toContain("final it head");
+    } finally {
+      if (otherActiveHeads.length) {
+        await prisma.user.updateMany({
+          where: { id: { in: otherActiveHeads.map((user) => user.id) } },
+          data: { active: true },
+        });
+      }
+    }
   });
 
   it("rejects invitation creation by non-administrators", async () => {

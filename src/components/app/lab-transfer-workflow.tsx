@@ -252,6 +252,7 @@ export function LabTransferWorkspace({ requests, destinationLabs, nonce, sourceP
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2"><strong className="wrap-value">{request.sourceLab.code} → {request.destinationLab.code}</strong><Badge variant={statusVariant(request.status)}>{statusLabel(request.status)}</Badge><span className="text-xs text-[var(--muted)]">Packet v{request.packetVersion}</span></div>
                 <p className="mt-1 text-sm text-[var(--muted)]">{request.subjectType === "cage" ? request.sourceCage?.barcode ?? "Cage" : `${packetAnimals.length} animals`} · requested {request.requestedAt.toISOString().slice(0, 10)} · earliest {request.requestedEffectiveAt.toISOString().slice(0, 10)}</p>
+                {request.correction ? <p className="mt-1 text-xs font-semibold text-emerald-800" data-testid={`transfer-correction-${request.id}`}>Corrected metadata · request {request.correction.requestId.slice(0, 12)}</p> : null}
               </div>
               <span className="text-xs text-[var(--muted)]">{request.id.slice(0, 8)}</span>
             </div>

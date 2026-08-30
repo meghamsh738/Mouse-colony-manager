@@ -75,6 +75,7 @@ type ProcedureRow = {
     sopVersionNumber: number;
     sopContentHash: string;
     executedBy: string;
+    correction: { requestId: string; appliedAt: string } | null;
   }>;
 };
 
@@ -256,7 +257,7 @@ export function ProcedureWorkspace({
               <div><span>SOP</span><strong className="wrap-value">{row.sopCode} v{row.sopVersionNumber}</strong><small className="wrap-value">{row.sopContentHash.slice(0, 12)}…</small></div>
               <div><span>Contact</span><strong className="wrap-value">{row.operationalContact ?? "Not recorded"}</strong></div>
             </div>
-            {row.occurrences.map((occurrence) => <div className="mt-4 border-l-4 border-emerald-500 bg-emerald-50 px-4 py-3 text-sm" key={occurrence.id}><div className="flex flex-wrap justify-between gap-2"><strong>{occurrence.status.replaceAll("_", " ")}</strong><span>{formatDate(occurrence.occurredAt)} · {occurrence.executedBy}</span></div>{occurrence.outcomeNote ? <p className="mt-1 wrap-value">{occurrence.outcomeNote}</p> : null}<p className="mt-1 text-xs text-emerald-900">Exact SOP v{occurrence.sopVersionNumber} · {occurrence.sopContentHash.slice(0, 12)}…</p></div>)}
+            {row.occurrences.map((occurrence) => <div className="mt-4 border-l-4 border-emerald-500 bg-emerald-50 px-4 py-3 text-sm" key={occurrence.id}><div className="flex flex-wrap justify-between gap-2"><strong>{occurrence.status.replaceAll("_", " ")}</strong><span>{formatDate(occurrence.occurredAt)} · {occurrence.executedBy}</span></div>{occurrence.outcomeNote ? <p className="mt-1 wrap-value">{occurrence.outcomeNote}</p> : null}<p className="mt-1 text-xs text-emerald-900">Exact SOP v{occurrence.sopVersionNumber} · {occurrence.sopContentHash.slice(0, 12)}…</p>{occurrence.correction ? <p className="mt-1 text-xs font-semibold text-emerald-900" data-testid={`procedure-correction-${occurrence.id}`}>Corrected metadata · request {occurrence.correction.requestId.slice(0, 12)}</p> : null}</div>)}
             <ProcedureActions canExecute={canExecute} canPlan={canPlan} defaultOccurredAt={defaultOccurredAt} nonce={nonce} row={row} />
           </article>
         )) : <div className="worksheet-empty">No procedure plans match this view.</div>}

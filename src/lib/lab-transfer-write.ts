@@ -52,6 +52,44 @@ const TERMINAL_ANIMAL_STATUSES = [
   "archived",
 ] as const;
 
+async function getAppliedTransferCorrection(
+  tx: Prisma.TransactionClient,
+  requestId: string,
+) {
+  return tx.correctionSupersession.findFirst({
+    where: {
+      domain: "cross_lab_transfer",
+      targetEntityId: requestId,
+      request: { status: "applied" },
+    },
+    select: {
+      effectiveProjection: true,
+      request: { select: { proposedCorrection: true } },
+    },
+  });
+}
+
+function transferCorrectionMasks(
+  correction: Awaited<ReturnType<typeof getAppliedTransferCorrection>>,
+  field: "reason" | "requestedEffectiveAt",
+) {
+  const proposal = correction?.request.proposedCorrection;
+  return Boolean(proposal && typeof proposal === "object" && !Array.isArray(proposal)
+    && Object.prototype.hasOwnProperty.call(proposal, field));
+}
+
+function correctedTransferString(
+  correction: Awaited<ReturnType<typeof getAppliedTransferCorrection>>,
+  field: "reason" | "requestedEffectiveAt",
+  fallback: string,
+) {
+  if (!transferCorrectionMasks(correction, field)) return fallback;
+  const projection = correction?.effectiveProjection;
+  if (!projection || typeof projection !== "object" || Array.isArray(projection)) return fallback;
+  const value = projection[field];
+  return typeof value === "string" ? value : fallback;
+}
+
 async function releaseDestinationTransferReservation(
   tx: Prisma.TransactionClient,
   input: {
@@ -178,7 +216,7 @@ async function getCurrentTransferPacket(
   tx: Prisma.TransactionClient,
   requestId: string,
 ) {
-  const [request, mixedSexRule] = await Promise.all([
+  const [request, mixedSexRule, correction] = await Promise.all([
     tx.labTransferRequest.findUnique({
       where: { id: requestId },
       include: {
@@ -253,8 +291,21 @@ async function getCurrentTransferPacket(
       where: { key: "mixed_sex_holding_allowed" },
       select: { value: true },
     }),
+    getAppliedTransferCorrection(tx, requestId),
   ]);
   if (!request) return null;
+
+  const effectiveReason = correctedTransferString(correction, "reason", request.reason);
+  const effectiveRequestedAt = new Date(correctedTransferString(
+    correction,
+    "requestedEffectiveAt",
+    request.requestedEffectiveAt.toISOString(),
+  ));
+  const effectiveRequest = {
+    ...request,
+    reason: effectiveReason,
+    requestedEffectiveAt: effectiveRequestedAt,
+  };
 
   const destinationCapacity = request.destinationCage
     ? getCageCapacityState({
@@ -268,8 +319,8 @@ async function getCurrentTransferPacket(
     subjectType: request.subjectType,
     sourceLab: request.sourceLab,
     destinationLab: request.destinationLab,
-    reason: request.reason,
-    requestedEffectiveAt: request.requestedEffectiveAt.toISOString(),
+    reason: effectiveReason,
+    requestedEffectiveAt: effectiveRequestedAt.toISOString(),
     sourceCage: request.sourceCage
       ? {
           id: request.sourceCage.id,
@@ -318,7 +369,7 @@ async function getCurrentTransferPacket(
     })),
   });
 
-  return { request, ...built };
+  return { request: effectiveRequest, ...built };
 }
 
 async function createTransferEvent(
@@ -1077,6 +1128,7 @@ export async function executeReviseLabTransferCommand(input: {
           message: "This transfer can no longer be revised.",
         };
       }
+      const correction = await getAppliedTransferCorrection(tx, request.id);
       await setTransferCommandContext(tx, {
         requestId: request.id,
         actorId: input.actor.id,
@@ -1088,6 +1140,12 @@ export async function executeReviseLabTransferCommand(input: {
       const requestedEffectiveAt = parseCalendarDate(
         input.command.requestedEffectiveAt,
       );
+      const effectiveReason = correctedTransferString(correction, "reason", request.reason);
+      const effectiveRequestedAt = new Date(correctedTransferString(
+        correction,
+        "requestedEffectiveAt",
+        request.requestedEffectiveAt.toISOString(),
+      ));
       if (
         !requestedEffectiveAt ||
         dateKey(requestedEffectiveAt) < dateKey(new Date()) ||
@@ -1096,6 +1154,13 @@ export async function executeReviseLabTransferCommand(input: {
         return transferValidationError(
           "Choose today or a future transfer date and enter a clear reason.",
         );
+      }
+      if (transferCorrectionMasks(correction, "reason") && reason !== effectiveReason) {
+        return transferValidationError("The transfer reason is controlled by an applied correction and cannot be revised.");
+      }
+      if (transferCorrectionMasks(correction, "requestedEffectiveAt")
+        && dateKey(requestedEffectiveAt) !== dateKey(effectiveRequestedAt)) {
+        return transferValidationError("The requested effective date is controlled by an applied correction and cannot be revised.");
       }
       if (
         !input.command.destinationLabId ||
@@ -1256,9 +1321,9 @@ export async function executeReviseLabTransferCommand(input: {
           data: {
             destinationLabId: input.command.destinationLabId,
             destinationCageId: null,
-            reason,
+            ...(transferCorrectionMasks(correction, "reason") ? {} : { reason }),
             sourcePrivateNote,
-            requestedEffectiveAt,
+            ...(transferCorrectionMasks(correction, "requestedEffectiveAt") ? {} : { requestedEffectiveAt }),
             status: "requested",
             packetVersion,
             acceptedPacketVersion: null,

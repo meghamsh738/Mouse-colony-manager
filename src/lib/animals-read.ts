@@ -2,6 +2,7 @@ import { compareDesc, differenceInDays } from "date-fns";
 import type { Prisma } from "@prisma/client";
 
 import { normalizeUserRole, type Capability } from "@/lib/capabilities";
+import { correctedNullableString, correctedString, correctionMarker, getAppliedCorrectionProjectionMap, getAppliedCorrectionProjectionMapForAuthorizedEventIds } from "@/lib/correction-read";
 import { canViewLab, getActorReadLabAccess, type ActorLabAccess, type LabActor } from "@/lib/lab-access";
 import { parseExternalTransferProvenance } from "@/lib/lifecycle-provenance";
 import { prisma } from "@/lib/prisma";
@@ -755,6 +756,11 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
           sop: { select: { code: true, title: true } },
         },
       },
+      animalMovements: {
+        orderBy: { movedAt: "desc" },
+        take: ANIMAL_DETAIL_HISTORY_LIMIT,
+        select: { id: true, movedAt: true, reason: true, fromCageId: true, toCageId: true },
+      },
     },
   });
 
@@ -781,6 +787,38 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
       access?.canViewAll ||
       (record.labId === animal.owningLabId && (!record.project || record.project.labId === record.labId)),
   );
+  const [sampleCorrections, statusCorrections, movementCorrections] = await Promise.all([
+    getAppliedCorrectionProjectionMap("biosample", visibleSampleRecords.map((record) => ({ id: record.id, labIds: [record.labId] }))),
+    getAppliedCorrectionProjectionMapForAuthorizedEventIds("animal_lifecycle", animal.statusEvents.map((event) => event.id)),
+    getAppliedCorrectionProjectionMapForAuthorizedEventIds("animal_move", animal.animalMovements.map((movement) => movement.id)),
+  ]);
+  const effectiveSampleRecords = visibleSampleRecords.map((record) => {
+    const correction = sampleCorrections.get(record.id);
+    return {
+      ...record,
+      collectedAt: correctedString(correction, "collectedAt", record.collectedAt.toISOString()),
+      notes: correctedNullableString(correction, "notes", record.notes),
+      correction: correctionMarker(correction),
+    };
+  });
+  const effectiveStatusEvents = animal.statusEvents.map((event) => {
+    const correction = statusCorrections.get(event.id);
+    return {
+      ...event,
+      happenedAt: correctedString(correction, "happenedAt", event.happenedAt.toISOString()),
+      reason: correctedNullableString(correction, "reason", event.reason),
+      correction: correctionMarker(correction),
+    };
+  });
+  const effectiveMovements = animal.animalMovements.map((movement) => {
+    const correction = movementCorrections.get(movement.id);
+    return {
+      ...movement,
+      movedAt: correctedString(correction, "movedAt", movement.movedAt.toISOString()),
+      reason: correctedNullableString(correction, "reason", movement.reason),
+      correction: correctionMarker(correction),
+    };
+  });
   const visibleHealthNotes = animal.healthNotes.filter(
     (note) => access?.canViewAll || Boolean(access?.memberLabIds.includes(note.labId)),
   );
@@ -903,24 +941,35 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
       date: record.resultDate.toISOString(),
       label: `Genotype ${record.status}`,
       description: record.finalCall,
+      correction: null,
     })),
-    ...visibleSampleRecords.map((record) => ({
+    ...effectiveSampleRecords.map((record) => ({
       id: `sample-${record.id}`,
-      date: record.collectedAt.toISOString(),
+      date: record.collectedAt,
       label: `Sample ${titleCase(record.status)}`,
       description: `${record.sampleLabel} · ${record.sampleType}${record.project?.projectCode ? ` · ${record.project.projectCode}` : ""}`,
+      correction: record.correction,
     })),
-    ...animal.statusEvents.map((event) => ({
+    ...effectiveStatusEvents.map((event) => ({
       id: event.id,
-      date: event.happenedAt.toISOString(),
+      date: event.happenedAt,
       label: titleCase(event.toStatus),
       description: `${event.reason ?? "Status updated"}${event.sop ? ` · ${event.sop.code} v${event.sopVersionNumber} · ${event.sopContentHash?.slice(0, 12)}` : ""}`,
+      correction: event.correction,
+    })),
+    ...effectiveMovements.map((movement) => ({
+      id: `movement-${movement.id}`,
+      date: movement.movedAt,
+      label: "Animal movement",
+      description: movement.reason ?? "Movement recorded",
+      correction: movement.correction,
     })),
     ...animal.experimentAssignments.map((assignment) => ({
       id: assignment.id,
       date: assignment.startDate.toISOString(),
       label: `Experiment ${assignment.status}`,
       description: `${assignment.experiment.experimentCode}${assignment.treatmentGroup ? ` · ${assignment.treatmentGroup}` : ""}`,
+      correction: null,
     })),
   ].sort((left, right) => compareDesc(new Date(left.date), new Date(right.date)));
 
@@ -969,16 +1018,17 @@ export async function getAnimalDetailView(animalId: string, actor: AnimalReadAct
         storageUrl: attachment.storageUrl,
       })),
     })),
-    sampleRecords: visibleSampleRecords.map((record) => ({
+    sampleRecords: effectiveSampleRecords.map((record) => ({
       id: record.id,
       sampleLabel: record.sampleLabel,
       sampleType: record.sampleType,
       status: record.status,
-      collectedAt: record.collectedAt.toISOString(),
+      collectedAt: record.collectedAt,
       storageLocation: record.storageLocation ?? null,
       quantityLabel: record.quantityLabel ?? null,
       notes: record.notes ?? null,
       projectCode: record.project?.projectCode ?? null,
+      correction: record.correction,
     })),
     sireAnimalId: animal.sire?.animalId ?? null,
     damAnimalId: animal.dam?.animalId ?? null,

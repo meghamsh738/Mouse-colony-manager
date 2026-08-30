@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { actorHasCapability } from "@/lib/capabilities";
+import { correctedNullableString, correctedString, correctionMarker, getAppliedCorrectionProjectionMap, type AppliedCorrectionProjection } from "@/lib/correction-read";
 import { getActorLabAccess, labScopedWhere } from "@/lib/lab-access";
 import { prisma } from "@/lib/prisma";
 import type { ResolvedActor } from "@/lib/session";
@@ -101,7 +102,10 @@ function snapshotString(snapshot: Prisma.JsonObject, key: string, fallback: stri
   return typeof value === "string" ? value : fallback;
 }
 
-function serializePlan(plan: Prisma.ProcedurePlanGetPayload<{ select: typeof procedurePlanSelect }>) {
+function serializePlan(
+  plan: Prisma.ProcedurePlanGetPayload<{ select: typeof procedurePlanSelect }>,
+  corrections: ReadonlyMap<string, AppliedCorrectionProjection>,
+) {
   const assignmentContext = jsonObject(plan.assignmentContextSnapshot);
   const experimentContext = jsonObject(plan.experimentContextSnapshot);
   return {
@@ -147,12 +151,14 @@ function serializePlan(plan: Prisma.ProcedurePlanGetPayload<{ select: typeof pro
     experimentContextSnapshot: plan.experimentContextSnapshot,
     createdBy: plan.createdBy.name,
     createdAt: plan.createdAt.toISOString(),
-    occurrences: plan.occurrences.map((occurrence) => ({
+    occurrences: plan.occurrences.map((occurrence) => {
+      const correction = corrections.get(occurrence.id);
+      return {
       id: occurrence.id,
       occurrenceKey: occurrence.occurrenceKey,
-      occurredAt: occurrence.occurredAt.toISOString(),
+      occurredAt: correctedString(correction, "occurredAt", occurrence.occurredAt.toISOString()),
       status: occurrence.status,
-      outcomeNote: occurrence.outcomeNote,
+      outcomeNote: correctedNullableString(correction, "outcomeNote", occurrence.outcomeNote),
       experimentCode: occurrence.experimentCodeSnapshot,
       animalFacilityId: occurrence.animalFacilityIdSnapshot,
       cageBarcode: occurrence.cageBarcodeSnapshot,
@@ -168,7 +174,9 @@ function serializePlan(plan: Prisma.ProcedurePlanGetPayload<{ select: typeof pro
       experimentContextSnapshot: occurrence.experimentContextSnapshot,
       executedBy: occurrence.executedBy.name,
       recordedAt: occurrence.recordedAt.toISOString(),
-    })),
+      correction: correctionMarker(correction),
+    };
+    }),
   };
 }
 
@@ -280,7 +288,11 @@ export async function getProcedureWorkspace(actor: ResolvedActor, input?: { sear
       sopVersionNumber: assignment.sopVersion.versionNumber,
       sopContentHash: assignment.sopVersion.contentHash,
     }));
-  const rows = plans.map(serializePlan);
+  const occurrenceCorrections = await getAppliedCorrectionProjectionMap(
+    "procedure_occurrence",
+    plans.flatMap((plan) => plan.occurrences.map((occurrence) => ({ id: occurrence.id, labIds: [plan.labId] }))),
+  );
+  const rows = plans.map((plan) => serializePlan(plan, occurrenceCorrections));
   return {
     rows,
     assignmentOptions,
@@ -301,5 +313,10 @@ export async function getProcedurePlanById(actor: ResolvedActor, planId: string)
     where: { id: planId, ...labScopedWhere(access) },
     select: procedurePlanSelect,
   });
-  return plan ? serializePlan(plan) : null;
+  if (!plan) return null;
+  const corrections = await getAppliedCorrectionProjectionMap(
+    "procedure_occurrence",
+    plan.occurrences.map((occurrence) => ({ id: occurrence.id, labIds: [plan.labId] })),
+  );
+  return serializePlan(plan, corrections);
 }

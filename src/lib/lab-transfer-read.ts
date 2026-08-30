@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { actorHasCapability } from "@/lib/capabilities";
+import { correctedString, correctionMarker, getAppliedCorrectionProjectionMap } from "@/lib/correction-read";
 import {
   canCancelLabTransfer,
   canDecideLabTransfer,
@@ -141,6 +142,10 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
       },
     },
   });
+  const transferCorrections = await getAppliedCorrectionProjectionMap(
+    "cross_lab_transfer",
+    requests.map((request) => ({ id: request.id, labIds: [request.sourceLabId, request.destinationLabId] })),
+  );
 
   const animalIds = [...new Set(requests.flatMap((request) => request.items.map((item) => item.animalId)))];
   const [assignmentRows, allocationRows, breedingRows] = animalIds.length
@@ -220,6 +225,7 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
   }
 
   const projected = requests.map((request) => {
+    const correction = transferCorrections.get(request.id);
     const packetRow = request.packets[0];
     const rawPacket = packetRow && isDestinationTransferPacket(packetRow.destinationPayload)
       ? packetRow.destinationPayload
@@ -254,9 +260,9 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
       destinationLab: request.destinationLab,
       sourceCage: request.sourceCage,
       destinationCage: canReadDestinationDetails ? request.destinationCage : null,
-      reason: request.reason,
+      reason: correctedString(correction, "reason", request.reason),
       sourcePrivateNote: mayReadSourcePrivateNote(actor, request.sourceLabId) ? request.sourcePrivateNote : null,
-      requestedEffectiveAt: request.requestedEffectiveAt,
+      requestedEffectiveAt: new Date(correctedString(correction, "requestedEffectiveAt", request.requestedEffectiveAt.toISOString())),
       requestedAt: request.requestedAt,
       requestedBy: request.requestedBy.name,
       destinationDecisionAt: request.destinationDecisionAt,
@@ -265,6 +271,7 @@ export async function getLabTransferWorkspace(actor: ResolvedActor) {
       finalizedAt: request.finalizedAt,
       finalizedBy: request.finalizedBy?.name ?? null,
       overrideReason: request.overrideReason,
+      correction: correctionMarker(correction),
       packet,
       animalCount: request.items.length,
       blockers,
