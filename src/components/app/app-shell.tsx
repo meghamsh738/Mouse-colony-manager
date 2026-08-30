@@ -57,6 +57,7 @@ const navigationIcons: Record<NavigationItemId, LucideIcon> = {
   quarantine: ShieldAlert,
   welfare: HeartPulse,
   corrections: FilePenLine,
+  reconciliation: Search,
   breeding: Activity,
   experiments: FlaskConical,
   procedures: Wrench,

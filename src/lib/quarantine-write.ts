@@ -5,10 +5,12 @@ import { addDays } from "date-fns";
 
 import { validateProjectedSexComposition } from "@/lib/cage-assignment-rules";
 import { getCageCapacityState } from "@/lib/cage-capacity";
-import { canonicalJsonHash, executeIdempotentCommand } from "@/lib/command-foundation";
+import { canonicalJsonHash, executeIdempotentCommand, reauthorizeActorForCommand } from "@/lib/command-foundation";
 import { canManageLab, getActorLabAccess } from "@/lib/lab-access";
 import { canRequestQuarantineRelease, nextQuarantineStatusForObservation, QUARANTINE_HEALTH_NOTE_ACTION_PREFIX } from "@/lib/quarantine-state-machine";
 import type { ResolvedActor } from "@/lib/session";
+import { prisma } from "@/lib/prisma";
+import { appendLifecycleEvent, currentDesignatedVeterinarianEvidence, deriveManifestHealthStatus, setM16Context } from "@/lib/reconciliation-write";
 
 function parseCalendarDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -434,28 +436,37 @@ export async function executeFinalizeQuarantineReleaseCommand(input: {
   workflowDraftId: string;
   reviewSnapshotId: string;
 }) {
+  if (!input.actor.capabilities.includes("quarantine:release") || !await reauthorizeActorForCommand(prisma as unknown as Prisma.TransactionClient, input.actor, "quarantine:release", null)) {
+    return { ok: false as const, code: "forbidden", message: "Current Designated Veterinarian authority is required." };
+  }
+  if (!await currentDesignatedVeterinarianEvidence(prisma as unknown as Prisma.TransactionClient, input.actor)) {
+    return { ok: false as const, code: "clinical_duty_required", message: "A current Designated Veterinarian duty and fresh identity assurance are required." };
+  }
+  const target = await prisma.quarantineCase.findUnique({ where: { id: input.command.caseId }, select: { labId: true } });
+  if (!target) return { ok: false as const, code: "not_found", message: "Quarantine case not found." };
   return executeIdempotentCommand({
     actor: input.actor,
-    commandType: "quarantine.case.finalize_release",
+    commandType: "m16.quarantine.release",
     idempotencyKey: input.idempotencyKey,
     requestId: input.requestId,
     request: { command: input.command, expectedVersion: input.expectedVersion, reviewSnapshotId: input.reviewSnapshotId } as unknown as Prisma.InputJsonValue,
-    requiredCapability: "quarantine:manage",
-    labId: commandLabId(input.actor),
+    requiredCapability: "quarantine:release",
+    labId: target.labId,
+    authorizationLabId: null,
     workflowDraftId: input.workflowDraftId,
     aggregateType: "quarantine_case",
     aggregateId: input.command.caseId,
     expectedVersion: input.expectedVersion,
-    handler: async (tx) => {
-      if (input.actor.canonicalRole !== "facility_admin" && input.actor.canonicalRole !== "cmu_staff") {
-        return { ok: false as const, code: "forbidden", message: "Only CMU staff or Facility Admin can finalize quarantine release." };
-      }
+    handler: async (tx, context) => {
+      await setM16Context(tx, { receiptId: context.receiptId, actorId: input.actor.id, commandType: "m16.quarantine.release" });
+      const clinicalEvidence = await currentDesignatedVeterinarianEvidence(tx, input.actor);
+      if (!clinicalEvidence) return { ok: false as const, code: "clinical_duty_required", message: "A current Designated Veterinarian duty and fresh identity assurance are required." };
       const snapshot = await tx.workflowReviewSnapshot.findUnique({
         where: { id: input.reviewSnapshotId },
         include: { draft: true },
       });
       const expectedPayload = { command: input.command, expectedVersion: input.expectedVersion };
-      const labId = commandLabId(input.actor);
+      const labId = target.labId;
       if (
         !snapshot
         || snapshot.draftId !== input.workflowDraftId
@@ -511,7 +522,7 @@ export async function executeFinalizeQuarantineReleaseCommand(input: {
           },
         },
       });
-      if (!quarantineCase || !canManageLab(await getActorLabAccess(input.actor, tx), quarantineCase.labId)) {
+      if (!quarantineCase || quarantineCase.labId !== target.labId) {
         return restoreReview("not_found", "Quarantine case not found.");
       }
       if (quarantineCase.status !== "release_requested" || !quarantineCase.releaseRequestedAt) {
@@ -523,6 +534,12 @@ export async function executeFinalizeQuarantineReleaseCommand(input: {
       const latestObservation = quarantineCase.observations[0] ?? null;
       if (!latestObservation || (latestObservation.result !== "clear" && latestObservation.result !== "exception_resolved")) {
         return restoreReview("invalid_transition", "The latest quarantine observation is no longer clearing. Record and review a new clear observation.");
+      }
+      if (quarantineCase.intakeBatchId) {
+        const shipment = await tx.shipmentManifest.findUnique({ where: { intakeBatchId: quarantineCase.intakeBatchId }, select: { id: true, healthEvidenceStatus: true } });
+        if (shipment && (shipment.healthEvidenceStatus !== "compatible" || await deriveManifestHealthStatus(tx, shipment.id) !== "compatible")) {
+          return restoreReview("health_evidence_block", "Structured shipment health evidence is no longer compatible. Veterinary release remains blocked.");
+        }
       }
       const openFollowupCount = await tx.healthNote.count({
         where: openQuarantineHealthFollowupWhere({
@@ -602,7 +619,16 @@ export async function executeFinalizeQuarantineReleaseCommand(input: {
 
       const releasedCase = await tx.quarantineCase.update({
         where: { id: quarantineCase.id },
-        data: { status: "released", releasedAt, releasedById: input.actor.id, releaseReason: reason },
+        data: {
+          status: "released", releasedAt, releasedById: input.actor.id, releaseReason: reason,
+          releaseDutyAssignmentId: clinicalEvidence.assignment.id,
+          releaseDutyVersion: clinicalEvidence.assignment.version,
+          releaseIdentityLinkId: clinicalEvidence.identityLinkId,
+          releaseAuthenticatedAt: clinicalEvidence.authenticatedAt,
+          releaseAuthzVersion: input.actor.authzVersion,
+          releaseAssuranceLevel: clinicalEvidence.assurance,
+          releaseCommandReceiptId: context.receiptId,
+        },
         select: { version: true },
       });
 
@@ -643,6 +669,20 @@ export async function executeFinalizeQuarantineReleaseCommand(input: {
           },
           timestamp,
         },
+      });
+      await appendLifecycleEvent(tx, {
+        actor: input.actor,
+        receiptId: context.receiptId,
+        domain: "quarantine",
+        aggregateType: "quarantine_case",
+        aggregateId: quarantineCase.id,
+        labId: quarantineCase.labId,
+        eventType: "veterinary_release",
+        previousStatus: quarantineCase.status,
+        resultingStatus: "released",
+        evidence: { quarantineCaseId: quarantineCase.id, movedAnimals: occupants.length, healthEvidenceRequiredForManifestIntake: Boolean(quarantineCase.intakeBatchId), policyMarker: "synthetic-fail-closed-m16" },
+        createAudit: false,
+        duty: clinicalEvidence.assignment,
       });
       const committed = await tx.workflowDraft.updateMany({
         where: { id: snapshot.draftId, actorId: input.actor.id, labId, status: "submitted", version: snapshot.draftVersion + 2 },

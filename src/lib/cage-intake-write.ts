@@ -93,6 +93,11 @@ export type ReceivePurchasedAnimalsInput = {
   arrivalDate: string;
   disposition: AnimalIntakeDisposition;
   notes?: string;
+  frozenCompliance?: {
+    protocolAuthorizationId: string;
+    complianceEvidenceSnapshotId: string;
+    protocolCountAllocationId: string;
+  };
   animals: AnimalIntakeRow[];
   cages: CageDraft[];
 };
@@ -1351,6 +1356,9 @@ export async function receivePurchasedAnimals(
         disposition: input.disposition,
         notes: input.notes?.trim() || null,
         createdById: actor.id,
+        protocolAuthorizationId: input.frozenCompliance?.protocolAuthorizationId ?? null,
+        complianceEvidenceSnapshotId: input.frozenCompliance?.complianceEvidenceSnapshotId ?? null,
+        protocolCountAllocationId: input.frozenCompliance?.protocolCountAllocationId ?? null,
       },
     });
 

@@ -1,6 +1,6 @@
 # Product Readiness Remediation
 
-Status: M11–M15 verified through controlled corrections and immutable history; M16 next
+Status: M11–M16 verified through safe operational reconciliation; M17 next
 Source review: [`2026-08-29-chatgpt-pro-product-review.md`](./reviews/2026-08-29-chatgpt-pro-product-review.md)
 
 ## Approved Boundary
@@ -51,8 +51,8 @@ The maturity labels below mean:
 | M13 | Verified | Protocol/licence and competency gates. |
 | M14 | Verified | Veterinary and welfare cases. |
 | M15 | Verified | Controlled corrections and immutable history. |
-| M16 | Next | Shipment, census, quarantine, and transfer reconciliation. |
-| M17 | Planned | Private attachments, security controls, and full synthetic recovery. |
+| M16 | Verified | Shipment, census, quarantine, and transfer reconciliation. |
+| M17 | Next | Private attachments, security controls, and full synthetic recovery. |
 | M18 | Planned | P1 operational capability. |
 | M19 | Planned | P2 capability laboratory with fail-closed production boundaries. |
 | M20 | Planned | Full synthetic qualification, regenerated guidance, acceptance review, and versioned recovery checkpoint. |

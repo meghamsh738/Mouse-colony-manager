@@ -9,6 +9,10 @@ export type Capability =
   | "cages:manage"
   | "quarantine:read"
   | "quarantine:manage"
+  | "quarantine:release"
+  | "reconciliation:read"
+  | "reconciliation:manage"
+  | "reconciliation:approve"
   | "transfers:read"
   | "transfers:request"
   | "transfers:approve"
@@ -78,7 +82,7 @@ export type CapabilityActor = {
 
 const facilityAdminCapabilities = new Set<Capability>([
   "dashboard:view", "scan:use", "animals:read", "animals:manage", "cages:read", "cages:manage",
-  "quarantine:read", "quarantine:manage", "transfers:read", "transfers:finalize",
+  "quarantine:read", "quarantine:manage", "reconciliation:read", "reconciliation:manage", "reconciliation:approve", "transfers:read", "transfers:finalize",
   "breeding:read", "breeding:manage", "experiments:read", "experiments:full", "experiments:manage", "procedures:operational",
   "procedures:plan", "procedures:execute",
   "biosamples:read", "biosamples:manage", "cryostorage:read", "cryostorage:request", "cryostorage:manage",
@@ -91,7 +95,7 @@ const facilityAdminCapabilities = new Set<Capability>([
 
 const cmuCapabilities = new Set<Capability>([
   "dashboard:view", "scan:use", "animals:read", "animals:manage", "cages:read", "cages:manage",
-  "quarantine:read", "quarantine:manage", "transfers:read", "transfers:finalize", "breeding:read",
+  "quarantine:read", "quarantine:manage", "reconciliation:read", "reconciliation:manage", "transfers:read", "transfers:finalize", "breeding:read",
   "breeding:manage", "experiments:read", "procedures:operational", "procedures:execute", "cryostorage:read", "cryostorage:manage", "sops:read",
   "strains:discover",
   "sops:manage", "billing:read", "billing:generate", "billing:finalize", "notifications:read", "approvals:read", "workbook:read",
@@ -100,13 +104,13 @@ const cmuCapabilities = new Set<Capability>([
 ]);
 
 const labReadCapabilities: Capability[] = [
-  "dashboard:view", "scan:use", "animals:read", "cages:read", "quarantine:read", "transfers:read",
+  "dashboard:view", "scan:use", "animals:read", "cages:read", "quarantine:read", "reconciliation:read", "transfers:read",
   "breeding:read", "experiments:read", "experiments:full", "procedures:operational", "biosamples:read", "cryostorage:read", "forecast:read",
   "strains:discover", "strains:request", "sops:read", "billing:read", "notifications:read", "workbook:read",
 ];
 
 const labStaffCapabilities: Capability[] = [
-  ...labReadCapabilities, "animals:manage", "cages:manage", "quarantine:manage", "breeding:manage",
+  ...labReadCapabilities, "animals:manage", "cages:manage", "quarantine:manage", "reconciliation:manage", "breeding:manage",
   "biosamples:manage", "cryostorage:request", "experiments:manage", "procedures:plan", "corrections:request", "corrections:read",
 ];
 
@@ -161,7 +165,7 @@ function capabilitiesForLabRole(role: LabMembershipRole | undefined) {
 }
 
 export const DUTY_CAPABILITIES: Readonly<Record<FacilityDuty, readonly Capability[]>> = {
-  designated_veterinarian: ["dashboard:view", "duties:read", "welfare:read", "welfare:manage", "welfare:close"],
+  designated_veterinarian: ["dashboard:view", "duties:read", "welfare:read", "welfare:manage", "welfare:close", "quarantine:read", "quarantine:release", "reconciliation:read"],
   welfare_officer: ["dashboard:view", "duties:read", "welfare:read", "welfare:manage"],
   protocol_reviewer: ["dashboard:view", "duties:read", "protocols:read", "protocols:approve"],
   training_administrator: ["dashboard:view", "duties:read", "competencies:read", "competencies:manage"],

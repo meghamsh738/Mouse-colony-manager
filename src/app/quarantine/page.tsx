@@ -47,7 +47,7 @@ export default async function QuarantinePage({ searchParams }: { searchParams: P
       }
     : null;
   const canManage = user.capabilities.includes("quarantine:manage");
-  const canFinalize = user.canonicalRole === "facility_admin" || user.canonicalRole === "cmu_staff";
+  const canFinalize = user.capabilities.includes("quarantine:release") && Boolean(user.activeDuties?.includes("designated_veterinarian"));
   const occupants = view.cages.flatMap((cage) =>
     cage.occupants.map((animal) => ({
       ...animal,
@@ -58,7 +58,7 @@ export default async function QuarantinePage({ searchParams }: { searchParams: P
   );
 
   if (query.action === "release") {
-    if (!canManage || !canFinalize || !actionCase) notFound();
+    if (!canFinalize || !actionCase) notFound();
     if (actionCase.status !== "release_requested" && actionCase.status !== "released") notFound();
     const destinations = view.releaseDestinations.filter((cage) => cage.labId === actionCase.labId);
     return (
@@ -72,7 +72,7 @@ export default async function QuarantinePage({ searchParams }: { searchParams: P
             { label: "Minimum release", value: actionCase.minimumReleaseAt.slice(0, 10) },
             { label: "Open follow-ups", value: actionCase.openFollowupCount },
           ]}
-          description="Review the release date, reason, every animal destination, and receiving-cage capacity before moving the cohort."
+          description="A current Designated Veterinarian reviews structured shipment health evidence, quarantine results, every animal destination, and receiving-cage capacity before the atomic release."
           title={`Release ${actionCase.cageLabel} from quarantine`}
         >
           {actionCase.status === "release_requested" ? <QuarantineReleaseWorkflow destinations={destinations} nonce={randomUUID()} selectedCase={actionCase} today={view.rules.today.slice(0, 10)} /> : <div className="worksheet-empty"><strong>Quarantine release complete</strong><p>This case is {actionCase.status.replaceAll("_", " ")} and no longer awaits finalization.</p><Link className="table-action" href="/quarantine">Return to quarantine queue</Link></div>}

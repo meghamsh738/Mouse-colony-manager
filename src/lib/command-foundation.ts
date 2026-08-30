@@ -426,12 +426,16 @@ export async function prepareWorkflowReview(input: {
   workflowType: string;
   requiredCapability: Capability;
   labId?: string | null;
+  authorizationLabId?: string | null;
   payload: Prisma.InputJsonValue;
   allowCommittedReplay?: boolean;
 }) {
   return prisma.$transaction(async (tx) => {
     const labId = input.labId ?? (input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null);
-    if (!await reauthorizeActorForCommand(tx, input.actor, input.requiredCapability, labId)) {
+    const authorizationLabId = Object.prototype.hasOwnProperty.call(input, "authorizationLabId")
+      ? input.authorizationLabId ?? null
+      : labId;
+    if (!await reauthorizeActorForCommand(tx, input.actor, input.requiredCapability, authorizationLabId)) {
       return { ok: false as const, code: "forbidden", message: "Your current access no longer permits this workflow." };
     }
 
@@ -553,6 +557,12 @@ const VERSIONED_AGGREGATE_TABLES = {
   notification_preference: true,
   welfare_case: true,
   correction_request: true,
+  shipment_manifest: true,
+  shipment_receipt_session: true,
+  census_session: true,
+  census_discrepancy: true,
+  capacity_exception: true,
+  transfer_custody_reconciliation: true,
   workflow_draft: true,
 } as const;
 
@@ -679,6 +689,36 @@ export async function getAggregateVersion(
       }))?.version ?? null;
     case "correction_request":
       return (await tx.correctionRequest.findFirst({
+        where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
+    case "shipment_manifest":
+      return (await tx.shipmentManifest.findFirst({
+        where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
+    case "shipment_receipt_session":
+      return (await tx.shipmentReceiptSession.findFirst({
+        where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
+    case "census_session":
+      return (await tx.censusSession.findFirst({
+        where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
+    case "census_discrepancy":
+      return (await tx.censusDiscrepancy.findFirst({
+        where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
+    case "capacity_exception":
+      return (await tx.cageCapacityException.findFirst({
+        where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
+    case "transfer_custody_reconciliation":
+      return (await tx.transferCustodyReconciliation.findFirst({
         where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
         select: { version: true },
       }))?.version ?? null;

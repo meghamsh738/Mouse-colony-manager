@@ -9,6 +9,7 @@ export type NavigationItemId =
   | "quarantine"
   | "welfare"
   | "corrections"
+  | "reconciliation"
   | "breeding"
   | "experiments"
   | "procedures"
@@ -45,6 +46,7 @@ export const navigationRegistry: NavigationItem[] = [
   { id: "quarantine", href: "/quarantine", label: "Quarantine", group: "Colony", capability: "quarantine:read" },
   { id: "welfare", href: "/welfare", label: "Welfare cases", group: "Facility", capability: "welfare:read" },
   { id: "corrections", href: "/corrections", label: "Controlled corrections", group: "Facility", capability: "corrections:read" },
+  { id: "reconciliation", href: "/reconciliation", label: "Operational reconciliation", group: "Facility", capability: "reconciliation:read" },
   { id: "breeding", href: "/breeding", label: "Breeding", group: "Research", capability: "breeding:read" },
   { id: "experiments", href: "/experiments", label: "Experiments", group: "Research", capability: "experiments:read" },
   { id: "procedures", href: "/procedures", label: "Procedures", group: "Research", capability: "procedures:operational" },

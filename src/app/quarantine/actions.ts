@@ -13,6 +13,7 @@ import {
   executeFinalizeQuarantineReleaseCommand,
 } from "@/lib/quarantine-write";
 import { requireUser } from "@/lib/session";
+import { prisma } from "@/lib/prisma";
 
 const identitySchema = {
   idempotencyKey: z.string().trim().min(16),
@@ -108,7 +109,7 @@ export async function requestQuarantineReleaseAction(_: FormActionState, formDat
 }
 
 export async function finalizeQuarantineReleaseAction(_: FormActionState, formData: FormData): Promise<FormActionState> {
-  const actor = await requireUser({ capability: "quarantine:manage" });
+  const actor = await requireUser({ capability: "quarantine:release" });
   const parsed = finalizeReleaseSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { status: "error", message: "Review every animal destination, release date, and reason before finalizing." };
   let assignments: z.infer<typeof releaseAssignmentSchema>;
@@ -120,12 +121,15 @@ export async function finalizeQuarantineReleaseAction(_: FormActionState, formDa
   const { expectedVersion, idempotencyKey, requestId, workflowDraftId, assignmentsJson: _assignmentsJson, ...fields } = parsed.data;
   void _assignmentsJson;
   const command = { ...fields, assignments };
+  const target = await prisma.quarantineCase.findUnique({ where: { id: command.caseId }, select: { labId: true } });
+  if (!target) return { status: "error", message: "Quarantine case not found." };
   const review = await prepareWorkflowReview({
     actor,
     draftId: workflowDraftId,
     workflowType: "quarantine.release",
-    requiredCapability: "quarantine:manage",
-    labId: actor.canonicalRole === "lab_user" ? actor.activeLabId : null,
+    requiredCapability: "quarantine:release",
+    labId: target.labId,
+    authorizationLabId: null,
     payload: { command, expectedVersion } as unknown as Prisma.InputJsonValue,
     allowCommittedReplay: true,
   });

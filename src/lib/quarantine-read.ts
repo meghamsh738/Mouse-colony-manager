@@ -42,13 +42,21 @@ async function getQuarantineRuleContext(): Promise<QuarantineRuleContext> {
   };
 }
 
-export async function getQuarantineSentinelView(actor: LabActor) {
+type QuarantineActor = LabActor & { activeDuties?: readonly string[] };
+
+function isUnitVeterinarian(actor: QuarantineActor) {
+  return actor.activeDuties?.includes("designated_veterinarian") ?? false;
+}
+
+export async function getQuarantineSentinelView(actor: QuarantineActor) {
   const access = await getActorLabAccess(actor);
+  const unitScoped = isUnitVeterinarian(actor);
+  const scope = unitScoped ? {} : labScopedWhere(access);
   const rules = await getQuarantineRuleContext();
   const cages = await prisma.cage.findMany({
     where: {
       status: "quarantine",
-      ...labScopedWhere(access),
+      ...scope,
     },
     orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
     include: {
@@ -58,7 +66,7 @@ export async function getQuarantineSentinelView(actor: LabActor) {
       animals: {
         where: {
           outcomeStatus: "alive",
-          ...labScopedWhere(access, "owningLabId"),
+          ...(unitScoped ? {} : labScopedWhere(access, "owningLabId")),
         },
         orderBy: { animalId: "asc" },
         include: {
@@ -66,7 +74,7 @@ export async function getQuarantineSentinelView(actor: LabActor) {
         },
       },
       healthNotes: {
-        where: labScopedWhere(access),
+        where: scope,
         orderBy: { createdAt: "desc" },
         select: {
           id: true,
@@ -109,7 +117,7 @@ export async function getQuarantineSentinelView(actor: LabActor) {
     },
   });
   const releaseCages = await prisma.cage.findMany({
-    where: { active: true, status: "active", ...labScopedWhere(access) },
+    where: { active: true, status: "active", ...scope },
     orderBy: [{ room: { roomNumber: "asc" } }, { rack: { rackNumber: "asc" } }, { cageNumber: "asc" }],
     select: {
       id: true,
@@ -232,10 +240,12 @@ export async function getQuarantineSentinelView(actor: LabActor) {
   };
 }
 
-export async function getQuarantineCaseActionView(actor: LabActor, caseId: string) {
+export async function getQuarantineCaseActionView(actor: QuarantineActor, caseId: string) {
   const access = await getActorLabAccess(actor);
+  const unitScoped = isUnitVeterinarian(actor);
+  const scope = unitScoped ? {} : labScopedWhere(access);
   const quarantineCase = await prisma.quarantineCase.findFirst({
-    where: { id: caseId, ...labScopedWhere(access) },
+    where: { id: caseId, ...scope },
     include: {
       cage: {
         select: {
@@ -244,12 +254,12 @@ export async function getQuarantineCaseActionView(actor: LabActor, caseId: strin
           room: { select: { roomNumber: true } },
           rack: { select: { rackNumber: true } },
           animals: {
-            where: { outcomeStatus: "alive", ...labScopedWhere(access, "owningLabId") },
+            where: { outcomeStatus: "alive", ...(unitScoped ? {} : labScopedWhere(access, "owningLabId")) },
             orderBy: { animalId: "asc" },
             select: { id: true, animalId: true, sex: true, strain: { select: { name: true } } },
           },
           healthNotes: {
-            where: { resolved: false, ...labScopedWhere(access) },
+            where: { resolved: false, ...scope },
             select: { createdAt: true, severity: true, followupRequired: true, actionTaken: true },
           },
         },

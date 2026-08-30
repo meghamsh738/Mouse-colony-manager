@@ -17,12 +17,12 @@ This is the source of truth for the role-scoped redesign in the `codex/empty-col
 
 | Item | State | Evidence / note |
 | --- | --- | --- |
-| Active Codex goal | In progress | M11–M15 are Verified through controlled corrections and immutable history; M16 safe intake, census, quarantine, and transfer reconciliation is next, while real-data M9 and production rollout remain explicitly Deferred |
+| Active Codex goal | In progress | M11–M16 are Verified through safe operational reconciliation; M17 private attachments, security controls, and full synthetic recovery is next, while real-data M9 and production rollout remain explicitly Deferred |
 | Target worktree | Verified | `.runtime-data/worktrees/empty-colony`, branch `codex/empty-colony` |
 | Existing dirty work preserved | Verified | No reset, checkout, or unrelated reversion performed |
 | Architecture reviews 1-4 | Verified | Roles/privacy, workflows, data/migration, role-specific UI |
 | Canonical role foundation | Verified | `it_head`, `facility_admin`, `cmu_staff`, `lab_user` plus migration compatibility values; role/access suites pass |
-| Capability navigation | Verified | Central capability/navigation registries and all 90 protected entry points pass final manifest and role QA |
+| Capability navigation | Verified | Central capability/navigation registries and all 92 protected entry points pass final manifest and role QA |
 | Empty profiles | Verified | IT, Facility Admin, CMU, Lab 1, and Lab 2 onboarding profiles; production switch remains blocked |
 | Foundation checks | Verified | Prisma validate, TypeScript, lint, 17 focused tests, build, diff check |
 | Independent foundation review | Verified | Milestone 0 independent re-review returned with no blockers |
@@ -321,9 +321,32 @@ Fresh PostgreSQL 16 target `mcm_test_m15_mask_20260830_r1_child`, schema `mcm_te
 
 Independent high-risk review returned `SHIP` after three fix-first rounds closed operational-projection gaps, reverse evidence pairing, durable actor/duty/identity parity, test isolation, dashboard/intake timing, biosample database-side search/order/pagination, post-transfer history, and stale uncorrected-field overlays. The boundary is marked `synthetic-controlled-metadata-supersession-v1`; it is not an electronic-record or institutional correction-policy claim.
 
+## Milestone 16: Safe Operational Reconciliation
+
+**Milestone status: Verified**
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| M16-01 | Add expected shipment manifests, append-only health evidence, resumable receipt observations, and atomic intake/quarantine reconciliation | Verified |
+| M16-02 | Add room/cage census sessions, owned discrepancy queues, independent sign-off, and expiring reasoned capacity exceptions without rewriting colony truth | Verified |
+| M16-03 | Require an independent current Designated Veterinarian decision over the exact append-only shipment-health evidence before intake/release | Verified |
+| M16-04 | Add dispatch-frozen transfer custody items, cancellation, partial/full destination receipt, and reconciliation evidence | Verified |
+| M16-05 | Bind every state/evidence mutation to exact command, aggregate, transition, actor, authority, event, audit, receipt, parent, lab, and complete item set | Verified |
+| M16-06 | Pass atomic migration, clean seed, full regression, responsive browser, and independent high-risk review gates | Verified |
+
+Migration `0041_safe_operational_reconciliation` adds shipment manifests/items, resumable receipt sessions/observations, append-only health evidence and veterinarian decisions, reconciliation summaries, census sessions/observations/discrepancies, capacity exceptions, transfer custody events/frozen expected items/receipt evidence/reconciliation, and one exact operational lifecycle stream. Its SHA-256 checksum is `6ce77a83856b8df10de5267e6ff731b5cc3f0988f6d84e18810e92b6b7cb7d81`.
+
+An external-vendor shipment must start from an expected manifest and a pre-existing empty quarantine cage. Final confirmation atomically consumes the exact M13 authorization allocation, invokes the existing guarded intake, creates animals/intake/quarantine evidence, accepts the exact manifest items, and writes summary/event/audit/receipt evidence—or rolls everything back. Raw health tests never self-certify compatibility: adverse or inconclusive evidence remains fail-closed, only an independent current Designated Veterinarian can decide over the exact evidence set, and later evidence invalidates an older decision. Internal-source movement stays on the transfer-custody workflow.
+
+Census observations never silently change cage or animal records. Outcome and room semantics are checked at application and database boundaries; discrepancies require owned resolution plus a signer independent of the starter, owner, observation recorders, and resolvers. Capacity exceptions are explicit, reasoned, expiring evidence. Transfer dispatch freezes the complete non-empty active mouse-item set, and partial/full destination receipt must match every exact request item, animal, identifier, source/destination, and custody event. All multi-parent/lab relationships, immutable snapshots, state transitions, clinical evidence, and bidirectional event/audit/receipt parity are commit-time guarded.
+
+Fresh PostgreSQL 16 database/schema `mcm_test_m16_fix4_20260830_r1` replayed all 41 migrations. The final gate passed 127 database-free files / 615 tests, 20 guarded database files / 218 tests, 12 focused safety/atomicity tests, Prisma validation/generation, TypeScript, all 92 authorization-manifest entries, ESLint with the same five pre-existing administration warnings, a 56-entry production build, migration replay/schema parity/empty bootstrap, and `git diff --check`. Focused Playwright passed 4/4 across desktop Chromium and Pixel 7, covering manager receipt, independent census sign-off, veterinarian/viewer privacy, no console errors, and no horizontal overflow.
+
+Independent high-risk review returned `SHIP` after migration atomicity, mutable duty evidence, sealed release fields, exact mutation/evidence parity, independent health decisions, occupied-cage rollback, census independence, cross-parent/lab lineage, clinical event identity parity, census location semantics, exact custody item binding, and complete dispatch-set findings were repaired with live regressions. The milestone remains a synthetic operational coordinator; institutional intake, health, quarantine, custody, device, and veterinary policies require external validation before real use.
+
 ## Required Gate For Every Milestone
 
-The checked list below records the latest full application gate through M15. Documentation-only M11 used its focused evidence; M12 through M15 record their complete code, database, browser, and independent-review evidence above. Subsequent milestones must record their own applicable checks before they can be marked Verified.
+The checked list below records the latest full application gate through M16. Documentation-only M11 used its focused evidence; M12 through M16 record their complete code, database, browser, and independent-review evidence above. Subsequent milestones must record their own applicable checks before they can be marked Verified.
 
 - [x] Focused unit and integration tests pass.
 - [x] `npm run prisma:validate` passes when schema is affected.

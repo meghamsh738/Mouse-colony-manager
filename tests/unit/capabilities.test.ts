@@ -53,6 +53,7 @@ describe("role capability foundation", () => {
       "dashboard:view", "duties:read", "welfare:read", "welfare:manage", "welfare:close",
       "protocols:read", "protocols:approve", "competencies:read", "competencies:manage",
       "billing:govern", "corrections:read", "corrections:approve",
+      "quarantine:read", "quarantine:release", "reconciliation:read",
     ]);
     for (const capabilities of Object.values(DUTY_CAPABILITIES)) {
       expect(capabilities.every((capability) => allowed.has(capability))).toBe(true);
