@@ -26,6 +26,7 @@ import {
   Wrench,
   ClipboardCheck,
   Dna,
+  HeartPulse,
   type LucideIcon,
 } from "lucide-react";
 
@@ -53,6 +54,7 @@ const navigationIcons: Record<NavigationItemId, LucideIcon> = {
   animals: Table2,
   cages: Boxes,
   quarantine: ShieldAlert,
+  welfare: HeartPulse,
   breeding: Activity,
   experiments: FlaskConical,
   procedures: Wrench,

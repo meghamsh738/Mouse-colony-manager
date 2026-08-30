@@ -119,6 +119,32 @@ export function canonicalJson(value: unknown) {
   return JSON.stringify(sortJson(value));
 }
 
+export function idempotentCommandRequestHash(input: {
+  commandType: string;
+  labId: string | null;
+  authorizationLabId?: string | null;
+  workflowDraftId: string | null;
+  aggregateType: string | null;
+  aggregateId: string | null;
+  expectedVersion: number | null;
+  requiredCapability: Capability;
+  request: Prisma.InputJsonValue;
+}) {
+  const legacyPayload = {
+    commandType: input.commandType,
+    labId: input.labId,
+    workflowDraftId: input.workflowDraftId,
+    aggregateType: input.aggregateType,
+    aggregateId: input.aggregateId,
+    expectedVersion: input.expectedVersion,
+    requiredCapability: input.requiredCapability,
+    request: input.request,
+  };
+  return canonicalJsonHash(Object.prototype.hasOwnProperty.call(input, "authorizationLabId")
+    ? { ...legacyPayload, authorizationLabId: input.authorizationLabId ?? null }
+    : legacyPayload);
+}
+
 export async function allocateFacilityIdentifiers(
   tx: Prisma.TransactionClient,
   entityType: FacilityIdentifierType,
@@ -525,6 +551,7 @@ const VERSIONED_AGGREGATE_TABLES = {
   strain_directory_request: true,
   notification_recipient: true,
   notification_preference: true,
+  welfare_case: true,
   workflow_draft: true,
 } as const;
 
@@ -644,6 +671,11 @@ export async function getAggregateVersion(
         where: { id: aggregateId, userId: scope.actorId },
         select: { version: true },
       }))?.version ?? null;
+    case "welfare_case":
+      return (await tx.welfareCase.findFirst({
+        where: { id: aggregateId, ...(lab ? { labId: lab } : {}) },
+        select: { version: true },
+      }))?.version ?? null;
     case "workflow_draft":
       return (await tx.workflowDraft.findFirst({
         where: { id: aggregateId, actorId: scope.actorId, ...(lab ? { labId: lab } : {}) },
@@ -689,6 +721,7 @@ export async function executeIdempotentCommand<T extends Prisma.InputJsonValue>(
   request: Prisma.InputJsonValue;
   requiredCapability: Capability;
   labId?: string | null;
+  authorizationLabId?: string | null;
   workflowDraftId?: string | null;
   aggregateType?: string;
   aggregateId?: string;
@@ -713,9 +746,15 @@ export async function executeIdempotentCommand<T extends Prisma.InputJsonValue>(
     };
   }
   const commandLabId = input.labId ?? (input.actor.canonicalRole === "lab_user" ? input.actor.activeLabId : null);
-  const requestHash = canonicalJsonHash({
+  const authorizationLabId = Object.prototype.hasOwnProperty.call(input, "authorizationLabId")
+    ? input.authorizationLabId ?? null
+    : commandLabId;
+  const requestHash = idempotentCommandRequestHash({
     commandType: input.commandType,
     labId: commandLabId,
+    ...(Object.prototype.hasOwnProperty.call(input, "authorizationLabId")
+      ? { authorizationLabId: input.authorizationLabId ?? null }
+      : {}),
     workflowDraftId: input.workflowDraftId ?? null,
     aggregateType: input.aggregateType ?? null,
     aggregateId,
@@ -750,7 +789,7 @@ export async function executeIdempotentCommand<T extends Prisma.InputJsonValue>(
           },
         },
       });
-      const authorized = await reauthorizeActorForCommand(tx, input.actor, input.requiredCapability, commandLabId);
+      const authorized = await reauthorizeActorForCommand(tx, input.actor, input.requiredCapability, authorizationLabId);
       if (!authorized) {
         const message = "Your current authorization no longer permits this command.";
         if (inserted.length) {

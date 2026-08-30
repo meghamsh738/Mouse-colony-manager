@@ -1,6 +1,6 @@
 # Role-Scoped Colony Platform Implementation Tracker
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 This is the source of truth for the role-scoped redesign in the `codex/empty-colony` worktree. A requirement is complete only when its status is **Verified** and evidence is recorded below.
 
@@ -17,12 +17,12 @@ This is the source of truth for the role-scoped redesign in the `codex/empty-col
 
 | Item | State | Evidence / note |
 | --- | --- | --- |
-| Active Codex goal | In progress | M11–M13 are Verified through protocol authorization and competency gates; M14 veterinary and welfare case management is next, while real-data M9 and production rollout remain explicitly Deferred |
+| Active Codex goal | In progress | M11–M14 are Verified through veterinary and welfare case management; M15 controlled corrections and immutable history is next, while real-data M9 and production rollout remain explicitly Deferred |
 | Target worktree | Verified | `.runtime-data/worktrees/empty-colony`, branch `codex/empty-colony` |
 | Existing dirty work preserved | Verified | No reset, checkout, or unrelated reversion performed |
 | Architecture reviews 1-4 | Verified | Roles/privacy, workflows, data/migration, role-specific UI |
 | Canonical role foundation | Verified | `it_head`, `facility_admin`, `cmu_staff`, `lab_user` plus migration compatibility values; role/access suites pass |
-| Capability navigation | Verified | Central capability/navigation registries and all 86 protected entry points pass final manifest and role QA |
+| Capability navigation | Verified | Central capability/navigation registries and all 88 protected entry points pass final manifest and role QA |
 | Empty profiles | Verified | IT, Facility Admin, CMU, Lab 1, and Lab 2 onboarding profiles; production switch remains blocked |
 | Foundation checks | Verified | Prisma validate, TypeScript, lint, 17 focused tests, build, diff check |
 | Independent foundation review | Verified | Milestone 0 independent re-review returned with no blockers |
@@ -279,9 +279,30 @@ Fresh PostgreSQL 16 target `mcm_test_m13_final_20260829_r8` replayed all 38 migr
 
 Background Playwright passed 16/16 full-role scenarios and 6/6 focused M13 compliance scenarios across desktop and mobile. Evidence covers independent reviewer versus training-administrator controls, lab-owner draft creation, only active in-scope operational selections, lab-viewer mutation denial, and no horizontal overflow. Independent high-risk re-review returned `SHIP` after stale receipt reuse, legacy weaning bypass, transfer/cancellation allocation settlement, experiment completion normalization, and stranded procedure-plan findings were corrected with live regressions. Institutional protocol/licence rules, training curricula, competency durations, and authority mappings remain external validation requirements; this repository evidence does not claim institutional approval.
 
+## Milestone 14: Veterinary And Welfare Case Management
+
+**Milestone status: Verified**
+
+| ID | Requirement | Status |
+| --- | --- | --- |
+| M14-01 | Add structured lab-owned welfare cases, observations, treatment orders, administrations, escalations, and lifecycle history | Verified |
+| M14-02 | Require current designated-veterinarian or welfare-officer duty plus fresh synthetic MFA evidence | Verified |
+| M14-03 | Keep clinical detail private while exposing only the welfare officer's operational projection | Verified |
+| M14-04 | Bind every clinical mutation, lifecycle event, and audit row to one exact current command receipt | Verified |
+| M14-05 | Enforce veterinarian-only treatment authority and terminal case closure | Verified |
+| M14-06 | Pass clean migration/seed, full regression, responsive browser, and independent high-risk review gates | Verified |
+
+Migration `0039_veterinary_welfare_cases` adds the six structured welfare entities, guarded status transitions, current duty and identity evidence, immutable clinical history, command-receipt provenance, and database-level event/audit parity. Its SHA-256 checksum is `98fefb1b0d25329b5e1eb938c9fc66a3d0e4ed1322fd2ac3daeb63bf414f0a88`.
+
+Welfare Officer and Designated Veterinarian duties remain independent of base role and lab membership authority. Welfare Officers can open, triage, observe, escalate, and acknowledge through privacy-minimized views. Only the current Designated Veterinarian can approve/administer/stop treatment, resolve escalation, and close a case. Every case, order, observation, administration, escalation, lifecycle event, and audit mutation is tied to the same current transaction receipt, actor, authorization snapshot, lab, subject, command, and allowed state transition. Missing or mismatched evidence rolls back atomically; immutable rows cannot be updated, deleted, or truncated. Existing `HealthNote` and quarantine records remain separate and are not reinterpreted.
+
+Fresh retained target `mcm_test_m14_full_20260830_r19` replayed all 39 migrations and seeded guarded role QA with the deployment profile intentionally unset. Fresh database and schema `mcm_test_m14_full_20260830_r23` passed the complete guarded database project: 14 files / 180 tests. The code gate passed 121 database-free files / 592 tests, Prisma validation/generation, TypeScript, all 88 authorization-manifest entries, ESLint with the same five pre-existing administration warnings, a 54-entry production build, and `git diff --check`. Fresh browser target `mcm_test_m14_e2e_20260830_r24` passed the focused welfare workflow in Desktop Chrome and Pixel 7 profiles, including clinical redaction, authoritative subject selection, access denial, and no horizontal overflow.
+
+Independent high-risk review returned `SHIP` after command-hash compatibility, migration atomicity, duty-history, cancellation, immutable evidence, exact command/event/state/audit pairing, direct-write sealing, and self-contained database-test findings were repaired with live regressions. This milestone is a synthetic operational coordinator marked `synthetic-fail-closed-v1`; it is not an institutionally validated clinical record. Clinical terminology, severity policy, formulary, service levels, retention, emergency paging, and designated-veterinarian validation remain external requirements.
+
 ## Required Gate For Every Milestone
 
-The checked list below records the latest full application gate through M13. Documentation-only M11 used its focused evidence; M12 and M13 record their complete code, database, browser, and independent-review evidence above. Subsequent milestones must record their own applicable checks before they can be marked Verified.
+The checked list below records the latest full application gate through M14. Documentation-only M11 used its focused evidence; M12 through M14 record their complete code, database, browser, and independent-review evidence above. Subsequent milestones must record their own applicable checks before they can be marked Verified.
 
 - [x] Focused unit and integration tests pass.
 - [x] `npm run prisma:validate` passes when schema is affected.

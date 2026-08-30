@@ -8,6 +8,7 @@ import {
   authenticateOutboxWorker,
   canonicalJsonHash,
   executeIdempotentCommand,
+  idempotentCommandRequestHash,
   reauthorizeActorForCommand,
   staleConflict,
 } from "@/lib/command-foundation";
@@ -18,6 +19,41 @@ describe("command foundation", () => {
       canonicalJsonHash({ a: { c: 3, d: 4 }, b: 2 }),
     );
     expect(canonicalJsonHash({ values: [2, 1] })).not.toBe(canonicalJsonHash({ values: [1, 2] }));
+  });
+
+  it("preserves the durable pre-M14 hash for callers without an authorization scope override", () => {
+    const legacyFixture = {
+      commandType: "animal.update",
+      labId: "lab-microglia",
+      workflowDraftId: null,
+      aggregateType: "animal",
+      aggregateId: "animal-001",
+      expectedVersion: 4,
+      requiredCapability: "animals:manage" as const,
+      request: { animalId: "animal-001", status: "active" },
+    };
+    expect(idempotentCommandRequestHash(legacyFixture)).toBe(
+      "19b8e7061f733548ae079b559ae0db833ead9416bae0ea8326b3a93db0dbc505",
+    );
+  });
+
+  it("hashes an explicit null authorization scope without changing the legacy default", () => {
+    const fixture = {
+      commandType: "animal.update",
+      labId: "lab-microglia",
+      workflowDraftId: null,
+      aggregateType: "animal",
+      aggregateId: "animal-001",
+      expectedVersion: 4,
+      requiredCapability: "animals:manage" as const,
+      request: { animalId: "animal-001", status: "active" },
+    };
+    expect(idempotentCommandRequestHash({ ...fixture, authorizationLabId: null })).toBe(
+      "b1c4e6286fb56aa92cf2a51d8319d06aff1d3ac1b8b1a3d59916fac1b79b0ecc",
+    );
+    expect(idempotentCommandRequestHash({ ...fixture, authorizationLabId: null })).not.toBe(
+      idempotentCommandRequestHash(fixture),
+    );
   });
 
   it("returns a structured stale-conflict response", () => {

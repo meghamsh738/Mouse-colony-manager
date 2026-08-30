@@ -6,6 +6,7 @@ import type { UserRole } from "../src/lib/types";
 import { seedDatabase } from "./seed-database";
 import { seedDutyQaFixture } from "./seed-duty-qa";
 import { seedProtocolQaFixture } from "./seed-protocol-qa";
+import { seedWelfareQaFixture } from "./seed-welfare-qa";
 
 const roleQaUsers: Array<{ id: string; name: string; email: string; role: UserRole }> = [
   { id: "user-it-head-qa", name: "QA IT Head", email: SEEDED_ROLE_QA_EMAILS.itHead, role: "it_head" },
@@ -28,13 +29,13 @@ const roleQaMemberships = [
   { id: "lab-member-qa-viewer-micro", labId: "lab-microglia", userId: "user-lab-viewer-qa", role: "viewer" as const },
 ];
 
-export async function seedRoleQaDatabase() {
+export async function seedRoleQaDatabase(options: { clearAttachments?: boolean } = {}) {
   assertRoleQaSeedAllowed();
   const qaPassword = process.env.ROLE_QA_PASSWORD;
   if (!qaPassword || qaPassword.length < 12) {
     throw new Error("ROLE_QA_PASSWORD must be supplied by the operator and contain at least 12 characters.");
   }
-  await seedDatabase();
+  await seedDatabase(options);
   await prisma.user.createMany({
     data: roleQaUsers.map((user) => ({
       ...user,
@@ -64,4 +65,12 @@ export async function seedRoleQaDatabase() {
     ],
   }));
   await prisma.$transaction((tx) => seedProtocolQaFixture(tx));
+  const previousProfile = process.env.MCM_DEPLOYMENT_PROFILE;
+  process.env.MCM_DEPLOYMENT_PROFILE = "synthetic";
+  try {
+    await seedWelfareQaFixture();
+  } finally {
+    if (previousProfile === undefined) delete process.env.MCM_DEPLOYMENT_PROFILE;
+    else process.env.MCM_DEPLOYMENT_PROFILE = previousProfile;
+  }
 }

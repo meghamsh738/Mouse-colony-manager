@@ -475,6 +475,58 @@ enum CompetencyEventType {
   revoked
 }
 
+enum WelfareCaseSubjectType {
+  animal
+  cage
+}
+
+enum WelfareCaseStatus {
+  open
+  triaged
+  under_observation
+  treatment_ordered
+  escalated
+  closed
+  cancelled
+}
+
+enum WelfareTreatmentOrderStatus {
+  proposed
+  approved
+  active
+  stopped
+  completed
+  cancelled
+}
+
+enum WelfareAdministrationOutcome {
+  administered
+  not_administered
+  error
+}
+
+enum WelfareEscalationStatus {
+  open
+  acknowledged
+  resolved
+}
+
+enum WelfareCaseEventType {
+  opened
+  triaged
+  observation_recorded
+  treatment_ordered
+  treatment_approved
+  treatment_stopped
+  treatment_completed
+  administration_recorded
+  escalated
+  escalation_acknowledged
+  escalation_resolved
+  closed
+  cancelled
+}
+
 model User {
   id                             String                                @id
   name                           String
@@ -565,27 +617,40 @@ model User {
   strainDirectoryRequests        StrainDirectoryRequest[]              @relation("StrainDirectoryRequester")
   strainDirectoryDecisions       StrainDirectoryRequest[]              @relation("StrainDirectoryDecisionActor")
   strainDirectoryEvents          StrainDirectoryRequestEvent[]         @relation("StrainDirectoryRequestEventActor")
+  welfareCasesOpened             WelfareCase[]                         @relation("WelfareCaseOpenedBy")
+  welfareCasesTriaged            WelfareCase[]                         @relation("WelfareCaseTriagedBy")
+  welfareCasesClosed             WelfareCase[]                         @relation("WelfareCaseClosedBy")
+  welfareCasesCancelled          WelfareCase[]                         @relation("WelfareCaseCancelledBy")
+  welfareObservations            WelfareObservation[]                  @relation("WelfareObservationActor")
+  welfareOrdersProposed          WelfareTreatmentOrder[]               @relation("WelfareOrderProposer")
+  welfareOrdersApproved          WelfareTreatmentOrder[]               @relation("WelfareOrderApprover")
+  welfareOrdersStopped           WelfareTreatmentOrder[]               @relation("WelfareOrderStopper")
+  welfareAdministrations         WelfareAdministrationAttempt[]        @relation("WelfareAdministrationActor")
+  welfareEscalationsOpened       WelfareEscalation[]                   @relation("WelfareEscalationOpener")
+  welfareEscalationsAcknowledged WelfareEscalation[]                   @relation("WelfareEscalationAcknowledger")
+  welfareEscalationsResolved     WelfareEscalation[]                   @relation("WelfareEscalationResolver")
+  welfareCaseEvents              WelfareCaseLifecycleEvent[]           @relation("WelfareCaseEventActor")
 }
 
 model Lab {
-  id                         String                        @id
+  id                         String                         @id
   name                       String
-  code                       String                        @unique
+  code                       String                         @unique
   billingContact             String?
   notes                      String?
-  active                     Boolean                       @default(true)
-  createdAt                  DateTime                      @default(now())
-  updatedAt                  DateTime                      @updatedAt
+  active                     Boolean                        @default(true)
+  createdAt                  DateTime                       @default(now())
+  updatedAt                  DateTime                       @updatedAt
   memberships                LabMembership[]
   cages                      Cage[]
   animals                    Animal[]
   chargePeriods              CageChargePeriod[]
   invoices                   Invoice[]
   invoiceAdjustments         InvoiceAdjustment[]
-  cageTransfersFrom          CageLabTransfer[]             @relation("CageTransferFromLab")
-  cageTransfersTo            CageLabTransfer[]             @relation("CageTransferToLab")
-  animalTransfersFrom        AnimalLabTransfer[]           @relation("AnimalTransferFromLab")
-  animalTransfersTo          AnimalLabTransfer[]           @relation("AnimalTransferToLab")
+  cageTransfersFrom          CageLabTransfer[]              @relation("CageTransferFromLab")
+  cageTransfersTo            CageLabTransfer[]              @relation("CageTransferToLab")
+  animalTransfersFrom        AnimalLabTransfer[]            @relation("AnimalTransferFromLab")
+  animalTransfersTo          AnimalLabTransfer[]            @relation("AnimalTransferToLab")
   animalIntakeBatches        AnimalIntakeBatch[]
   invitations                UserInvitation[]
   projects                   Project[]
@@ -606,8 +671,8 @@ model Lab {
   quarantineCases            QuarantineCase[]
   quarantineObservations     QuarantineObservation[]
   cageClosures               CageClosure[]
-  transferRequestsFrom       LabTransferRequest[]          @relation("LabTransferSourceLab")
-  transferRequestsTo         LabTransferRequest[]          @relation("LabTransferDestinationLab")
+  transferRequestsFrom       LabTransferRequest[]           @relation("LabTransferSourceLab")
+  transferRequestsTo         LabTransferRequest[]           @relation("LabTransferDestinationLab")
   transferEvents             LabTransferEvent[]
   sopDocuments               SopDocument[]
   sopAssignments             SopAssignment[]
@@ -630,6 +695,12 @@ model Lab {
   strainDirectoryListings    StrainDirectoryListing[]
   strainDirectoryRequests    StrainDirectoryRequest[]
   strainDirectoryEvents      StrainDirectoryRequestEvent[]
+  welfareCases               WelfareCase[]
+  welfareObservations        WelfareObservation[]
+  welfareTreatmentOrders     WelfareTreatmentOrder[]
+  welfareAdministrations     WelfareAdministrationAttempt[]
+  welfareEscalations         WelfareEscalation[]
+  welfareCaseEvents          WelfareCaseLifecycleEvent[]
 }
 
 model SopDocument {
@@ -864,6 +935,7 @@ model FacilityDutyAssignment {
   competencyGovernanceEvents CompetencyLifecycleEvent[]
   protocolGovernanceStates   ProtocolAuthorization[]               @relation("ProtocolAuthorizationDutyEvidence")
   competencyGovernanceStates CompetencyEvidence[]                  @relation("CompetencyDutyEvidence")
+  welfareCaseEvents          WelfareCaseLifecycleEvent[]
 
   @@unique([id, version])
   @@index([userId, duty, validFrom, validUntil], map: "FacilityDutyAssignment_userId_duty_validity_idx")
@@ -910,6 +982,7 @@ model ExternalIdentityLink {
   competencyGovernanceEvents CompetencyLifecycleEvent[]
   protocolGovernanceStates   ProtocolAuthorization[]               @relation("ProtocolAuthorizationIdentityEvidence")
   competencyGovernanceStates CompetencyEvidence[]                  @relation("CompetencyIdentityEvidence")
+  welfareCaseEvents          WelfareCaseLifecycleEvent[]
 
   @@unique([provider, providerSubject], map: "ExternalIdentityLink_provider_subject_key")
   @@unique([userId, provider], map: "ExternalIdentityLink_user_provider_key")
@@ -1420,6 +1493,7 @@ model Cage {
   destinationTransferRequests LabTransferRequest[] @relation("LabTransferDestinationCage")
   transferItems               LabTransferItem[]
   userAssignments             CageUserAssignment[]
+  welfareCases                WelfareCase[]
 
   @@unique([rackId, cageNumber])
   @@unique([id, labId])
@@ -1588,6 +1662,7 @@ model Animal {
   labTransfers          AnimalLabTransfer[]
   transferRequestItems  LabTransferItem[]
   procedureOccurrences  ProcedureOccurrence[]
+  welfareCases          WelfareCase[]
 
   @@unique([intakeBatchId, sourceAnimalId])
   @@index([status])
@@ -2114,6 +2189,199 @@ model CryostorageOperation {
   @@index([recordId, performedAt])
   @@index([labId, performedAt])
   @@index([performedById, performedAt])
+}
+
+model WelfareCase {
+  id                     String                         @id
+  labId                  String
+  subjectType            WelfareCaseSubjectType
+  animalId               String?
+  cageId                 String?
+  reopenedFromCaseId     String?
+  status                 WelfareCaseStatus              @default(open)
+  severity               AlertSeverity
+  operationalSummary     String
+  privateClinicalSummary String
+  policyMarker           String                         @default("synthetic-fail-closed-v1")
+  openedAt               DateTime                       @db.Timestamptz(6)
+  openedById             String
+  openedCommandReceiptId String                         @unique
+  lastCommandReceiptId   String                         @unique
+  triagedAt              DateTime?                      @db.Timestamptz(6)
+  triagedById            String?
+  closedAt               DateTime?                      @db.Timestamptz(6)
+  closedById             String?
+  closureReason          String?
+  cancelledAt            DateTime?                      @db.Timestamptz(6)
+  cancelledById          String?
+  cancellationCode       String?
+  cancellationReason     String?
+  version                Int                            @default(1)
+  createdAt              DateTime                       @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime                       @updatedAt @db.Timestamptz(6)
+  lab                    Lab                            @relation(fields: [labId], references: [id], onDelete: Restrict)
+  animal                 Animal?                        @relation(fields: [animalId], references: [id], onDelete: Restrict)
+  cage                   Cage?                          @relation(fields: [cageId], references: [id], onDelete: Restrict)
+  reopenedFrom           WelfareCase?                   @relation("WelfareCaseReopen", fields: [reopenedFromCaseId], references: [id], onDelete: Restrict)
+  reopenedCases          WelfareCase[]                  @relation("WelfareCaseReopen")
+  openedBy               User                           @relation("WelfareCaseOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
+  openedCommandReceipt   CommandReceipt                 @relation("WelfareCaseOpenReceipt", fields: [openedCommandReceiptId], references: [id], onDelete: Restrict)
+  lastCommandReceipt     CommandReceipt                 @relation("WelfareCaseLastReceipt", fields: [lastCommandReceiptId], references: [id], onDelete: Restrict)
+  triagedBy              User?                          @relation("WelfareCaseTriagedBy", fields: [triagedById], references: [id], onDelete: Restrict)
+  closedBy               User?                          @relation("WelfareCaseClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
+  cancelledBy            User?                          @relation("WelfareCaseCancelledBy", fields: [cancelledById], references: [id], onDelete: Restrict)
+  observations           WelfareObservation[]
+  treatmentOrders        WelfareTreatmentOrder[]
+  administrationAttempts WelfareAdministrationAttempt[]
+  escalations            WelfareEscalation[]
+  lifecycleEvents        WelfareCaseLifecycleEvent[]
+
+  @@unique([id, labId])
+  @@index([labId, status, severity])
+  @@index([animalId, status])
+  @@index([cageId, status])
+  @@index([reopenedFromCaseId])
+}
+
+model WelfareObservation {
+  id               String         @id
+  caseId           String
+  labId            String
+  observedAt       DateTime       @db.Timestamptz(6)
+  severity         AlertSeverity
+  operationalCode  String
+  privateNote      String
+  observedById     String
+  commandReceiptId String         @unique
+  createdAt        DateTime       @default(now()) @db.Timestamptz(6)
+  welfareCase      WelfareCase    @relation(fields: [caseId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab              Lab            @relation(fields: [labId], references: [id], onDelete: Restrict)
+  observedBy       User           @relation("WelfareObservationActor", fields: [observedById], references: [id], onDelete: Restrict)
+  commandReceipt   CommandReceipt @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, observedAt])
+  @@index([labId, severity, observedAt])
+}
+
+model WelfareTreatmentOrder {
+  id                       String                         @id
+  caseId                   String
+  labId                    String
+  status                   WelfareTreatmentOrderStatus    @default(proposed)
+  medication               String
+  dose                     String
+  route                    String
+  frequency                String
+  instructions             String
+  proposedAt               DateTime                       @db.Timestamptz(6)
+  proposedById             String
+  proposedCommandReceiptId String                         @unique
+  lastCommandReceiptId     String                         @unique
+  approvedAt               DateTime?                      @db.Timestamptz(6)
+  approvedById             String?
+  stoppedAt                DateTime?                      @db.Timestamptz(6)
+  stoppedById              String?
+  stopReason               String?
+  completedAt              DateTime?                      @db.Timestamptz(6)
+  version                  Int                            @default(1)
+  createdAt                DateTime                       @default(now()) @db.Timestamptz(6)
+  updatedAt                DateTime                       @updatedAt @db.Timestamptz(6)
+  welfareCase              WelfareCase                    @relation(fields: [caseId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab                      Lab                            @relation(fields: [labId], references: [id], onDelete: Restrict)
+  proposedBy               User                           @relation("WelfareOrderProposer", fields: [proposedById], references: [id], onDelete: Restrict)
+  proposedCommandReceipt   CommandReceipt                 @relation("WelfareOrderProposalReceipt", fields: [proposedCommandReceiptId], references: [id], onDelete: Restrict)
+  lastCommandReceipt       CommandReceipt                 @relation("WelfareOrderLastReceipt", fields: [lastCommandReceiptId], references: [id], onDelete: Restrict)
+  approvedBy               User?                          @relation("WelfareOrderApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  stoppedBy                User?                          @relation("WelfareOrderStopper", fields: [stoppedById], references: [id], onDelete: Restrict)
+  administrationAttempts   WelfareAdministrationAttempt[]
+
+  @@unique([id, caseId, labId])
+  @@index([caseId, status])
+  @@index([labId, status])
+}
+
+model WelfareAdministrationAttempt {
+  id               String                       @id
+  caseId           String
+  orderId          String
+  labId            String
+  administeredAt   DateTime                     @db.Timestamptz(6)
+  outcome          WelfareAdministrationOutcome
+  actualDose       String?
+  privateNote      String?
+  administeredById String
+  commandReceiptId String                       @unique
+  createdAt        DateTime                     @default(now()) @db.Timestamptz(6)
+  welfareCase      WelfareCase                  @relation(fields: [caseId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  treatmentOrder   WelfareTreatmentOrder        @relation(fields: [orderId, caseId, labId], references: [id, caseId, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab              Lab                          @relation(fields: [labId], references: [id], onDelete: Restrict)
+  administeredBy   User                         @relation("WelfareAdministrationActor", fields: [administeredById], references: [id], onDelete: Restrict)
+  commandReceipt   CommandReceipt               @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, administeredAt])
+  @@index([orderId, administeredAt])
+}
+
+model WelfareEscalation {
+  id                     String                  @id
+  caseId                 String
+  labId                  String
+  severity               AlertSeverity
+  status                 WelfareEscalationStatus @default(open)
+  operationalCode        String
+  privateReason          String
+  openedAt               DateTime                @db.Timestamptz(6)
+  openedById             String
+  openedCommandReceiptId String                  @unique
+  lastCommandReceiptId   String                  @unique
+  acknowledgedAt         DateTime?               @db.Timestamptz(6)
+  acknowledgedById       String?
+  resolvedAt             DateTime?               @db.Timestamptz(6)
+  resolvedById           String?
+  resolutionNote         String?
+  version                Int                     @default(1)
+  createdAt              DateTime                @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime                @updatedAt @db.Timestamptz(6)
+  welfareCase            WelfareCase             @relation(fields: [caseId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab                    Lab                     @relation(fields: [labId], references: [id], onDelete: Restrict)
+  openedBy               User                    @relation("WelfareEscalationOpener", fields: [openedById], references: [id], onDelete: Restrict)
+  openedCommandReceipt   CommandReceipt          @relation("WelfareEscalationOpenReceipt", fields: [openedCommandReceiptId], references: [id], onDelete: Restrict)
+  lastCommandReceipt     CommandReceipt          @relation("WelfareEscalationLastReceipt", fields: [lastCommandReceiptId], references: [id], onDelete: Restrict)
+  acknowledgedBy         User?                   @relation("WelfareEscalationAcknowledger", fields: [acknowledgedById], references: [id], onDelete: Restrict)
+  resolvedBy             User?                   @relation("WelfareEscalationResolver", fields: [resolvedById], references: [id], onDelete: Restrict)
+
+  @@unique([id, caseId, labId])
+  @@index([caseId, status, severity])
+  @@index([labId, status, severity])
+}
+
+model WelfareCaseLifecycleEvent {
+  id                    String                 @id
+  caseId                String
+  labId                 String
+  eventType             WelfareCaseEventType
+  fromStatus            WelfareCaseStatus?
+  toStatus              WelfareCaseStatus
+  actorId               String
+  actorAuthzVersion     Int
+  assurance             IdentityAssuranceLevel
+  dutyAssignmentId      String
+  dutyAssignmentVersion Int
+  identityLinkId        String
+  authenticatedAt       DateTime               @db.Timestamptz(6)
+  commandReceiptId      String                 @unique
+  detail                Json?
+  occurredAt            DateTime               @default(now()) @db.Timestamptz(6)
+  welfareCase           WelfareCase            @relation(fields: [caseId, labId], references: [id, labId], onDelete: Restrict, onUpdate: NoAction)
+  lab                   Lab                    @relation(fields: [labId], references: [id], onDelete: Restrict)
+  actor                 User                   @relation("WelfareCaseEventActor", fields: [actorId], references: [id], onDelete: Restrict)
+  dutyAssignment        FacilityDutyAssignment @relation(fields: [dutyAssignmentId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  identityLink          ExternalIdentityLink   @relation(fields: [identityLinkId], references: [id], onDelete: Restrict)
+  commandReceipt        CommandReceipt         @relation(fields: [commandReceiptId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, occurredAt])
+  @@index([labId, occurredAt])
+  @@index([actorId, occurredAt])
 }
 
 model HealthNote {
@@ -2762,38 +3030,47 @@ model WorkflowReviewSnapshot {
 }
 
 model CommandReceipt {
-  id                         String                               @id
-  actorId                    String
-  actorAuthzVersion          Int                                  @default(0)
-  databasePrincipal          String                               @default(dbgenerated("SESSION_USER"))
-  labId                      String?
-  workflowDraftId            String?
-  commandType                String
-  idempotencyKey             String
-  requestHash                String
-  requestId                  String
-  transactionId              BigInt                               @default(dbgenerated("txid_current()"))
-  status                     CommandReceiptStatus                 @default(processing)
-  aggregateType              String?
-  aggregateId                String?
-  expectedVersion            Int?
-  resultingVersion           Int?
-  result                     Json?
-  errorCode                  String?
-  errorMessage               String?
-  startedAt                  DateTime                             @default(now())
-  completedAt                DateTime?
-  actor                      User                                 @relation("CommandReceiptActor", fields: [actorId], references: [id], onDelete: Restrict)
-  lab                        Lab?                                 @relation(fields: [labId], references: [id], onDelete: Restrict)
-  workflowDraft              WorkflowDraft?                       @relation(fields: [workflowDraftId], references: [id], onDelete: SetNull)
-  auditLogs                  AuditLog[]
-  protocolAllocationHistory  ProtocolCountAllocationHistory[]
-  protocolAllocationReceipts ProtocolCountAllocation[]            @relation("ProtocolCountAllocationCreationReceipt")
-  complianceEvidence         ComplianceEvidenceSnapshot[]
-  protocolGovernanceEvent    ProtocolAuthorizationLifecycleEvent?
-  competencyGovernanceEvent  CompetencyLifecycleEvent?
-  protocolVersionCreated     ProtocolAuthorizationVersion?        @relation("ProtocolVersionCreationReceipt")
-  competencyVersionIssued    CompetencyEvidenceVersion?           @relation("CompetencyVersionReceipt")
+  id                             String                               @id
+  actorId                        String
+  actorAuthzVersion              Int                                  @default(0)
+  databasePrincipal              String                               @default(dbgenerated("SESSION_USER"))
+  labId                          String?
+  workflowDraftId                String?
+  commandType                    String
+  idempotencyKey                 String
+  requestHash                    String
+  requestId                      String
+  transactionId                  BigInt                               @default(dbgenerated("txid_current()"))
+  status                         CommandReceiptStatus                 @default(processing)
+  aggregateType                  String?
+  aggregateId                    String?
+  expectedVersion                Int?
+  resultingVersion               Int?
+  result                         Json?
+  errorCode                      String?
+  errorMessage                   String?
+  startedAt                      DateTime                             @default(now())
+  completedAt                    DateTime?
+  actor                          User                                 @relation("CommandReceiptActor", fields: [actorId], references: [id], onDelete: Restrict)
+  lab                            Lab?                                 @relation(fields: [labId], references: [id], onDelete: Restrict)
+  workflowDraft                  WorkflowDraft?                       @relation(fields: [workflowDraftId], references: [id], onDelete: SetNull)
+  auditLogs                      AuditLog[]
+  protocolAllocationHistory      ProtocolCountAllocationHistory[]
+  protocolAllocationReceipts     ProtocolCountAllocation[]            @relation("ProtocolCountAllocationCreationReceipt")
+  complianceEvidence             ComplianceEvidenceSnapshot[]
+  protocolGovernanceEvent        ProtocolAuthorizationLifecycleEvent?
+  competencyGovernanceEvent      CompetencyLifecycleEvent?
+  protocolVersionCreated         ProtocolAuthorizationVersion?        @relation("ProtocolVersionCreationReceipt")
+  competencyVersionIssued        CompetencyEvidenceVersion?           @relation("CompetencyVersionReceipt")
+  welfareObservations            WelfareObservation[]
+  welfareAdministrations         WelfareAdministrationAttempt[]
+  welfareCaseEvents              WelfareCaseLifecycleEvent[]
+  welfareCasesOpened             WelfareCase[]                        @relation("WelfareCaseOpenReceipt")
+  welfareCasesLastMutation       WelfareCase[]                        @relation("WelfareCaseLastReceipt")
+  welfareOrdersProposed          WelfareTreatmentOrder[]              @relation("WelfareOrderProposalReceipt")
+  welfareOrdersLastMutation      WelfareTreatmentOrder[]              @relation("WelfareOrderLastReceipt")
+  welfareEscalationsOpened       WelfareEscalation[]                  @relation("WelfareEscalationOpenReceipt")
+  welfareEscalationsLastMutation WelfareEscalation[]                  @relation("WelfareEscalationLastReceipt")
 
   @@unique([actorId, commandType, idempotencyKey])
   @@index([requestId])

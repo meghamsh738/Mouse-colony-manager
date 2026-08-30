@@ -15,6 +15,8 @@ export default defineConfig({
           include: [
             "tests/unit/identity-governance.test.ts",
             "tests/unit/facility-duty-governance.integration.test.ts",
+            "tests/unit/welfare-command.integration.test.ts",
+            "tests/unit/welfare-safety.integration.test.ts",
             "tests/unit/m13-weaning-command.integration.test.ts",
             "tests/unit/protocol-authorization-competency.integration.test.ts",
             "tests/unit/m13-experiment-completion.integration.test.ts",
@@ -42,6 +44,8 @@ export default defineConfig({
             "tests/unit/**/*.test.tsx",
             "tests/unit/identity-governance.test.ts",
             "tests/unit/facility-duty-governance.integration.test.ts",
+            "tests/unit/welfare-command.integration.test.ts",
+            "tests/unit/welfare-safety.integration.test.ts",
             "tests/unit/m13-weaning-command.integration.test.ts",
             "tests/unit/protocol-authorization-competency.integration.test.ts",
             "tests/unit/m13-experiment-completion.integration.test.ts",
